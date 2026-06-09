@@ -1,9 +1,9 @@
 # Product Specification & UX Blueprint
 
-**Version:** 0.1
+**Version:** 0.2
 **Status:** Draft
-**Based on:** Domain Model v0.2, Architecture v0.1, Engineering Guide v0.1
-**Last Updated:** 2026-06-06
+**Based on:** Domain Model v0.3, Architecture v0.2, Engineering Guide v0.2
+**Last Updated:** 2026-06-09
 
 ---
 
@@ -85,11 +85,13 @@ The smallest production-valuable system that replaces the current paper-based pr
 | Asset detail view | Yes | See position, history, specs |
 | Create corrective event | Yes | Replace paper event logging |
 | Start/resolve/close corrective event | Yes | Full lifecycle for corrective events |
-| Create corrective report (draft) | Yes | Replace paper shift report |
-| Add tasks to report | Yes | Document what was done |
-| Upload photo attachments | Yes | Photo is the most critical field evidence |
+| Create corrective report (draft, 6-section) | Yes | Replace paper shift report — summary, parts, labor, tests, doc, comments |
+| Add tasks to report (StandardActivity + ReplacementTask) | Yes | Document what was done, including component replacements |
+| Stop Here (section-based progressive fill) | Yes | Multi-shift reports — stop at section N, resume next shift |
+| Mark individual report sections as complete | Yes | Visual progress tracking per section |
+| Upload photo attachments (per section) | Yes | Photo is the most critical field evidence |
 | Capture signature (PencilKit) | Yes | Replace wet signatures on paper |
-| Submit corrective report | Yes | Finalize and lock the report |
+| Submit corrective report (full or partial) | Yes | Finalize and lock the report — supports Stop Here partial submit |
 | View corrective event timeline | Yes | See what happened during the event |
 | View maintenance history per asset | Yes | See past events for an asset |
 | Record asset replacement | Yes | Replace paper replacement records |
@@ -139,9 +141,11 @@ The smallest production-valuable system that replaces the current paper-based pr
 - Photos are taken with the device camera; no external camera integration.
 - Signatures are captured on-device (finger or Apple Pencil).
 - The asset hierarchy is pre-loaded by the administrator before technician use.
-- One technician per report (team reports are multiple separate reports).
-- Shift reports correspond to a single corrective event.
+- One technician per report per shift (team reports are multiple separate reports per shift).
+- Shift reports correspond to a single corrective event (6-section report enables multi-shift continuation via Stop Here).
 - PCON plans are currently managed outside the system; MVP reads plans but does not create them.
+- Components (serialized inventory) are a separate concern from Assets (hierarchical equipment). Components live in slots; Assets are the parent equipment that contains those slots.
+- Corrective reports are divided into 6 sections to support progressive fill across multiple shifts.
 
 ### 2.5 High-Risk Workflows (MVP)
 
@@ -295,9 +299,9 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Title** | Technician creates, fills, and submits a corrective shift report |
 | **Actor** | Technician |
 | **Preconditions** | Event is IN_PROGRESS. Technician is assigned. |
-| **Main flow** | 1. Technician taps "Create Report" on event detail. 2. System creates draft report. 3. Technician fills: work description, date/time, tasks performed. 4. For each task: select task type, add description, mark as completed. 5. Adds photos (camera or gallery). 6. Adds tool usage (optional). 7. Records replaced parts (optional). 8. Captures supervisor signature. 9. Captures own signature. 10. Taps "Submit Report". 11. System validates all required fields. 12. System submits report → status changes to SUBMITTED. 13. Event timeline updated with report submission. |
-| **Alternate flows** | **Missing required fields:** Show inline validation errors. Highlight missing fields. **Network error on submit:** Save as submitted-draft, queue for retry. Show "Pending submission" badge. **Session expires:** Authenticate silently, retry. |
-| **Acceptance criteria** | Report created as DRAFT. All fields editable in draft state. Signatures captured via PencilKit. Photo attachments uploaded. Submission validates required fields. Submitting locks the report. Event timeline updated. |
+| **Main flow** | 1. Technician taps "Create Report" on event detail. 2. System creates draft report with 6 empty sections: (1) Summary & Fault, (2) Parts & Materials, (3) Labor & Personnel, (4) Tests & Measurements, (5) Documentation & Attachments, (6) Comments. 3. Technician fills sections progressively. 4. Each section can be marked complete independently. 5. For each task (StandardActivity or ReplacementTask): select task type, add description, mark completed. 6. If task is a replacement: scan/select component from inventory, record serial numbers. 7. Adds photos per section (camera or gallery). 8. Adds tool usage (optional). 9. Captures supervisor signature. 10. Captures own signature. 11. Two submit options: "Submit All" or "Stop Here" (submit partial, continue next shift). 12. If Stop Here: technician selects which section to stop at (1-5); sections beyond are disabled. 13. Taps "Submit" → system validates completed sections only. 14. System submits report → status changes to SUBMITTED (or SUBMITTED_PARTIAL if Stop Here). 15. Event timeline updated. |
+| **Alternate flows** | **Stop Here (multi-shift):** Technician stops at section N → report enters SECTIONAL_DRAFT. Next-shift technician resumes report — disabled sections re-enable. **Missing required fields:** Show inline validation errors. Highlight missing fields. **Network error on submit:** Save as submitted-draft, queue for retry. **Session expires:** Authenticate silently, retry. |
+| **Acceptance criteria** | Report created as DRAFT with 6 sections. Sections markable complete individually. Tasks support both StandardActivity and ReplacementTask. Stop Here creates SECTIONAL_DRAFT with disabled sections. Resume re-enables sections. Submission validates only completed sections. Partial submit possible. Submitting locks the report. Event timeline updated. |
 | **Priority** | P0 |
 
 ### US-COR-06: Resolve and Close Event
@@ -312,6 +316,77 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Alternate flows** | **Supervisor rejects resolution:** Reopen event with rejection notes. Return to IN_PROGRESS. **Reopen after close:** Supervisor taps "Reopen" → returns to IN_PROGRESS. |
 | **Acceptance criteria** | Resolve sets RESOLVED status. Close sets CLOSED status. Reopen returns to IN_PROGRESS. Rejection includes notes. Event timeline updated for each transition. |
 | **Priority** | P0 |
+
+### US-COR-07: Stop Here on Corrective Report
+
+| Field | Value |
+|-------|-------|
+| **ID** | US-COR-07 |
+| **Title** | Technician stops a report mid-way for next-shift continuation |
+| **Actor** | Technician |
+| **Preconditions** | Report is DRAFT. At least one section is complete. |
+| **Main flow** | 1. Technician taps "Stop Here" button during report editing. 2. System shows section picker (1-5). 3. Technician selects the section to stop at (e.g., section 3 means sections 1-2 complete, section 3 in progress, sections 4-6 disabled). 4. Technician adds optional handover note. 5. System transitions report to SECTIONAL_DRAFT. 6. Sections > stopSectionIndex become disabled (grayed out in UI). 7. Next-shift notification triggered (v2). |
+| **Alternate flows** | **No sections complete:** Button disabled — must complete at least section 1 before Stop Here. |
+| **Acceptance criteria** | Report transitions to SECTIONAL_DRAFT. Sections beyond stop index disabled. Handover note captured. Report remains editable for sections 1..stopSectionIndex. |
+
+### US-COR-08: Resume Corrective Report (Next Shift)
+
+| Field | Value |
+|-------|-------|
+| **ID** | US-COR-08 |
+| **Title** | Technician resumes a SECTIONAL_DRAFT report started by previous shift |
+| **Actor** | Technician (next shift) |
+| **Preconditions** | Report has SECTIONAL_DRAFT status. Technician is assigned to the same event. |
+| **Main flow** | 1. Technician opens event detail. 2. Report shows "Resume" badge. 3. Technician taps resume. 4. System re-enables all sections > stopSectionIndex. 5. Sections 1..stopSectionIndex-1 are read-only (already submitted). 6. Section stopSectionIndex becomes editable. 7. Report transitions back to DRAFT. 8. New shift start timestamp recorded. |
+| **Alternate flows** | **Different technician resumes:** Allowed — any assigned technician can resume. Report captures both shifts' technician IDs. |
+| **Acceptance criteria** | Resuming re-enables sections. Previously completed sections are read-only. Report transitions to DRAFT. Shift timestamp updated. |
+
+### US-COMP-01: Register New Component
+
+| Field | Value |
+|-------|-------|
+| **ID** | US-COMP-01 |
+| **Title** | Warehouse operator registers a new component in inventory |
+| **Actor** | Warehouse / Inventory Operator |
+| **Preconditions** | ComponentType exists in catalog. |
+| **Main flow** | 1. Operator navigates to Components tab. 2. Taps "Register New". 3. Selects component type from catalog (filtered by subsystem). 4. Enters serial number (scanned via camera or typed). 5. Optionally enters: manufacturing date, batch number, initial warehouse location, notes. 6. Taps "Register". 7. System creates Component with status REGISTERED → EN_STOCK. 8. Component appears in inventory list. |
+| **Alternate flows** | **Duplicate serial number:** Show error "Serial number already registered for this component type". **Unknown component type:** Operator can request new type creation (admin). |
+| **Acceptance criteria** | Component registered with unique serial. Status transitions to EN_STOCK. Movement history created with initial location. |
+
+### US-COMP-02: Install Component in Slot
+
+| Field | Value |
+|-------|-------|
+| **ID** | US-COMP-02 |
+| **Title** | Technician installs a component in an equipment slot (via ReplacementTask) |
+| **Actor** | Technician |
+| **Preconditions** | Corrective event is IN_PROGRESS. ReplacementTask is being performed. Component is EN_STOCK. Slot exists and is empty. |
+| **Main flow** | 1. During corrective report creation, technician adds a ReplacementTask. 2. Technician taps "Select Component". 3. System shows available EN_STOCK components matching slot requirements (filtered by ComponentType). 4. Technician selects component. 5. System auto-assigns to current slot (based on task context). 6. Component status changes to INSTALLED. 7. Slot shows as occupied. 8. ComponentMovement recorded (INSTALL). |
+| **Alternate flows** | **Component not in stock:** Show "No available components. Request warehouse." **Wrong component type for slot:** Validation error. **Slot occupied:** Show current occupant. Require removal first. |
+| **Acceptance criteria** | Component transitions from EN_STOCK to INSTALLED. Slot becomes occupied. Movement history recorded. Asset replacement linked. |
+
+### US-COMP-03: Remove Component from Slot
+
+| Field | Value |
+|-------|-------|
+| **ID** | US-COMP-03 |
+| **Title** | Technician removes a component from its slot (via ReplacementTask) |
+| **Actor** | Technician |
+| **Preconditions** | Corrective event is IN_PROGRESS. ReplacementTask is being performed. Component is INSTALLED in the slot. |
+| **Main flow** | 1. During corrective report creation, technician selects "Remove Component". 2. System shows currently installed component in the slot. 3. Technician confirms removal. 4. Component status changes to REMOVED (or EN_REPARACIÓN if sent for repair). 5. Slot becomes empty. 6. ComponentMovement recorded (REMOVE). 7. Asset lifecycle updated (AssetReplacement record created). |
+| **Alternate flows** | **Send to repair:** Select destination "Repair" — status becomes EN_REPARACIÓN. **Mark lost:** Select "Lost" — status becomes PERDIDO. |
+| **Acceptance criteria** | Component transitions from INSTALLED to REMOVED/EN_REPARACIÓN/PERDIDO. Slot becomes empty. Movement history recorded. Asset replacement record created. |
+
+### US-COMP-04: View Component Movement History
+
+| Field | Value |
+|-------|-------|
+| **ID** | US-COMP-04 |
+| **Title** | User views full movement history of a component |
+| **Actor** | Technician, Supervisor, Warehouse Operator |
+| **Preconditions** | Component exists. Component has at least one movement. |
+| **Main flow** | 1. User navigates to component detail. 2. "Movement History" section shows reverse-chronological timeline. 3. Each entry shows: date, movement type (INSTALL, REMOVE, WAREHOUSE_TRANSFER, REPAIR, SCRAP), from/to location, related replacement task or corrective event. 4. User can tap an entry for more detail. |
+| **Acceptance criteria** | All movements displayed chronologically. Each movement includes location, type, and related context. |
 
 ### US-PREV-01: View Preventive Schedule
 
@@ -790,7 +865,18 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **PM Report Form** | Execute PM report | Complete steps, add photos, sign, submit | Step checklist, notes, photos, signatures | Schedule Detail → Execute | `POST /preventive-reports`, `PATCH /preventive-reports/{id}` | Tech | Auto-save, queue submit | Photos, signatures |
 | **PM Report Detail** | View submitted PM report | View completed steps, photos, signatures | Completed checklist with notes | Schedule detail, asset history | `GET /preventive-reports/{id}` | All | Show cached | Photos, signatures |
 
-### 5.5 Common / Shared Screens
+### 5.5 Components Module
+
+| Screen | Purpose | Primary Actions | Data Displayed | Entry Points | API Endpoints | Required Role | Offline Behavior | Media |
+|--------|---------|----------------|----------------|--------------|---------------|---------------|------------------|-------|
+| **Component List** | Browse all components with filters | Filter by status/type, search by serial, tap detail | Component cards: type icon, serial, current location, status badge | Tab "Components" | `GET /api/v1/components` | All | Show cached list | — |
+| **Component Detail** | View component info + movement history | View current slot, view movement timeline, navigate to asset | Header: type, serial, status. Sections: current location, movements timeline | Component list tap | `GET /api/v1/components/{id}` | All | Cached detail | — |
+| **Register Component** | Register new component in inventory | Select type, enter serial, add location, confirm | Form fields: type picker, serial input, location selector, notes | Components tab "+" | `POST /api/v1/components` | Warehouse Operator | Queue on disconnect | Camera for serial scan |
+| **Slot Locations** | View slot hierarchy per equipment kind | Browse by equipment kind, view slot detail, see occupancy | Expandable tree of slots, occupancy indicator per slot | Components tab → Slots | `GET /api/v1/slot-locations` | All | Cached tree | — |
+| **Slot Detail** | View single slot with image and occupancy | View slot image, see current occupant, navigate to component | Slot info, image viewer, current component card | Slot location tap | `GET /api/v1/slot-locations/{id}` | All | Cached detail | Slot image |
+| **Physical Locations** | Browse warehouse zones and shelves | View hierarchy of warehouse locations | Tree view of location hierarchy | Components tab → Locations | `GET /api/v1/locations` | All | Cached tree | — |
+
+### 5.6 Common / Shared Screens
 
 | Screen | Purpose | Primary Actions | Data Displayed | Entry Points | API Endpoints | Required Role | Offline Behavior | Media |
 |--------|---------|----------------|----------------|--------------|---------------|---------------|------------------|-------|
@@ -813,15 +899,15 @@ The smallest production-valuable system that replaces the current paper-based pr
 
 ```
 ┌─────────────┬──────────────┬──────────────┬──────────────┬─────────────┐
-│  Corrective  │  Preventive  │   Assets     │  Profile     │  (Dashboard)│
-│  (Tab 1)     │  (Tab 2)     │  (Tab 3)     │  (Tab 4)     │  Future     │
-│             │              │              │              │             │
-│  Icon:      │  Icon:       │  Icon:       │  Icon:       │             │
-│  wrench     │  calendar    │  cube        │  person      │             │
-│             │              │              │              │             │
-│  Badge:     │  Badge:      │              │              │             │
-│  open count │  overdue cnt │              │              │             │
-└─────────────┴──────────────┴──────────────┴──────────────┴─────────────┘
+│  Corrective  │  Preventive  │   Assets     │  Components  │  Profile     │  (Dashboard)│
+│  (Tab 1)     │  (Tab 2)     │  (Tab 3)     │  (Tab 4)     │  (Tab 5)     │  Future     │
+│             │              │              │              │              │             │
+│  Icon:      │  Icon:       │  Icon:       │  Icon:       │  Icon:       │             │
+│  wrench     │  calendar    │  cube        │  chip        │  person      │             │
+│             │              │              │  (cpu)       │              │             │
+│  Badge:     │  Badge:      │              │  Badge:      │              │             │
+│  open count │  overdue cnt │              │  low stock   │              │             │
+└─────────────┴──────────────┴──────────────┴──────────────┴──────────────┴─────────────┘
 ```
 
 - Tab bar uses SF Symbols with selected/unselected states.
@@ -881,6 +967,8 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 - **Keyboard handling:** Scroll to active field. Keyboard toolbar with "Done" / "Next".
 - **Photo grid:** Horizontally scrollable row of thumbnails with "+" add button.
 - **Signature step:** Dedicated section with "Add Signature" button → opens full-screen PencilKit.
+- **Section completion:** Each of the 6 report sections shows a completion toggle (green checkmark / empty circle). Sections can be completed independently.
+- **Stop Here:** A "Stop Here" button in the report footer opens a section picker sheet. Selecting a stop point disables subsequent sections and submits the report as SECTIONAL_DRAFT.
 
 ### 6.9 Error UX
 

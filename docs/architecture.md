@@ -1,9 +1,9 @@
 ﻿# Architecture Blueprint
 
-**Version:** 0.1 (Draft)
+**Version:** 0.2 (Draft)
 **Phase:** Architecture — Complete
-**Based on Domain Model:** v0.2
-**Last Updated:** 2026-06-06
+**Based on Domain Model:** v0.3
+**Last Updated:** 2026-06-09
 
 ---
 
@@ -60,7 +60,7 @@ Modular monolith (v1)
 │  Repository interfaces                                       │
 │  Domain Events                                               │
 │  Domain invariants and validation                            │
-│  Aggregate roots (as defined in domain model v0.2)           │
+│  Aggregate roots (as defined in domain model v0.3)           │
 ├─────────────────────────────────────────────────────────────┤
 │                   INFRASTRUCTURE LAYER                       │
 │  Repository implementations (PostgreSQL)                     │
@@ -105,16 +105,22 @@ src/
 │   ├── domain/                # Aggregates: Asset, AssetType, AssetAssignment, etc.
 │   └── infrastructure/        # PostgreSQL repositories, file storage
 │
+├── component_inventory/       # Core — Serialized components, slots, movements
+│   ├── interface/             # API routes for components, slots, locations
+│   ├── application/           # Component movement, slot configuration
+│   ├── domain/                # Aggregates: ComponentType, Component, SlotLocation, Location
+│   └── infrastructure/        # PostgreSQL repositories
+│
 ├── maintenance_execution/     # Core — Preventive + Corrective reports
 │   ├── interface/             # Report and event API routes
-│   ├── application/           # Report submission, event lifecycle
+│   ├── application/           # Report submission, event lifecycle, Stop Here
 │   ├── domain/                # Aggregates: CorrectiveEvent, Reports, Tasks
 │   └── infrastructure/        # Report repositories
 │
-├── inventory/                 # Supporting — Tools, warehouse
+├── inventory/                 # Supporting — Tools, warehouse, certifications
 │   ├── interface/             # Tool and warehouse API routes
 │   ├── application/           # Tool usage, warehouse movements
-│   ├── domain/                # Aggregates: Tool, WarehouseStock
+│   ├── domain/                # Aggregates: Tool, ToolCertification, ConsumableType
 │   └── infrastructure/        # Tool repositories
 │
 ├── planning_scheduling/       # Future-separable — Templates, plans, schedules
@@ -197,14 +203,14 @@ src/
 | EVT-002 | An in-process event bus collects events raised during a transaction and dispatches them after the aggregate operation completes, but before the transaction commits (for critical handlers) or after commit (for non-critical handlers). |
 | EVT-003 | Handlers are registered at application startup via DI. Each handler implements a simple interface: handle(event: DomainEvent) -> None. |
 | EVT-004 | The event bus is a simple in-process publish/subscribe mechanism. No message broker, no serialization, no external dependencies. |
-| EVT-005 | Exactly which events exist is defined in the domain model v0.2 (§16). |
+| EVT-005 | Exactly which events exist is defined in the domain model v0.3 (§19). |
 
 ### 1.12 Authorization Strategy
 
 | Aspect | Approach |
 |--------|----------|
 | **Authentication** | JWT bearer tokens. Token contains: userId, username, role, projectId. Short-lived access token (15 min) + long-lived refresh token (7 days). |
-| **Role model** | Enum-based for v1: TECHNICIAN, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER. Future RBAC evolution documented in domain model §17.3. |
+| **Role model** | Enum-based for v1: TECHNICIAN, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER. Future RBAC evolution documented in domain model §20.3. |
 | **Resource scoping** | All data is scoped to a project. The JWT contains the user's projectId. All queries filter by this scope. Cross-project access is prohibited. |
 | **Permission checks** | Authorization logic lives in the Application layer. Each use case checks: (a) is the user authenticated? (b) does the user's role permit this action? (c) does the user's project scope match the resource? |
 | **Report ownership** | Technicians can edit only their own draft reports. Coordinators can edit any draft. No user can edit a submitted report. |
@@ -248,20 +254,25 @@ asset_management ◄────────────────────
      │                                                   │            │
      ├──► maintenance_execution (references Asset)       │            │
      │         │                                         │            │
+     │         ├──► component_inventory (via events)     │            │
      │         ├──► inventory (references Tool, Report)  │            │
      │         │                                         │            │
      │         └──► planning_scheduling (via events)     │            │
      │                                                    │            │
-     └──► reporting (future, consumes events)             │            │
+     ├──► reporting (future, consumes events)             │            │
+     │                                                    │            │
+     └──► component_inventory (references Asset for slot) │            │
                                                           │            │
-     (AssetReplacementService lives in asset_management,  │            │
-      called by maintenance_execution via domain service) ─┘            │
-                                                                        │
-     planning_scheduling (future-separable)                             │
-          │                                                            │
-          └──► maintenance_execution (via MaintenanceSchedule)         │
-                                                                        │
-     inventory (standalone, references Asset for warehouse) ────────────┘
+      (AssetReplacementService lives in asset_management, │            │
+       called by maintenance_execution via domain service)┘            │
+                                                                       │
+      component_inventory (standalone, references Asset for slot) ─────┘
+                                                                       │
+      planning_scheduling (future-separable)                           │
+           │                                                          │
+           └──► maintenance_execution (via MaintenanceSchedule)       │
+                                                                       │
+      inventory (standalone, references Asset for warehouse) ──────────┘
 `
 
 ### 2.2 Asset Management Module
@@ -281,12 +292,14 @@ asset_management ◄────────────────────
 
 | Aggregate Root | Key Entities / VOs Inside | Repositories Needed |
 |---------------|---------------------------|---------------------|
-| Asset | Asset (single node), GeographicLocation (VO), Position (VO) | AssetRepository: findById, findByParent, findBySerialNumber, findByPartNumber, findAncestors, findDescendants (via closure table) |
+| Asset | Asset (single node), Position (VO), EquipmentCategory (ref), EquipmentKind (ref) | AssetRepository: findById, findByParent, findBySerialNumber, findByPartNumber, findAncestors, findDescendants (via closure table) |
 | AssetType | AssetType | AssetTypeRepository: findById, findAll, findByPolicy |
+| EquipmentCategory | EquipmentCategory | EquipmentCategoryRepository: findBySubsystem |
+| EquipmentKind | EquipmentKind | EquipmentKindRepository: findByEquipmentCategory |
 | AssetCompositionRule | AssetCompositionRule | CompositionRuleRepository: findBySubsystemAndParentType |
 | AssetAssignment | AssetAssignment | AssetAssignmentRepository: findActiveByAsset, findByAssetAndTime, findLineageByAsset |
 | AssetReplacement | AssetReplacement | AssetReplacementRepository: findByEvent, findByAsset, findChain |
-| GeographicLocation | GeographicLocation | GeographicLocationRepository: findById, findChildren |
+| GeographicLocation | GeographicLocation (recursive) | GeographicLocationRepository: findById, findChildren, findByLevel |
 
 **Domain Services:**
 
@@ -296,6 +309,7 @@ asset_management ◄────────────────────
 | AssetCompositionService | Resolves composition rules for (subsystem, parentType). Validates child type, position, quantity. | AssetCompositionRule, AssetType |
 | AssetSearchService | Provides hierarchical drill-down and direct search across the asset tree. | Asset (query only) |
 | HierarchyMutationService | Coordinates non-replacement moves (reinstall, warehouse transfer, parent change without replacement). | Asset, AssetAssignment |
+| EquipmentCategoryService | Manages N1/N2 classification catalog per subsystem. | EquipmentCategory, EquipmentKind |
 
 **Domain Events Published:**
 
@@ -329,9 +343,9 @@ asset_management ◄────────────────────
 | Aggregate Root | Key Entities / VOs Inside | Repositories Needed |
 |---------------|---------------------------|---------------------|
 | CorrectiveEvent | CorrectiveEvent, ReopenRecord (VO) | CorrectiveEventRepository: findById, findByStatus, findByAsset, findOpenByAssetAndSubsystem |
-| CorrectiveReport | CorrectiveReport, CorrectiveTask (entity collection) | CorrectiveReportRepository: findByEvent, findById |
-| PreventiveReport | PreventiveReport, StepResult (VO collection) | PreventiveReportRepository: findBySchedule, findById, findByAsset |
-| MaintenanceTemplate | MaintenanceTemplate, MaintenanceStep (VO collection), ToolRequirement (VO collection) | MaintenanceTemplateRepository: findById, findBySubsystem, findActive |
+| CorrectiveReport | CorrectiveReport, CorrectiveTask (polymorphic: StandardActivity, ReplacementTask), CorrectiveReportSection (6 sections), SectionCompletionState | CorrectiveReportRepository: findByEvent, findById, findDraftByEventAndShift |
+| PreventiveReport | PreventiveReport, StepResult (VO), TestExecutionResult (VO), PersonnelEntry (VO) | PreventiveReportRepository: findBySchedule, findById, findByAsset |
+| MaintenanceTemplate | MaintenanceTemplate, MaintenanceStep (VO), TestDefinition (VO), TestResultOption (VO), ToolRequirement (VO), PersonnelRequirement (VO) | MaintenanceTemplateRepository: findById, findBySubsystem, findActive |
 | TaskType | TaskType | TaskTypeRepository: findBySubsystem, findById |
 
 **Anti-Corruption Boundaries:**
@@ -339,6 +353,7 @@ asset_management ◄────────────────────
 | Boundary | Purpose | Mechanism |
 |----------|---------|-----------|
 | Asset Management | Maintenance Execution references Assets but does not own them | AssetRepository interface (read-only queries) is injected. Asset mutation is done via AssetReplacementService (domain service from Asset Management module). |
+| Component Inventory | ReplacementTask triggers ComponentMovement(s) | ComponentMovementService interface is injected. Maintenance Execution does not mutate component state directly. |
 | Inventory | Reports reference Tools via ToolUsage (VO) | ToolRepository interface (read-only lookup by serial). Maintenance Execution does not mutate Tool state. |
 
 **Domain Services:**
@@ -348,6 +363,8 @@ asset_management ◄────────────────────
 | CorrectiveEventLifecycleService | Manages state transitions: start, resolve, close, reopen. Validates preconditions (no overlapping IN_PROGRESS events, all reports submitted before resolve). | CorrectiveEvent, CorrectiveReport (query) |
 | ReportSubmissionService | Validates completeness (signatures, required fields), transitions documentStatus to SUBMITTED, updates related entities (event timeline, schedule status), publishes events. | CorrectiveReport / PreventiveReport, CorrectiveEvent (status check), MaintenanceSchedule (status update) |
 | SignatureCaptureService | Records a drawn signature for a user on a report. Validates user authentication link. | Signature, Participant |
+| ReportSectionService | Manages section-level state: mark section complete, activate Stop Here at section N, transition report to SECTIONAL_DRAFT, resume editing. | CorrectiveReport |
+| CorrectiveReportSubmissionService | Handles Stop Here-aware submission: validates that only sections 1..N are required when Stop Here is active, or all 6 sections when full. | CorrectiveReport |
 
 **Domain Events Published:**
 
@@ -356,31 +373,76 @@ asset_management ◄────────────────────
 | CorrectiveEventCreated | First technician starts event | eventId, eventCode, sapCode, subsystemId, affectedAssetId, timestamp |
 | CorrectiveEventStatusChanged | Event transitions state | eventId, oldStatus, newStatus, userId, reason, timestamp |
 | CorrectiveReportSubmitted | Report finalized | reportId, eventId, shift, timestamp, participantIds, assetReplacementIds |
+| CorrectiveReportStopHere | Stop Here activated | reportId, eventId, stopSectionIndex, completedSectionIds, timestamp |
 | PreventiveReportSubmitted | Report finalized | reportId, templateId, scheduleId, timestamp, participantIds |
 | MaintenanceScheduleCompleted | Schedule fulfilled by report submission | scheduleId, reportId, templateId, actualDate, timestamp |
 
 **Integration Points:**
 - Calls: Asset Management (AssetReplacementService for replacement operations, AssetRepository for asset lookups)
+- Calls: Component Inventory (ComponentMovementService for component movements triggered by ReplacementTask)
 - Calls: Inventory (ToolRepository for tool validation)
 - Called by: Planning & Scheduling (schedule → report reference)
 - Consumed by: Infrastructure (report immutability enforcement, timeline projection)
 
-### 2.4 Inventory Module
+### 2.4 Component Inventory Module
+
+**Package:** component_inventory
+
+**Responsibilities:**
+- Manage ComponentType catalog (part-number-based component definitions).
+- Manage inventory of serialized Component instances with full lifecycle tracking.
+- Manage SlotLocation hierarchy (physical slots within equipment, organized per EquipmentKind).
+- Manage physical Location catalog (warehouse zones, shelves, bins).
+- Track ComponentMovement events (install, remove, transfer, repair, scrap).
+- Coordinate with Maintenance Execution on ReplacementTask-triggered movements.
+
+**Aggregates Owned:**
+
+| Aggregate Root | Key Entities / VOs Inside | Repositories Needed |
+|---------------|---------------------------|---------------------|
+| ComponentType | ComponentType | ComponentTypeRepository: findById, findByPartNumber, findBySubsystem |
+| Component | Component, ComponentMovement (collection) | ComponentRepository: findById, findBySerialNumber, findByCurrentSlot, findByCurrentAsset, findByStatus, findByComponentType |
+| SlotLocation | SlotLocation (recursive), SlotType, SlotImage | SlotLocationRepository: findById, findByEquipmentKind, findByParentSlot, findAvailable |
+| Location | Location, LocationType | LocationRepository: findById, findByType, findChildren |
+| SlotImage | SlotImage | SlotImageRepository: findBySlotLocation |
+
+**Domain Services:**
+
+| Service | Responsibility | Involved Aggregates |
+|---------|---------------|---------------------|
+| ComponentMovementService | Coordinates component movements across slots, warehouses, and lifecycle states. Validates slot compatibility (SlotType × ComponentType). Creates ComponentMovement records. | Component, SlotLocation, Location |
+| ReplacementMovementCoordinator | Called by Maintenance Execution when a ReplacementTask completes. Creates ComponentMovement for removed component (→ REMOVED) and installed component (→ INSTALLED at slot). | Component (×2), SlotLocation, AssetReplacement |
+
+**Domain Events Published:**
+
+| Event | When | Payload |
+|-------|------|---------|
+| ComponentInstalled | Component placed in slot | componentId, slotLocationId, assetId, replacementTaskId, correctiveEventId?, timestamp |
+| ComponentRemoved | Component taken out of slot | componentId, slotLocationId, assetId, replacementTaskId, correctiveEventId?, timestamp |
+| ComponentStatusChanged | Status transition (warehouse, repair, scrap) | componentId, oldStatus, newStatus, location, timestamp |
+
+**Integration Points:**
+- Called by: Maintenance Execution (via ComponentMovementService for ReplacementTask)
+- References: Asset Management (SlotLocation references Asset for equipment context)
+
+### 2.5 Inventory Module
 
 **Package:** inventory
 
 **Responsibilities:**
 - Manage Tool catalog (serial-number-tracked maintenance equipment).
+- Manage ToolCertification records (calibration, periodic inspection).
 - Record ToolUsage during maintenance activities.
-- Maintain WarehouseStock view (best-effort representation of external warehouse).
+- Manage ConsumableType catalog (oils, greases, general consumables).
 - Manage WarehouseLocation catalog.
 
 **Aggregates Owned:**
 
 | Aggregate Root | Key Entities / VOs Inside | Repositories Needed |
 |---------------|---------------------------|---------------------|
-| Tool | Tool | ToolRepository: findBySerialNumber, findById, findByAvailability |
-| WarehouseStock | WarehouseStock | WarehouseStockRepository: findByWarehouse, findByAssetType, findBySerialNumber |
+| Tool | Tool, ToolCertification (collection) | ToolRepository: findBySerialNumber, findById, findByAvailability |
+| ToolCertification | ToolCertification | ToolCertificationRepository: findByTool, findByExpirationDate |
+| ConsumableType | ConsumableType | ConsumableTypeRepository: findById, findAll |
 | WarehouseLocation | WarehouseLocation | WarehouseLocationRepository: findById, findAll |
 
 **Domain Events Published:**
@@ -391,9 +453,9 @@ asset_management ◄────────────────────
 
 **Integration Points:**
 - Called by: Maintenance Execution (tool lookup, usage recording)
-- References: Asset Management (warehouse stock references Asset)
+- References: Asset Management (warehouse locations)
 
-### 2.5 Planning & Scheduling Module
+### 2.6 Planning & Scheduling Module
 
 **Package:** planning_scheduling
 
@@ -411,13 +473,13 @@ asset_management ◄────────────────────
 | MaintenancePlanEntry | MaintenancePlanEntry | MaintenancePlanEntryRepository: findByMonth, findByYear, findByTemplate |
 | MaintenanceSchedule | MaintenanceSchedule | MaintenanceScheduleRepository: findByDate, findByTechnician, findByPlan |
 
-**Note on MaintenanceTemplate ownership:** The domain model v0.2 places MaintenanceTemplate in the Preventive Maintenance context, which maps to Maintenance Execution in this architecture. However, Planning & Scheduling also needs read access to templates. For v1, MaintenanceTemplate is owned by **Maintenance Execution** and exposed to Planning & Scheduling via a read-only repository interface. If the Planning module is later extracted, it would either: (a) reference the template via the monolith's shared kernel API, or (b) cache its own copy via domain events.
+**Note on MaintenanceTemplate ownership:** The domain model v0.3 places MaintenanceTemplate in the Preventive Maintenance context, which maps to Maintenance Execution in this architecture. However, Planning & Scheduling also needs read access to templates. For v1, MaintenanceTemplate is owned by **Maintenance Execution** and exposed to Planning & Scheduling via a read-only repository interface. If the Planning module is later extracted, it would either: (a) reference the template via the monolith's shared kernel API, or (b) cache its own copy via domain events.
 
 **Integration Points:**
 - Calls: Maintenance Execution (template lookup via read-only interface)
 - Called by: (future) PCON import process
 
-### 2.6 Identity & Access Module
+### 2.7 Identity & Access Module
 
 **Package:** identity_access
 
@@ -445,7 +507,7 @@ asset_management ◄────────────────────
 - Called by: All modules (for authentication and authorization context)
 - Provides: JWT validation middleware shared across all modules
 
-### 2.7 Reporting Module (Future)
+### 2.8 Reporting Module (Future)
 
 **Package:** eporting
 
@@ -490,13 +552,13 @@ Each use case below defines:
 |--------|--------|
 | **Module** | Maintenance Execution |
 | **Application Service** | SubmitCorrectiveReportService |
-| **Input DTO** | { correctiveEventId, shift, startTimestamp, endTimestamp?, sapCode?, affectedAssetId, locationSnapshotId, failureDescription, faultType, tasks[], toolUsages[], participantIds[], attachmentIds[], comments } |
-| **Orchestration** | 1. Load CorrectiveEvent — verify status is IN_PROGRESS. 2. Load all referenced Assets, Tools, Participants. 3. Create CorrectiveReport with documentStatus = DRAFT. 4. For each task with taskType.requiresReplacement = true: invoke AssetReplacementService (cross-module). 5. Link each AssetReplacement to the task. 6. Add all Participants with signatures. 7. Call ReportSubmissionService.submit(report) — validates signatures, transitions to SUBMITTED. 8. Save report. 9. Publish CorrectiveReportSubmitted. 10. Check if all shifts completed → if yes, trigger auto-resolve (optional, via domain event handler). |
-| **Aggregates involved** | CorrectiveEvent (read), CorrectiveReport (create), CorrectiveTask (create × N), AssetReplacement (create × N via Asset Management), Asset (update × N), AssetAssignment (close + create × N) |
-| **Transaction scope** | Single transaction: report + tasks + replacements + hierarchy updates + assignments. This is the largest transaction in the system. |
-| **Events emitted** | CorrectiveReportSubmitted, AssetReplacementCompleted (×N), AssetHierarchyModified (×N), ToolUsed (×N) |
-| **Validations** | Event is IN_PROGRESS. All referenced assets exist. At least one participant with signature. All required task fields present. If task type is "Component Replacement," AssetReplacement must be provided. |
-| **Failure scenarios** | Event not found → 404. Event CLOSED → 422 (must reopen). Missing signatures → 422. Replacement validation fails → 422 with details. Tool not found → 404. |
+| **Input DTO** | { correctiveEventId, shift, startTimestamp, endTimestamp?, sapCode?, affectedAssetId, locationSnapshotId, failureDescription, faultType, sectionData (6 sections: summary, parts, labor, tests, doc, comments), tasks[], toolUsages[], participantIds[], attachmentIds[], isStopHere?, stopSectionIndex? } |
+| **Orchestration** | 1. Load CorrectiveEvent — verify status is IN_PROGRESS. 2. Load all referenced Assets, Tools, Participants. 3. Create CorrectiveReport with documentStatus = DRAFT, all 6 sections initialized. 4. For each task: if taskType = ReplacementTask → invoke AssetReplacementService (cross-module) AND ComponentMovementService (cross-module) to create ComponentMovement records. 5. Link each AssetReplacement and ComponentMovement to the task. 6. If isStopHere: mark sections > stopSectionIndex as disabled, transition to SECTIONAL_DRAFT, publish CorrectiveReportStopHere. 7. Add all Participants with signatures. 8. Call ReportSubmissionService.submit(report) — validates signatures on only completed sections, transitions to SUBMITTED (or SUBMITTED_PARTIAL if Stop Here active). 9. Save report. 10. Publish CorrectiveReportSubmitted. |
+| **Aggregates involved** | CorrectiveEvent (read), CorrectiveReport (create), CorrectiveTask (create × N — polymorphic), AssetReplacement (create × N via Asset Management), Asset (update × N), AssetAssignment (close + create × N), ComponentMovement (create × N via Component Inventory) |
+| **Transaction scope** | Single transaction: report + tasks + sections + replacements + component movements + hierarchy updates. Largest transaction in the system. |
+| **Events emitted** | CorrectiveReportSubmitted, CorrectiveReportStopHere (if Stop Here), AssetReplacementCompleted (×N), AssetHierarchyModified (×N), ComponentInstalled (×N), ComponentRemoved (×N), ToolUsed (×N) |
+| **Validations** | Event is IN_PROGRESS. All referenced assets exist. At least one participant with signature. Section data is valid for each completed section. If isStopHere, stopSectionIndex is 1-5. If task type is ReplacementTask, AssetReplacement + ComponentMovement records must be created. |
+| **Failure scenarios** | Event not found → 404. Event CLOSED → 422 (must reopen). Missing signatures → 422. Replacement validation fails → 422. Component movement validation fails → 422. Section data invalid → 422. |
 
 ### 3.3 Use Case: Submit Preventive Report
 
@@ -652,6 +714,76 @@ Each use case below defines:
 | **Validations** | Search text is non-empty. |
 | **Failure scenarios** | Empty search → 400. No results → empty list (200). |
 
+### 3.14 Use Case: Stop Here on Corrective Report
+
+| Aspect | Detail |
+|--------|--------|
+| **Module** | Maintenance Execution |
+| **Application Service** | StopHereService |
+| **Input DTO** | { reportId, stopSectionIndex, reason?, userId } |
+| **Orchestration** | 1. Load CorrectiveReport — verify documentStatus = DRAFT. 2. Call ReportSectionService.stopHere(report, stopSectionIndex): (a) validate sections 1..stopSectionIndex-1 are complete; (b) mark stopSectionIndex as IN_PROGRESS; (c) set sections > stopSectionIndex to DISABLED; (d) transition report to SECTIONAL_DRAFT. 3. Save. 4. Publish CorrectiveReportStopHere. |
+| **Aggregates involved** | CorrectiveReport (section state transitions) |
+| **Transaction scope** | Single transaction |
+| **Events emitted** | CorrectiveReportStopHere |
+| **Validations** | Report is DRAFT. stopSectionIndex is 1-5. Sections before stopSectionIndex are complete. |
+| **Failure scenarios** | Report not found → 404. Report already SUBMITTED → 422. Invalid section index → 422. |
+
+### 3.15 Use Case: Resume Corrective Report (Next Shift)
+
+| Aspect | Detail |
+|--------|--------|
+| **Module** | Maintenance Execution |
+| **Application Service** | ResumeCorrectiveReportService |
+| **Input DTO** | { reportId, userId } |
+| **Orchestration** | 1. Load CorrectiveReport — verify documentStatus = SECTIONAL_DRAFT. 2. Call ReportSectionService.resume(report): (a) re-enable sections > stopSectionIndex, set them to PENDING; (b) set stopSectionIndex to IN_PROGRESS; (c) transition report back to DRAFT. 3. Save. |
+| **Aggregates involved** | CorrectiveReport (section state transitions) |
+| **Transaction scope** | Single transaction |
+| **Events emitted** | None (same-draft resume is internal state change) |
+| **Validations** | Report is SECTIONAL_DRAFT. User is authorized (same or next-shift technician). |
+| **Failure scenarios** | Report not found → 404. Report not in SECTIONAL_DRAFT → 422. |
+
+### 3.16 Use Case: Register Component
+
+| Aspect | Detail |
+|--------|--------|
+| **Module** | Component Inventory |
+| **Application Service** | RegisterComponentService |
+| **Input DTO** | { componentTypeId, serialNumber, initialLocationId?, initialStatus (default: REGISTERED), manufacturingDate?, batchNumber?, notes? } |
+| **Orchestration** | 1. Load ComponentType — verify exists and is active. 2. Verify serialNumber uniqueness within componentType. 3. Create Component with status REGISTERED. 4. If initialLocationId provided, create ComponentMovement (REGISTERED → EN_STOCK). 5. Save. |
+| **Aggregates involved** | Component (create), ComponentMovement (create if location provided), ComponentType (read) |
+| **Transaction scope** | Single transaction |
+| **Events emitted** | ComponentStatusChanged |
+| **Validations** | ComponentType exists. Serial number is unique for this type. Initial location exists if provided. |
+| **Failure scenarios** | ComponentType not found → 404. Duplicate serial number → 409. Location not found → 404. |
+
+### 3.17 Use Case: Install Component in Slot
+
+| Aspect | Detail |
+|--------|--------|
+| **Module** | Component Inventory (called from Maintenance Execution via ReplacementTask) |
+| **Application Service** | InstallComponentService |
+| **Input DTO** | { componentId, slotLocationId, assetId, replacementTaskId?, correctiveEventId?, userId } |
+| **Orchestration** | 1. Load Component — verify status is EN_STOCK. 2. Load SlotLocation — verify slot is empty (no Component assigned with INSTALLED status). 3. Load Asset for context. 4. Update Component: currentSlotLocation = slotLocationId, currentAsset = assetId, status = INSTALLED. 5. Create ComponentMovement with movementType = INSTALL. 6. Save. 7. Publish ComponentInstalled. |
+| **Aggregates involved** | Component (update), ComponentMovement (create), SlotLocation (read) |
+| **Transaction scope** | Single transaction |
+| **Events emitted** | ComponentInstalled, ComponentStatusChanged |
+| **Validations** | Component exists and is EN_STOCK. Slot exists and is not occupied. Asset exists. |
+| **Failure scenarios** | Component not found → 404. Component not EN_STOCK → 422. Slot occupied → 409. Asset not found → 404. |
+
+### 3.18 Use Case: Remove Component from Slot
+
+| Aspect | Detail |
+|--------|--------|
+| **Module** | Component Inventory (called from Maintenance Execution via ReplacementTask) |
+| **Application Service** | RemoveComponentService |
+| **Input DTO** | { componentId, reason (enum: REPLACED, REMOVED_FOR_REPAIR, LOST), destinationLocationId?, replacementTaskId?, correctiveEventId?, userId } |
+| **Orchestration** | 1. Load Component — verify status is INSTALLED. 2. Clear currentSlotLocation and currentAsset. 3. Set status based on reason: REPLACED → REMOVED, REMOVED_FOR_REPAIR → EN_REPARACIÓN, LOST → PERDIDO. 4. Create ComponentMovement. 5. If destinationLocationId, create follow-up movement to that Location. 6. Save. 7. Publish ComponentRemoved + ComponentStatusChanged. |
+| **Aggregates involved** | Component (update), ComponentMovement (create), Location (read if provided) |
+| **Transaction scope** | Single transaction |
+| **Events emitted** | ComponentRemoved, ComponentStatusChanged |
+| **Validations** | Component exists and is INSTALLED. Reason is valid. |
+| **Failure scenarios** | Component not found → 404. Component not INSTALLED → 422. |
+
 ---
 
 ## 4. Persistence & Query Architecture
@@ -769,7 +901,7 @@ For v1, the **adjacency list + closure table** hybrid is recommended. Future evo
 
 ### 4.3 Temporal History Modeling (AssetAssignment)
 
-AssetAssignment is a **first-class domain entity** (see domain model §4.7), not a read projection. It is the authoritative historical record of the hierarchy.
+AssetAssignment is a **first-class domain entity** (see domain model §4.9), not a read projection. It is the authoritative historical record of the hierarchy.
 
 #### 4.3.1 Persistence Structure
 
@@ -953,7 +1085,11 @@ In addition to the closure table (which is the primary read projection), the arc
 | PATCH | /api/v1/corrective-reports/{id} | Update report (only when DRAFT) |
 | POST | /api/v1/corrective-reports/{id}/submit | Submit report (finalize) |
 | POST | /api/v1/corrective-reports/{id}/tasks | Add task to report |
+| POST | /api/v1/corrective-reports/{id}/stop-here | Activate Stop Here at section N |
+| POST | /api/v1/corrective-reports/{id}/resume | Resume report (next shift) |
 | POST | /api/v1/corrective-reports/{id}/signatures | Add participant signature |
+| GET | /api/v1/corrective-reports/{id}/sections | Get section completion states |
+| PATCH | /api/v1/corrective-reports/{id}/sections/{sectionIndex} | Mark section as complete |
 | GET | /api/v1/task-types | List task types (query: subsystem_id) |
 
 ### 5.5 Preventive Maintenance Endpoints
@@ -973,6 +1109,7 @@ In addition to the closure table (which is the primary read projection), the arc
 | PATCH | /api/v1/preventive-reports/{id} | Update report (only when DRAFT) |
 | POST | /api/v1/preventive-reports/{id}/submit | Submit report (finalize) |
 | POST | /api/v1/preventive-reports/{id}/signatures | Add participant signature |
+| GET | /api/v1/preventive-reports/{id}/generate-pdf | Generate PDF for report |
 
 ### 5.6 Attachment & File Endpoints
 
@@ -984,17 +1121,46 @@ In addition to the closure table (which is the primary read projection), the arc
 
 Where {type} = preventive or corrective.
 
-### 5.7 Personnel & Tool Endpoints
+### 5.7 Component Inventory Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | /api/v1/component-types | List component types (query: subsystem_id, part_number) |
+| GET | /api/v1/component-types/{id} | Get component type detail |
+| POST | /api/v1/component-types | Create component type |
+| GET | /api/v1/components | List components (query: status, type_id, slot_id, serial_number, asset_id) |
+| GET | /api/v1/components/{id} | Get component detail with movement history |
+| POST | /api/v1/components | Register new component |
+| POST | /api/v1/components/{id}/move | Move component (install, remove, transfer, repair, scrap) |
+| GET | /api/v1/slot-locations | List slot locations (query: equipment_kind_id, parent_slot_id) |
+| GET | /api/v1/slot-locations/{id} | Get slot detail with image |
+| POST | /api/v1/slot-locations | Create slot location |
+| GET | /api/v1/locations | List physical locations (warehouse zones, shelves) |
+| GET | /api/v1/locations/{id} | Get location detail |
+| POST | /api/v1/locations | Create location |
+
+### 5.8 PDF Generation Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | /api/v1/reports/{type}/{id}/generate-pdf | Generate PDF (async, returns GeneratedReport) |
+| GET | /api/v1/reports/{type}/{id}/pdf-status | Check PDF generation status |
+| GET | /api/v1/pdf-reports/{generatedReportId}/download | Download generated PDF |
+
+Where {type} = preventive or corrective.
+
+### 5.9 Personnel & Tool Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/v1/users | List users (query: role, project_id) |
 | GET | /api/v1/users/{id} | Get user detail |
-| GET | /api/v1/tools | List tools (query: serial, available) |
-| GET | /api/v1/tools/{id} | Get tool detail |
-| GET | /api/v1/warehouse-stock | List warehouse stock (query: type_id, serial, warehouse_id) |
+| GET | /api/v1/tools | List tools (query: serial, available, certified) |
+| GET | /api/v1/tools/{id} | Get tool detail with certifications |
+| POST | /api/v1/tools/{id}/certifications | Add tool certification |
+| GET | /api/v1/consumable-types | List consumable types |
 
-### 5.8 Pagination & Filtering
+### 5.10 Pagination & Filtering
 
 | Pattern | Description |
 |---------|-------------|
@@ -1004,7 +1170,7 @@ Where {type} = preventive or corrective.
 | **Filtering** | Query parameters matching entity fields: ?status=IN_PROGRESS&subsystem_id=uuid |
 | **Sorting** | ?sort=created_at&order=desc |
 
-### 5.9 Hierarchy Traversal Endpoints (Detailed)
+### 5.11 Hierarchy Traversal Endpoints (Detailed)
 
 These endpoints deserve special attention due to the recursive asset structure:
 
@@ -1015,7 +1181,7 @@ These endpoints deserve special attention due to the recursive asset structure:
 | GET /assets/{id}/ancestors | Ordered list from root to parent | Uses closure table: SELECT ancestor_id FROM asset_closure WHERE descendant_id = :id ORDER BY depth DESC |
 | GET /assets/search?q=MTORE | Flat list of matching assets (with breadcrumb path) | Searches serial/part/name, enriches each result with ancestor path from closure table |
 
-### 5.10 API Error Response Format
+### 5.12 API Error Response Format
 
 `json
 {
@@ -1083,11 +1249,13 @@ Tab 2: Corrective
 │   │   ├── Event Detail (timeline)
 │   │   │   ├── Shift Reports
 │   │   │   │   ├── Report Detail
-│   │   │   │   │   ├── Task List
-│   │   │   │   │   │   └── Replacement Detail
-│   │   │   │   │   ├── Attachments
+│   │   │   │   │   ├── 6 Sections (summary, parts, labor, tests, doc, comments)
+│   │   │   │   │   ├── Task List (StandardActivity / ReplacementTask)
+│   │   │   │   │   │   └── Replacement Detail + Component Movement
+│   │   │   │   │   ├── Attachments (per section)
 │   │   │   │   │   └── Signatures
-│   │   │   │   └── Create New Report
+│   │   │   │   ├── Stop Here (section picker)
+│   │   │   │   └── Resume (next shift)
 │   │   │   ├── Start Maintenance
 │   │   │   └── Event Controls (resolve, close, reopen)
 │   │   └── Create New Event
@@ -1096,7 +1264,7 @@ Tab 2: Corrective
 Tab 3: Preventive
 │   ├── Scheduled Activities
 │   │   └── Activity Detail
-│   │       └── Create Report
+│   │       └── Create Report (with test steps, personnel requirements)
 │   ├── Templates
 │   └── History
 │
@@ -1112,7 +1280,19 @@ Tab 4: Assets
 │   │   └── Warehouse movement history
 │   └── Quick Search (presented as sheet)
 │
-Tab 5: Profile / Settings
+Tab 5: Components
+│   ├── Component List (filter: status, type, slot, asset)
+│   │   ├── Component Detail
+│   │   │   ├── Movement History
+│   │   │   ├── Current Slot / Asset
+│   │   │   └── Current Status
+│   │   └── Register New Component
+│   ├── Slot Locations (per EquipmentKind)
+│   │   ├── Slot Detail (with image)
+│   │   └── Available Slots
+│   └── Physical Locations (warehouse)
+│
+Tab 6: Profile / Settings
     ├── User info
     ├── Signatures management
     └── Logout
@@ -1419,4 +1599,8 @@ The following architectural decisions were made during the creation of this docu
 | ADR-011 | **JWT Bearer Tokens (Short-Lived Access + Refresh)** | Stateless auth, no server-side session storage. Refresh token rotation. | Token revocation requires blacklist or short expiry. |
 | ADR-012 | **Event Store in Same PostgreSQL Instance** | Single database for transactional data and event store (separate schema). No operational complexity. | Migration path to dedicated event store if event volume grows significantly. |
 | ADR-013 | **Optimistic Locking via `version` Column** | Concurrent modification detection for assets and reports. No pessimistic locks needed at current scale. | Retry logic required in application layer on `version` conflict. |
+| ADR-014 | **Component Inventory as Separate Bounded Context** | Components have independent lifecycle (movement, repair, scrap) from Assets. Slot hierarchy is distinct from Asset hierarchy. | Cross-context coordination via domain events. ReplacementTask triggers both AssetReplacement + ComponentMovement atomically. |
+| ADR-015 | **Jinja2 + WeasyPrint for PDF Generation** | PDF is a pure infrastructure concern. Jinja2 HTML templates + WeasyPrint rendering is the simplest Python PDF pipeline. No expensive report designer tooling. | Two templates (preventive/corrective). GeneratedReport entity for traceability only. Generation triggered at report submission. |
+| ADR-016 | **Corrective Report 6-Section Decomposition** | The Stop Here workflow (section-by-section progressive fill) reflects the operational reality of multi-shift corrective maintenance. Section state is tracked independently per report. | More complex report state machine (DRAFT, SECTIONAL_DRAFT, SUBMITTED, SUBMITTED_PARTIAL). Section completion validation is per-section, not all-or-nothing. |
+| ADR-017 | **Client-Side Share Sheet for v1 Email** | iOS native UIActivityViewController (Share Sheet) for PDF sharing — zero backend complexity. Backend async notification (email/SMS) is v2. Email is a presentation concern, not a domain concern. | PDF must be downloaded to device first. No delivery tracking, no scheduled notifications in v1. |
 

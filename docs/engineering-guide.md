@@ -1,9 +1,9 @@
 # Engineering Guide
 
-**Version:** 0.1
+**Version:** 0.2
 **Status:** Draft
-**Based on:** Domain Model v0.2, Architecture v0.1
-**Last Updated:** 2026-06-06
+**Based on:** Domain Model v0.3, Architecture v0.2
+**Last Updated:** 2026-06-09
 
 ---
 
@@ -52,6 +52,14 @@ backend/
 │   │   │   └── tests/          # Module-specific tests
 │   │   │
 │   │   ├── maintenance_execution/
+│   │   │   ├── __init__.py
+│   │   │   ├── domain/
+│   │   │   ├── application/
+│   │   │   ├── infrastructure/
+│   │   │   ├── interfaces/
+│   │   │   └── tests/
+│   │   │
+│   │   ├── component_inventory/
 │   │   │   ├── __init__.py
 │   │   │   ├── domain/
 │   │   │   ├── application/
@@ -173,6 +181,10 @@ ios/
 │   │   │   ├── ViewModels/
 │   │   │   └── Views/
 │   │   ├── Preventive/
+│   │   │   ├── Models/
+│   │   │   ├── ViewModels/
+│   │   │   └── Views/
+│   │   ├── Components/
 │   │   │   ├── Models/
 │   │   │   ├── ViewModels/
 │   │   │   └── Views/
@@ -384,6 +396,8 @@ uv pip sync requirements/dev.txt
 | `python-multipart` | File uploads |
 | `structlog` | Structured logging |
 | `sentry-sdk` | Error tracking |
+| `jinja2` | HTML template rendering for PDF generation |
+| `weasyprint` | HTML → PDF conversion |
 | `httpx` | HTTP client (future integrations) |
 
 ---
@@ -537,6 +551,10 @@ backend/tests/
 │   │   └── test_report.py
 │   ├── inventory/
 │   │   └── test_tool.py
+│   ├── component_inventory/
+│   │   ├── test_component.py
+│   │   ├── test_slot.py
+│   │   └── test_component_movement.py
 │   ├── planning_scheduling/
 │   │   └── test_schedule.py
 │   └── identity_access/
@@ -616,7 +634,11 @@ docs/adr/
 ├── 0010-rest-over-graphql.md
 ├── 0011-jwt-auth.md
 ├── 0012-event-store-same-db.md
-└── 0013-optimistic-locking.md
+├── 0013-optimistic-locking.md
+├── 0014-component-inventory-context.md
+├── 0015-jinja2-weasyprint-pdf.md
+├── 0016-corrective-report-6-sections.md
+└── 0017-client-side-share-sheet-email.md
 ```
 
 ---
