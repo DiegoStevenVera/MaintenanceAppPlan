@@ -16,7 +16,7 @@
 | **Role** | Field operator, frontline maintenance staff |
 | **Count** | ~6–8 per site |
 | **Technical proficiency** | Low–medium. Comfortable with smartphones, NOT comfortable with complex UIs, databases, or abstract concepts. Uses phone primarily for calls, WhatsApp, camera. |
-| **Device** | Company-issued iPhone (typically not the latest model). iOS 17+ target mandated by MDM policy. |
+| **Device** | Company-issued iPhone (typically not the latest model). iOS 17+ target mandated by MDM policy. Shared iPad from the team. |
 | **Primary goal** | Record what was done, find the right asset, attach photos, get signatures, finish shift. Minimize paperwork. |
 | **Frustrations** | Slow forms, too many taps, unclear hierarchy, losing unsaved work, poor network in tunnels/workshops, being asked for data they don't have. |
 | **Daily workflow** | 1. Receive event/task assignment (verbally or via app notification). 2. Navigate to asset in hierarchy. 3. Review existing state/history. 4. Perform maintenance. 5. Open report → add tasks → add photos → add signatures → submit. Repeat for next event. Shift end: verify all reports submitted. |
