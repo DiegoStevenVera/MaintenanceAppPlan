@@ -127,7 +127,7 @@ The current system exists in Power Apps, but the new iOS app and backend are a c
 
 The old Power Apps implementation should only be treated as operational/business reference material.
 
-# PART 1 — PREVENTIVE MAINTENANCE REPORT
+# PART 1 — PREVENTIVE MAINTENANCE REPORT 
 
 ## Preventive Report — App Form Data
 
@@ -1120,3 +1120,69 @@ a70e488c-0dd8-43ac-bbb0-7c201dab4367	ffdd79a0-3495-4d4a-9e7d-870e12f7db72	760	Se
 
 
 cabe recalcar que sobre las tablas que te muestro solo son para que te guíes de qué tipos de datos se usan, que valores se usan actualmente, pero no lo sigas al 100% debido a que las tablas actuales están muy mal hechas debido a que se fueron armando con el tiempo, inició con un proyecto pequeño pero se fue añadiendo más y más cosas tal que se agrandó bastante y no se tuvo la idea original por lo que está mal diseñado, hay varias columnas y tablas que ni uso y tablas que se repiten valores. Si tienes alguna pregunta puedes consultame y podré responderte para que puedas tener claridad.
+
+La aplicación tiene que ser en español, pero no tiene que ser necesariamente en español completamente
+
+# Pantallas de la app
+En las Pantallas que tiene la aplicación tiene que tener las siguientes pantallas "grandes":
+1. Pantalla de inicio o "Home", en esta pantalla se tendrá todo la información en resumen acerca de la cantidad de mantenimientos realizados, cuantos están pendientes, cuantos en progreso, algo adicional es que indique los mantenimientos que se tienen que hacer en el día ya sea correctivos abiertos o los preventivos planificados para el día de hoy.
+2. En la pantalla de preventivos que salga todo relacionado con los preventivos como también la cantidad de preventivos que se tiene que hacer en el día actual, al darle click a un preventivo tiene que ingresar a otra pantalla de preventivo específico del seleccionado, acá deben aparecen secciones como el nombre del preventivo, el manual del preventivo (un pdf), un botón de iniciar preventivo, secciones de imágenes acerca del mantenimiento relacionado, una sección de comentarios o notas acerca de este tipo de mantenimiento (sección de comentarios de los mantenedores pueden dejar para ayudar como recomendaciones en este tipo de mantenimiento). Esta sería la pantalla en caso no se haya iniciado este mantenimiento en específico, si es que ya se dio click al botón de iniciar preventivo entonces en esta pantalla ya no se tendría el botón de iniciar preventivo sino habría 3 cosas más: un botón de generar reporte del mantenimiento, otro botón de resolver mantenimiento (no seleccionable cuando aún no se genera algún reporte) y una sección para mostrar los reportes ya generados sobre este mantenimiento donde muestra todos las versiones realizadas. Si se da click al botón de generar reporte del mantenimiento te llevaría a otra pantalla que sería un "formulario", este formulario ya fue descrito anteriormente en (PART 1 — PREVENTIVE MAINTENANCE REPORT (Preventive Report — App Form Data)). Este formulario debería finalizar con un botón de "finalizar reporte", esto haría que los datos del formulario se almacenen en la base de datos y también que se genere el PDF del reporte de mantenimiento (Está pendiente poder entregarte un template para este PDF) este reporte PDF sería el que se mostraría en la sección de la pantalla anterior de mostrar reportes ya generados. Al finalizar el reporte te lleva a la pantalla anterior pero ya no tendría el botón de generar reporte de mantenimiento, sino que sería Editar reporte de mantenimiento (debido a que ya se creó uno), este editar enviaría nuevamente a la pantalla del formulario pero con todos los datos ya rellenados de la versión anterior, el botón de finalizar reporte de mantenimiento generaría una nueva versión del pdf en base a lo editado, en este caso de edición en la sección de mostrar reportes ya generados aparecerían 2, la versión 1 y 2. Cuando ya se hizo al menos 1 reporte de mantenimiento el botón de Resolver mantenimiento ya se puede seleccionar y también aparecería un botón de "Enviar correo", este enviar correo tiene un formato específico pero por el momento solo tiene que enviar la información acerca del mantenimiento como fecha, nombre del mantenimiento, personal que trabajó en este y el PDF de la última versión realizada. Al darle resolver mantenimiento ya se tendría resuelto a nivel del mantenedor, en este caso ya se acabaría todo por el lado del mantendor, pero aún se tiene que cerrar este mantenimiento, solo al coordinador le aparecería el botón de "Cerrar mantenimiento" para cerrar definitivamente el mantenimiento sobre esto ya el técnico solo podría ver (ya no editar ni crear una nueva versión del reporte) en el mantenimiento. El coordinador también puede tener una opción de "Abrir nuevamente el mantenimiento".
+3. En la pantalla de correctivos el siguiente flujo lo resume :
+
+[Corrective Tab → Event List]
+    │
+    ├── [Tap event] ──→ [Event Detail]
+    │                       │
+    │                       ├── [Status: OPEN]
+    │                       │       │
+    │                       │       ├── [Tap "Start Maintenance"] ──→ [Status: IN_PROGRESS]
+    │                       │       │                                       │
+    │                       │       │                                       ▼
+    │                       │       │                                  [Button → "Resolve"]
+    │                       │       │
+    │                       │       └── [Tap "Create Report"]
+    │                       │               │
+    │                       │               ▼
+    │                       │          [Report Form (DRAFT)] (Completo en la sección anterio # PART 2 — CORRECTIVE MAINTENANCE REPORT)
+    │                       │               │
+    │                       │               ├── [Fill work description] ──→ Auto-save every 1m
+    │                       │               ├── [Add tasks] ──→ Select task type, add notes
+    │                       │               ├── [Add photos] ──→ Camera / Gallery → Upload
+    │                       │               ├── [Record replacements] ──→ Select old+new asset
+    │                       │               ├── [Add supervisor signature] ──→ PencilKit
+    │                       │               ├── [Add own signature] ──→ PencilKit
+    │                       │               │
+    │                       │               └── [Tap "Submit"]
+    │                       │                       │
+    │                       │                       ├── [Validation OK] ──→ [POST submit]
+    │                       │                       │                            │
+    │                       │                       │                            ▼
+    │                       │                       │                       [Status: SUBMITTED]
+    │                       │                       │                            │
+    │                       │                       │                            ▼
+    │                       │                       │                 [Event Timeline Updated]
+    │                       │                       │
+    │                       │                       └── [Validation fail] ──→ [Highlight errors]
+    │                       │
+    │                       ├── [Status: IN_PROGRESS]
+    │                       │       │
+    │                       │       ├── [Tap "Resolve"] ──→ [Add notes] ──→ [Status: RESOLVED]
+    │                       │       │
+    │                       │       └── [View reports] ──→ [List of submitted reports]
+    │                       │
+    │                       └── [Status: RESOLVED]
+    │                               │
+    │                               ├── [Supervisor: "Close Event"] ──→ [Status: CLOSED]
+    │                               └── [Supervisor: "Reopen"] ──→ [Status: IN_PROGRESS]
+    │
+    └── [Tap "+" (Supervisor)] ──→ [Create Event Form]
+                                        │
+                                        ├── [Select asset] ──→ Search/select asset
+                                        ├── [Set severity]
+                                        ├── [Add description]
+                                        ├── [Add initial photo (optional)]
+                                        └── [Tap "Create"] ──→ [Event created (OPEN)]
+                                              │
+                                              └── [Assign technicians] ──→ [Select from list]
+
+Por el momento son estas principales pantallas las que se tiene planteadas, para más adelante se prevee poder usar más como programación de trabajos, horarios de trabajadores, inventario, etc.
