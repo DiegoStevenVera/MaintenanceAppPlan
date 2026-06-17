@@ -3,7 +3,18 @@
 **Version:** 0.2
 **Status:** Draft
 **Based on:** Domain Model v0.3, Architecture v0.2
-**Last Updated:** 2026-06-09
+**Last Updated:** 2026-06-16
+
+---
+
+## 0. Current Engineering Decisions
+
+- v1 is local-first for demo and validation. Cloud provider is not approved yet.
+- Keep infrastructure provider-neutral until on-premise, Azure, or AWS is selected.
+- iPad is the initial target. iPhone is future.
+- Use unified `asset_management` for equipment, components, software, tools when they need hierarchy/history traceability.
+- Treat `component_inventory` references below as legacy draft structure unless inventory complexity later justifies a separate bounded context.
+- Corrective reports use dynamic blocks, not a fixed six-section model.
 
 ---
 

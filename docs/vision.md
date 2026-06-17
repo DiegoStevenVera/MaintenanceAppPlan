@@ -217,7 +217,8 @@ The system is expected to support:
 
 * iOS applications,
 * backend APIs,
-* cloud infrastructure,
+* local-first v1 infrastructure,
+* future cloud or on-premise infrastructure,
 * scalable services,
 * attachment storage,
 * future integrations,
@@ -240,9 +241,10 @@ Current expected stack:
 
 * Backend: FastAPI
 * Frontend: SwiftUI
-* Infrastructure: AWS
+* Initial infrastructure: local development/demo environment
+* Future infrastructure: cloud or on-premise, pending approval
 * Database: PostgreSQL
-* Infrastructure as Code: Terraform
+* Infrastructure as Code: Terraform after provider approval
 
 ---
 

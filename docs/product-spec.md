@@ -1,9 +1,24 @@
-# Product Specification & UX Blueprint
+﻿# Product Specification & UX Blueprint
 
-**Version:** 0.2
+**Version:** 0.3
 **Status:** Draft
 **Based on:** Domain Model v0.3, Architecture v0.2, Engineering Guide v0.2
-**Last Updated:** 2026-06-09
+**Last Updated:** 2026-06-16
+
+---
+
+## 0. Clarified Product Decisions
+
+- Initial device target: shared iPads. iPhone support is future and depends on corporate approval.
+- Initial delivery strategy: design and flows with mocks first, then backend/API, then real SwiftUI integration.
+- Infrastructure for v1: local demo/development environment, such as iPad connected to a Mac-hosted backend.
+- PDF generation is required in v1, even with simple raw-data templates.
+- Email/share in v1 uses the iOS Share Sheet with the generated PDF. Backend email is future.
+- Roles: Technician, Coordinator, Boss, Administrator. "Supervisor" in older drafts means Boss only when it refers to read-only leadership; operational closure belongs to Coordinator.
+- Maintenance lifecycle for preventive and corrective: Scheduled, In Progress, Completed, Closed.
+- Reports can be edited while the maintenance activity is not Closed. Each finalized edit creates a version.
+- Corrective reports use dynamic blocks based on the real report format. They are not fixed to six sections.
+- Asset and Component are unified under Asset. Component is an asset category, not a separate primary entity for v1.
 
 ---
 
@@ -14,37 +29,37 @@
 | Attribute | Detail |
 |-----------|--------|
 | **Role** | Field operator, frontline maintenance staff |
-| **Count** | ~6–8 per site |
-| **Technical proficiency** | Low–medium. Comfortable with smartphones, NOT comfortable with complex UIs, databases, or abstract concepts. Uses phone primarily for calls, WhatsApp, camera. |
+| **Count** | ~6â€“8 per site |
+| **Technical proficiency** | Lowâ€“medium. Comfortable with smartphones, NOT comfortable with complex UIs, databases, or abstract concepts. Uses phone primarily for calls, WhatsApp, camera. |
 | **Device** | Company-issued iPhone (typically not the latest model). iOS 17+ target mandated by MDM policy. Shared iPad from the team. |
 | **Primary goal** | Record what was done, find the right asset, attach photos, get signatures, finish shift. Minimize paperwork. |
 | **Frustrations** | Slow forms, too many taps, unclear hierarchy, losing unsaved work, poor network in tunnels/workshops, being asked for data they don't have. |
-| **Daily workflow** | 1. Receive event/task assignment (verbally or via app notification). 2. Navigate to asset in hierarchy. 3. Review existing state/history. 4. Perform maintenance. 5. Open report → add tasks → add photos → add signatures → submit. Repeat for next event. Shift end: verify all reports submitted. |
+| **Daily workflow** | 1. Receive event/task assignment (verbally or via app notification). 2. Navigate to asset in hierarchy. 3. Review existing state/history. 4. Perform maintenance. 5. Open report â†’ add tasks â†’ add photos â†’ add signatures â†’ submit. Repeat for next event. Shift end: verify all reports submitted. |
 | **Permissions** | Read assets in assigned subsystems. Create/edit/submit corrective reports (own only). Read preventive schedules. Execute assigned preventive tasks. Submit reports for own work. |
 | **Mobility constraints** | Frequently in low-connectivity areas (train tunnels, remote yards). Needs offline tolerance for report drafting. Photos are critical. |
 | **Offline tolerance** | Must be able to draft reports, capture photos, and capture signatures without network. Submission requires connectivity. |
 
-### 1.2 Supervisor
+### 1.2 Boss
 
 | Attribute | Detail |
 |-----------|--------|
-| **Role** | Shift lead, team coordinator |
-| **Count** | ~2–3 per site |
+| **Role** | Read-only operational leader, formerly called Supervisor in older drafts |
+| **Count** | ~2â€“3 per site |
 | **Technical proficiency** | Medium. Uses Excel, email, generic maintenance systems. Comfortable with basic data entry and reporting. |
-| **Device** | Company-issued iPhone or iPad. |
-| **Primary goal** | Ensure all corrective events are properly documented. Assign technicians. Review reports for quality. Close events. |
+| **Device** | Shared iPad initially; future iPhone access depends on corporate approval. |
+| **Primary goal** | Review maintenance metrics, inspect specific maintenance records, and understand operational status without editing data. |
 | **Frustrations** | Incomplete reports, missing signatures, technicians skipping fields, not knowing what happened during the shift. |
-| **Daily workflow** | 1. Review open events at shift start. 2. Assign technicians to events. 3. Monitor progress during shift. 4. Review submitted reports. 5. Verify signatures are complete. 6. Close completed events. 7. Generate shift summary. |
-| **Permissions** | Read all assets. Create/resolve/reopen/close corrective events. Read all reports. Reject submitted reports. Assign technicians to events/schedules. |
+| **Daily workflow** | 1. Review dashboard metrics. 2. Inspect open or closed maintenance activities if needed. 3. Review reports, PDFs, and asset history in read-only mode. |
+| **Permissions** | Read all reports, assets, timelines, summaries, and dashboards. No operational create/edit/close permissions. |
 | **Mobility constraints** | Mostly workshop/office based, but walks the floor. Connectivity generally good. |
-| **Offline tolerance** | Low — primarily online review work. |
+| **Offline tolerance** | Low â€” primarily online review work. |
 
 ### 1.3 Warehouse / Inventory Operator
 
 | Attribute | Detail |
 |-----------|--------|
 | **Role** | Spare parts and tool management |
-| **Count** | ~1–2 per site |
+| **Count** | ~1â€“2 per site |
 | **Technical proficiency** | Medium. Uses inventory systems, barcode scanners, Excel. |
 | **Device** | Company-issued iPhone or dedicated scanner + iPhone. |
 | **Primary goal** | Track tool check-out/check-in, manage spare part stock, process replacements reported by technicians. |
@@ -52,22 +67,30 @@
 | **Daily workflow** | 1. Review replacement requests from overnight reports. 2. Issue parts from warehouse. 3. Update stock levels. 4. Process returned parts (RMA, scrap, restock). 5. Reconcile physical inventory with system. |
 | **Permissions** | Read tools/stock. Create tool instances. Update warehouse stock. Link parts to replacement records. |
 | **Mobility constraints** | Within warehouse/yard. WiFi coverage typically good. |
-| **Offline tolerance** | Low — stock operations benefit from real-time accuracy. |
+| **Offline tolerance** | Low â€” stock operations benefit from real-time accuracy. |
 
-### 1.4 Administrator / Coordinator
+### 1.4 Coordinator
 
 | Attribute | Detail |
 |-----------|--------|
-| **Role** | Maintenance planner, system administrator, PCON manager |
-| **Count** | ~1–2 per site |
-| **Technical proficiency** | Medium–high. Uses planning software, ERP systems, Excel (often advanced). |
+| **Role** | Maintenance planner, documentation owner, schedule coordinator, and activity closer/reopener |
+| **Count** | ~1â€“2 per site |
+| **Technical proficiency** | Mediumâ€“high. Uses planning software, ERP systems, Excel (often advanced). |
 | **Device** | Office desktop/laptop primarily. Uses iPad for walkarounds. |
 | **Primary goal** | Plan preventive maintenance schedules. Import/manage PCON plans. Manage asset hierarchy. Manage users and permissions. Ensure regulatory compliance. |
 | **Frustrations** | Manual PCON import processes, rigid hierarchy that doesn't match reality, difficult reporting for audits. |
 | **Daily workflow** | 1. Review upcoming PM schedules. 2. Adjust plans based on operational needs. 3. Import/update PCON Excel files. 4. Manage asset hierarchy changes (new assets, decommission, moves). 5. Generate compliance reports. 6. Manage user accounts and roles. |
-| **Permissions** | Full system access. Create/edit/delete asset types, hierarchies, templates, schedules. Manage users. View all data. |
+| **Permissions** | Technician capabilities plus close/reopen maintenance activities. Future: create/edit schedules, import PCON, manage documentation workflows. |
 | **Mobility constraints** | Mostly office-based. Connectivity good. |
-| **Offline tolerance** | Very low — planning is online-intensive. |
+| **Offline tolerance** | Very low â€” planning is online-intensive. |
+
+### 1.5 Administrator
+
+| Attribute | Detail |
+|-----------|--------|
+| **Role** | System administrator |
+| **Primary goal** | Manage configuration, catalogs, users, roles, and platform-level settings. |
+| **Permissions** | All capabilities from Technician, Coordinator, and Boss, plus administrative configuration. |
 
 ---
 
@@ -80,18 +103,18 @@ The smallest production-valuable system that replaces the current paper-based pr
 | Workflow | Included in MVP | Rationale |
 |----------|----------------|-----------|
 | User authentication (email/password) | Yes | Gate for all other workflows |
-| Asset hierarchy browsing | Yes | Core navigation — finding the right asset is step 1 |
+| Asset hierarchy browsing | Yes | Core navigation â€” finding the right asset is step 1 |
 | Asset search (serial, part number, name) | Yes | Fast asset location without hierarchy drilling |
 | Asset detail view | Yes | See position, history, specs |
 | Create corrective event | Yes | Replace paper event logging |
 | Start/resolve/close corrective event | Yes | Full lifecycle for corrective events |
-| Create corrective report (draft, 6-section) | Yes | Replace paper shift report — summary, parts, labor, tests, doc, comments |
+| Create corrective report (draft, dynamic blocks) | Yes | Replace the real corrective report format; component replacement fields appear only when that activity type is selected |
 | Add tasks to report (StandardActivity + ReplacementTask) | Yes | Document what was done, including component replacements |
-| Stop Here (section-based progressive fill) | Yes | Multi-shift reports — stop at section N, resume next shift |
+| Stop Here indicator | Yes | Filters/prints the report only up to the indicated point so blank later fields do not appear in the PDF |
 | Mark individual report sections as complete | Yes | Visual progress tracking per section |
 | Upload photo attachments (per section) | Yes | Photo is the most critical field evidence |
 | Capture signature (PencilKit) | Yes | Replace wet signatures on paper |
-| Submit corrective report (full or partial) | Yes | Finalize and lock the report — supports Stop Here partial submit |
+| Finalize corrective report version | Yes | Generates/stores a report version while the activity remains editable until closed |
 | View corrective event timeline | Yes | See what happened during the event |
 | View maintenance history per asset | Yes | See past events for an asset |
 | Record asset replacement | Yes | Replace paper replacement records |
@@ -99,7 +122,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | Basic preventive schedule view | Yes | Technicians need to see assigned PMs |
 | Create preventive report (draft) | Yes | Replace paper PM checklists |
 | Submit preventive report | Yes | Finalize PM documentation |
-| User roles (Technician/Supervisor/Coordinator) | Yes | Basic access control |
+| User roles (Technician/Coordinator/Boss/Administrator) | Yes | Basic access control |
 
 ### 2.2 V1.1 (Post-MVP)
 
@@ -110,7 +133,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | PCON Excel import | Automate plan import |
 | Warehouse stock management | Basic inventory tracking for spare parts |
 | Tool check-out/check-in | Track tool usage per event |
-| Supervisor report review and rejection | Quality control loop |
+| Coordinator report review and reopen | Quality control loop |
 | Report editing (non-draft) with audit trail | Fix errors in submitted reports |
 | Dashboard (open events, pending tasks) | At-a-glance operational view |
 | Push notifications | Alert technicians of new assignments |
@@ -123,7 +146,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | Capability | Rationale |
 |------------|-----------|
 | Full offline mode with sync | Required for tunnels/remote areas without any connectivity |
-| PDF report export | Share with external auditors |
+| Advanced PDF templates | Improve the simple v1 PDF templates and align them with official formats |
 | PCON compliance analytics | Audit-readiness dashboards |
 | Geofencing for asset location | Verify technician is at correct location |
 | Barcode/QR code scanning | Fast asset identification |
@@ -136,16 +159,16 @@ The smallest production-valuable system that replaces the current paper-based pr
 
 ### 2.4 Operational Assumptions (MVP)
 
-- Technicians have company-issued iPhones on iOS 17+.
+- Technicians initially use shared iPads. iPhone support is future and depends on corporate security approval.
 - Network connectivity is generally available at shift start/end; brief dead zones exist.
 - Photos are taken with the device camera; no external camera integration.
 - Signatures are captured on-device (finger or Apple Pencil).
 - The asset hierarchy is pre-loaded by the administrator before technician use.
-- One technician per report per shift (team reports are multiple separate reports per shift).
-- Shift reports correspond to a single corrective event (6-section report enables multi-shift continuation via Stop Here).
+- Corrective maintenance allows one report per shift per corrective event.
+- Stop Here is an indicator for report/PDF filtering, not a hard section-based state machine.
 - PCON plans are currently managed outside the system; MVP reads plans but does not create them.
 - Components (serialized inventory) are a separate concern from Assets (hierarchical equipment). Components live in slots; Assets are the parent equipment that contains those slots.
-- Corrective reports are divided into 6 sections to support progressive fill across multiple shifts.
+- Corrective reports follow the real corrective format using dynamic blocks, especially in the activities section.
 
 ### 2.5 High-Risk Workflows (MVP)
 
@@ -167,11 +190,11 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-AUTH-01 |
 | **Title** | User logs into the application |
-| **Actor** | Technician, Supervisor, Coordinator |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | User account exists. User has email and password. |
 | **Main flow** | 1. User opens app. 2. App displays login screen. 3. User enters email and password. 4. User taps "Sign In". 5. System validates credentials. 6. System returns JWT access + refresh tokens. 7. App navigates to main tab view. |
 | **Alternate flows** | **Invalid credentials:** Show inline error "Invalid email or password". Allow retry. **Network error:** Show "No network connection. Please try again." alert. **Expired session (on app launch):** Redirect to login silently. |
-| **Acceptance criteria** | Valid credentials → navigates to home. Invalid credentials → error message, stays on login. Network error → user-friendly alert. Token stored securely in Keychain. |
+| **Acceptance criteria** | Valid credentials â†’ navigates to home. Invalid credentials â†’ error message, stays on login. Network error â†’ user-friendly alert. Token stored securely in Keychain. |
 | **Priority** | P0 |
 
 ### US-AUTH-02: Token Refresh
@@ -184,7 +207,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Preconditions** | User has valid refresh token stored. Access token expired. |
 | **Main flow** | 1. App makes API request. 2. Server returns 401. 3. Auth interceptor catches 401. 4. App calls `/auth/refresh` with refresh token. 5. Server returns new access token. 6. Original request retried with new token. |
 | **Alternate flows** | **Refresh token expired:** Clear stored tokens. Navigate to login screen. **Refresh token invalid:** Same as expired. |
-| **Acceptance criteria** | Expired access token → silent refresh → original request succeeds. Expired refresh token → redirect to login. No data loss. |
+| **Acceptance criteria** | Expired access token â†’ silent refresh â†’ original request succeeds. Expired refresh token â†’ redirect to login. No data loss. |
 | **Priority** | P0 |
 
 ### US-ASSET-01: Browse Asset Hierarchy
@@ -193,9 +216,9 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-ASSET-01 |
 | **Title** | User browses asset hierarchy by drill-down |
-| **Actor** | Technician, Supervisor, Coordinator |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | User is authenticated. Asset hierarchy exists. |
-| **Main flow** | 1. User taps "Assets" tab. 2. App displays top-level containers (Trains, Workshops, Warehouses). 3. User taps a container (e.g., a Train). 4. App navigates to child level (Cars). 5. User taps a Car → navigates to subsystems (HVAC, Doors, Brakes). 6. User taps a Subsystem → Components (Cabinet, Rack) → Line Replaceable Units. 7. Breadcrumb visible at all times. 8. User can tap breadcrumb to jump back to any ancestor level. |
+| **Main flow** | 1. User taps "Assets" tab. 2. App displays top-level containers (Trains, Workshops, Warehouses). 3. User taps a container (e.g., a Train). 4. App navigates to child level (Cars). 5. User taps a Car â†’ navigates to subsystems (HVAC, Doors, Brakes). 6. User taps a Subsystem â†’ Components (Cabinet, Rack) â†’ Line Replaceable Units. 7. Breadcrumb visible at all times. 8. User can tap breadcrumb to jump back to any ancestor level. |
 | **Alternate flows** | **Empty level:** Show empty state "No assets at this level". **Deep hierarchy (>5 levels):** Keep navigation smooth with lazy loading per level. |
 | **Acceptance criteria** | Each level loads children asynchronously. Breadcrumb updates with each navigation. Tapping breadcrumb navigates to that level. Back gesture works (swipe). |
 | **Priority** | P0 |
@@ -206,9 +229,9 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-ASSET-02 |
 | **Title** | User searches for an asset by serial number, part number, or name |
-| **Actor** | Technician, Supervisor, Coordinator |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | User is authenticated. Assets exist in the system. |
-| **Main flow** | 1. User taps search bar on Assets tab. 2. Keyboard appears. 3. User types partial serial/name (minimum 3 characters). 4. System debounces 300ms then queries `/assets?q=...`. 5. Results appear in a list below the search bar. 6. Each result shows: name, serial number, breadcrumb path (ancestors), asset type icon. 7. User taps a result → navigates to asset detail. |
+| **Main flow** | 1. User taps search bar on Assets tab. 2. Keyboard appears. 3. User types partial serial/name (minimum 3 characters). 4. System debounces 300ms then queries `/assets?q=...`. 5. Results appear in a list below the search bar. 6. Each result shows: name, serial number, breadcrumb path (ancestors), asset type icon. 7. User taps a result â†’ navigates to asset detail. |
 | **Alternate flows** | **No results:** Show "No assets found matching 'query'" with suggestion to try serial number. **Network error:** Show cached results if available, with "Offline results" badge. |
 | **Acceptance criteria** | Search triggers after 3 chars + 300ms debounce. Results show breadcrumb. Tapping result navigates to detail. Empty state for no results. |
 | **Priority** | P0 |
@@ -219,7 +242,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-ASSET-03 |
 | **Title** | User views detailed information about an asset |
-| **Actor** | Technician, Supervisor, Coordinator |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | User navigated to asset via hierarchy or search. |
 | **Main flow** | 1. App displays asset detail screen. 2. Header shows: asset name, serial number, asset type icon, status badge. 3. Breadcrumb shown below header. 4. Tabs or sections: Info, Children, History. 5. Info: serial, part number, manufacturer, installation date, position, location. 6. Children: list of direct children with drill-down. 7. History: timeline of events, reports, replacements, movements. |
 | **Alternate flows** | **Asset decommissioned:** Show decommissioned status badge in red. **No children:** Hide children section or show "No sub-assemblies". **No history:** Show "No maintenance history for this asset". |
@@ -232,9 +255,9 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-ASSET-04 |
 | **Title** | User views maintenance and movement history of an asset |
-| **Actor** | Technician, Supervisor, Coordinator |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | User is viewing asset detail. Asset has past events or movements. |
-| **Main flow** | 1. User taps "History" section/tab. 2. App shows chronological timeline. 3. Each entry shows: date, event type icon, title, summary. 4. Types: Corrective Event, Preventive Report, Replacement, Move/Reinstall. 5. User taps an entry → navigates to that report/event detail. |
+| **Main flow** | 1. User taps "History" section/tab. 2. App shows chronological timeline. 3. Each entry shows: date, event type icon, title, summary. 4. Types: Corrective Event, Preventive Report, Replacement, Move/Reinstall. 5. User taps an entry â†’ navigates to that report/event detail. |
 | **Alternate flows** | **No history:** Empty state "No recorded history for this asset". |
 | **Acceptance criteria** | History shows in reverse chronological order. Each type has distinct icon/color. Tapping opens detail. Loading state while fetching. |
 | **Priority** | P1 |
@@ -244,25 +267,24 @@ The smallest production-valuable system that replaces the current paper-based pr
 | Field | Value |
 |-------|-------|
 | **ID** | US-COR-01 |
-| **Title** | Supervisor creates a corrective maintenance event |
-| **Actor** | Supervisor |
-| **Preconditions** | Supervisor is authenticated. Affected asset exists. |
-| **Main flow** | 1. Supervisor taps "Corrective" tab. 2. Taps "+" button. 3. Selects affected asset (search + select). 4. Selects subsystem (auto-populated from asset context). 5. Sets severity (low/medium/high/critical). 6. Adds description of the issue. 7. Optionally adds initial photo. 8. Taps "Create Event". 9. System creates event in OPEN state. 10. Supervisor assigns technician(s). 11. Technician receives event in their list. |
-| **Alternate flows** | **Asset not found:** Allow free-text entry for new asset (post-MVP). **Cancel:** Discard draft with confirmation. |
-| **Acceptance criteria** | Event created with OPEN status. Assigned technicians see event immediately. Initial photo attached if provided. |
+| **Title** | Technician or Coordinator creates a corrective maintenance event |
+| **Actor** | Technician, Coordinator |
+| **Preconditions** | User is authenticated. Affected asset exists or can be entered for later reconciliation. |
+| **Main flow** | 1. User taps "Corrective" tab. 2. Taps "+" button. 3. Selects affected asset. 4. Selects subsystem. 5. Sets severity. 6. Adds description. 7. Optionally adds initial photo. 8. Taps "Create Event". 9. System creates event in SCHEDULED/OPEN state. |
+| **Alternate flows** | **Asset not found:** Allow manual reference for later reconciliation. **Cancel:** Discard draft with confirmation. |
+| **Acceptance criteria** | Event is created. Technician/Coordinator can start it. Boss can view it read-only. |
 | **Priority** | P0 |
 
-### US-COR-02: View Open Corrective Events
+### US-COR-02: View Corrective Events
 
 | Field | Value |
 |-------|-------|
 | **ID** | US-COR-02 |
-| **Title** | User views list of open corrective events |
-| **Actor** | Technician, Supervisor |
+| **Title** | User views corrective events |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | User is authenticated. Events exist. |
-| **Main flow** | 1. User taps "Corrective" tab. 2. App displays list of open events. 3. For Technicians: shows only assigned events. 4. For Supervisors: shows all events in their subsystem. 5. Each row shows: event ID, asset name, severity badge, status badge, time since opened, assigned technicians. 6. List sorted by severity (critical first) then by recency. 7. User taps event → navigates to event detail. |
-| **Alternate flows** | **No events:** Empty state "No open corrective events. Great work!" **Filter:** Segmented control for "All / Assigned to Me / Resolved / Closed". |
-| **Acceptance criteria** | List loads with all open events. Correct filtering per role. Tapping navigates to detail. Pull-to-refresh. |
+| **Main flow** | 1. User taps "Corrective" tab. 2. App displays events by status. 3. Technician sees operational events. 4. Coordinator sees events for review/closure. 5. Boss sees read-only events and metrics. 6. User taps event to open detail. |
+| **Acceptance criteria** | List loads with filters by status, asset, severity, date, and user scope. |
 | **Priority** | P0 |
 
 ### US-COR-03: View Corrective Event Detail & Timeline
@@ -270,12 +292,11 @@ The smallest production-valuable system that replaces the current paper-based pr
 | Field | Value |
 |-------|-------|
 | **ID** | US-COR-03 |
-| **Title** | User views corrective event with full timeline |
-| **Actor** | Technician, Supervisor |
-| **Preconditions** | User tapped an event from the list. |
-| **Main flow** | 1. App displays event detail header: status badge, severity, asset link, subsystem. 2. Description of the issue. 3. Timeline below showing chronological entries: Created → Technician Assigned → Maintenance Started → Reports Submitted → Resolved → Closed. 4. Each timeline entry shows date, who, what. 5. Linked reports shown as tappable cards. 6. Action buttons at bottom (context-dependent on status and role). |
-| **Alternate flows** | **Event not found (deleted):** Show error, navigate back. **No timeline yet:** Just show "Created" entry. |
-| **Acceptance criteria** | Timeline shows all status transitions. Reports listed as tappable cards. Action buttons correct per status. Pull-to-refresh. |
+| **Title** | User views corrective event with timeline and report versions |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
+| **Preconditions** | User selected an event. |
+| **Main flow** | 1. App displays event header, status, severity, asset, subsystem, description. 2. Timeline shows Created, Started, Report Versions, Completed, Closed/Reopened. 3. Report versions are tappable. 4. Actions depend on role and status. |
+| **Acceptance criteria** | Timeline shows status transitions, report versions, replacements, and closure/reopen records. Boss sees no edit actions. |
 | **Priority** | P0 |
 
 ### US-COR-04: Start Corrective Maintenance
@@ -284,63 +305,59 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-COR-04 |
 | **Title** | Technician starts working on a corrective event |
-| **Actor** | Technician |
-| **Preconditions** | Event is in OPEN status. Technician is assigned to the event. |
-| **Main flow** | 1. Technician opens event detail. 2. Taps "Start Maintenance" button. 3. System transitions event to IN_PROGRESS. 4. Timestamp recorded for when work began. 5. Button changes to "Resolve". |
-| **Alternate flows** | **Already in progress:** Show "In Progress" state, no action needed. |
-| **Acceptance criteria** | Event status becomes IN_PROGRESS. Timestamp recorded. Button updates. |
+| **Actor** | Technician, Coordinator |
+| **Preconditions** | Event is SCHEDULED/OPEN. |
+| **Main flow** | 1. User opens event detail. 2. Taps "Start Maintenance". 3. System transitions event to IN_PROGRESS. 4. Timestamp is recorded. |
+| **Acceptance criteria** | Event status becomes IN_PROGRESS and is visible to all users. |
 | **Priority** | P0 |
 
-### US-COR-05: Create & Submit Corrective Report
+### US-COR-05: Create/Edit Corrective Report Version
 
 | Field | Value |
 |-------|-------|
 | **ID** | US-COR-05 |
-| **Title** | Technician creates, fills, and submits a corrective shift report |
-| **Actor** | Technician |
-| **Preconditions** | Event is IN_PROGRESS. Technician is assigned. |
-| **Main flow** | 1. Technician taps "Create Report" on event detail. 2. System creates draft report with 6 empty sections: (1) Summary & Fault, (2) Parts & Materials, (3) Labor & Personnel, (4) Tests & Measurements, (5) Documentation & Attachments, (6) Comments. 3. Technician fills sections progressively. 4. Each section can be marked complete independently. 5. For each task (StandardActivity or ReplacementTask): select task type, add description, mark completed. 6. If task is a replacement: scan/select component from inventory, record serial numbers. 7. Adds photos per section (camera or gallery). 8. Adds tool usage (optional). 9. Captures supervisor signature. 10. Captures own signature. 11. Two submit options: "Submit All" or "Stop Here" (submit partial, continue next shift). 12. If Stop Here: technician selects which section to stop at (1-5); sections beyond are disabled. 13. Taps "Submit" → system validates completed sections only. 14. System submits report → status changes to SUBMITTED (or SUBMITTED_PARTIAL if Stop Here). 15. Event timeline updated. |
-| **Alternate flows** | **Stop Here (multi-shift):** Technician stops at section N → report enters SECTIONAL_DRAFT. Next-shift technician resumes report — disabled sections re-enable. **Missing required fields:** Show inline validation errors. Highlight missing fields. **Network error on submit:** Save as submitted-draft, queue for retry. **Session expires:** Authenticate silently, retry. |
-| **Acceptance criteria** | Report created as DRAFT with 6 sections. Sections markable complete individually. Tasks support both StandardActivity and ReplacementTask. Stop Here creates SECTIONAL_DRAFT with disabled sections. Resume re-enables sections. Submission validates only completed sections. Partial submit possible. Submitting locks the report. Event timeline updated. |
+| **Title** | Technician creates or edits a corrective shift report version |
+| **Actor** | Technician, Coordinator |
+| **Preconditions** | Event is IN_PROGRESS or COMPLETED, not CLOSED. |
+| **Main flow** | 1. User taps "Create/Edit Report". 2. System opens a dynamic corrective report based on the real format. 3. User fills event, failure, impact, activities, tests, attachments, conclusions, and comments. 4. User adds activities performed. 5. If activity type is Component Replacement, replacement fields appear inside that activity block. 6. User selects removed asset, installed asset, source, destination, and reason. 7. User captures participant signatures on the shared iPad. 8. User optionally sets Stop Here marker. 9. User finalizes the current report version. 10. System saves the snapshot, generates PDF, and updates timeline. |
+| **Alternate flows** | **Stop Here:** Marker controls PDF visibility. **Network error:** Save draft locally and queue upload. **Closed event:** Editing blocked until Coordinator reopens. |
+| **Acceptance criteria** | Report uses dynamic blocks. Replacement fields appear only for replacement activities. Finalizing creates a new version and PDF. Previous versions remain visible. |
 | **Priority** | P0 |
 
-### US-COR-06: Resolve and Close Event
+### US-COR-06: Complete and Close Corrective Event
 
 | Field | Value |
 |-------|-------|
 | **ID** | US-COR-06 |
-| **Title** | Technician resolves and supervisor closes a corrective event |
-| **Actor** | Technician (resolve), Supervisor (close) |
-| **Preconditions** | Event is IN_PROGRESS. At least one report has been submitted. |
-| **Main flow** | 1. Technician taps "Resolve" button. 2. Adds resolution notes (optional). 3. System transitions event to RESOLVED. 4. Supervisor reviews event. 5. Supervisor taps "Close Event". 6. System transitions event to CLOSED. |
-| **Alternate flows** | **Supervisor rejects resolution:** Reopen event with rejection notes. Return to IN_PROGRESS. **Reopen after close:** Supervisor taps "Reopen" → returns to IN_PROGRESS. |
-| **Acceptance criteria** | Resolve sets RESOLVED status. Close sets CLOSED status. Reopen returns to IN_PROGRESS. Rejection includes notes. Event timeline updated for each transition. |
+| **Title** | Technician completes and Coordinator closes a corrective event |
+| **Actor** | Technician (complete), Coordinator (close/reopen) |
+| **Preconditions** | Event is IN_PROGRESS. At least one report version exists. |
+| **Main flow** | 1. Technician taps "Complete/Resolve". 2. Adds notes if needed. 3. System transitions event to COMPLETED. 4. Coordinator reviews event. 5. Coordinator taps "Close Event". 6. System transitions event to CLOSED. |
+| **Alternate flows** | **Correction needed:** Coordinator reopens with notes and event returns to IN_PROGRESS. |
+| **Acceptance criteria** | Completed events remain editable; closed events are read-only until reopened by Coordinator/Admin. |
 | **Priority** | P0 |
 
-### US-COR-07: Stop Here on Corrective Report
+### US-COR-07: Mark Stop Here on Corrective Report
 
 | Field | Value |
 |-------|-------|
 | **ID** | US-COR-07 |
-| **Title** | Technician stops a report mid-way for next-shift continuation |
+| **Title** | Technician marks Stop Here for report/PDF filtering |
 | **Actor** | Technician |
-| **Preconditions** | Report is DRAFT. At least one section is complete. |
-| **Main flow** | 1. Technician taps "Stop Here" button during report editing. 2. System shows section picker (1-5). 3. Technician selects the section to stop at (e.g., section 3 means sections 1-2 complete, section 3 in progress, sections 4-6 disabled). 4. Technician adds optional handover note. 5. System transitions report to SECTIONAL_DRAFT. 6. Sections > stopSectionIndex become disabled (grayed out in UI). 7. Next-shift notification triggered (v2). |
-| **Alternate flows** | **No sections complete:** Button disabled — must complete at least section 1 before Stop Here. |
-| **Acceptance criteria** | Report transitions to SECTIONAL_DRAFT. Sections beyond stop index disabled. Handover note captured. Report remains editable for sections 1..stopSectionIndex. |
+| **Preconditions** | Report is editable and parent event is not CLOSED. |
+| **Main flow** | 1. User taps "Stop Here". 2. Chooses a block/point in the report. 3. Adds optional handover note. 4. System stores marker. 5. Generated PDF hides later blank fields after marker. |
+| **Acceptance criteria** | Stop Here is a marker, not a locked partial-submission state. Later shifts can continue and correct previous fields while event is editable. |
 
-### US-COR-08: Resume Corrective Report (Next Shift)
+### US-COR-08: Continue Corrective Documentation Next Shift
 
 | Field | Value |
 |-------|-------|
 | **ID** | US-COR-08 |
-| **Title** | Technician resumes a SECTIONAL_DRAFT report started by previous shift |
-| **Actor** | Technician (next shift) |
-| **Preconditions** | Report has SECTIONAL_DRAFT status. Technician is assigned to the same event. |
-| **Main flow** | 1. Technician opens event detail. 2. Report shows "Resume" badge. 3. Technician taps resume. 4. System re-enables all sections > stopSectionIndex. 5. Sections 1..stopSectionIndex-1 are read-only (already submitted). 6. Section stopSectionIndex becomes editable. 7. Report transitions back to DRAFT. 8. New shift start timestamp recorded. |
-| **Alternate flows** | **Different technician resumes:** Allowed — any assigned technician can resume. Report captures both shifts' technician IDs. |
-| **Acceptance criteria** | Resuming re-enables sections. Previously completed sections are read-only. Report transitions to DRAFT. Shift timestamp updated. |
-
+| **Title** | Technician continues corrective documentation in the next shift |
+| **Actor** | Technician |
+| **Preconditions** | Corrective event is not CLOSED. Previous shift may contain Stop Here marker. |
+| **Main flow** | 1. Technician opens event detail. 2. Reviews previous report versions and marker. 3. Creates/edits the report for current shift. 4. Continues documentation and may correct previous fields if needed. 5. Finalizes a new report version. |
+| **Acceptance criteria** | Next shift can continue after Stop Here without unlocking disabled sections, because Stop Here is only a marker. |
 ### US-COMP-01: Register New Component
 
 | Field | Value |
@@ -349,7 +366,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Title** | Warehouse operator registers a new component in inventory |
 | **Actor** | Warehouse / Inventory Operator |
 | **Preconditions** | ComponentType exists in catalog. |
-| **Main flow** | 1. Operator navigates to Components tab. 2. Taps "Register New". 3. Selects component type from catalog (filtered by subsystem). 4. Enters serial number (scanned via camera or typed). 5. Optionally enters: manufacturing date, batch number, initial warehouse location, notes. 6. Taps "Register". 7. System creates Component with status REGISTERED → EN_STOCK. 8. Component appears in inventory list. |
+| **Main flow** | 1. Operator navigates to Components tab. 2. Taps "Register New". 3. Selects component type from catalog (filtered by subsystem). 4. Enters serial number (scanned via camera or typed). 5. Optionally enters: manufacturing date, batch number, initial warehouse location, notes. 6. Taps "Register". 7. System creates Component with status REGISTERED â†’ EN_STOCK. 8. Component appears in inventory list. |
 | **Alternate flows** | **Duplicate serial number:** Show error "Serial number already registered for this component type". **Unknown component type:** Operator can request new type creation (admin). |
 | **Acceptance criteria** | Component registered with unique serial. Status transitions to EN_STOCK. Movement history created with initial location. |
 
@@ -373,9 +390,9 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Title** | Technician removes a component from its slot (via ReplacementTask) |
 | **Actor** | Technician |
 | **Preconditions** | Corrective event is IN_PROGRESS. ReplacementTask is being performed. Component is INSTALLED in the slot. |
-| **Main flow** | 1. During corrective report creation, technician selects "Remove Component". 2. System shows currently installed component in the slot. 3. Technician confirms removal. 4. Component status changes to REMOVED (or EN_REPARACIÓN if sent for repair). 5. Slot becomes empty. 6. ComponentMovement recorded (REMOVE). 7. Asset lifecycle updated (AssetReplacement record created). |
-| **Alternate flows** | **Send to repair:** Select destination "Repair" — status becomes EN_REPARACIÓN. **Mark lost:** Select "Lost" — status becomes PERDIDO. |
-| **Acceptance criteria** | Component transitions from INSTALLED to REMOVED/EN_REPARACIÓN/PERDIDO. Slot becomes empty. Movement history recorded. Asset replacement record created. |
+| **Main flow** | 1. During corrective report creation, technician selects "Remove Component". 2. System shows currently installed component in the slot. 3. Technician confirms removal. 4. Component status changes to REMOVED (or EN_REPARACIÃ“N if sent for repair). 5. Slot becomes empty. 6. ComponentMovement recorded (REMOVE). 7. Asset lifecycle updated (AssetReplacement record created). |
+| **Alternate flows** | **Send to repair:** Select destination "Repair" â€” status becomes EN_REPARACIÃ“N. **Mark lost:** Select "Lost" â€” status becomes PERDIDO. |
+| **Acceptance criteria** | Component transitions from INSTALLED to REMOVED/EN_REPARACIÃ“N/PERDIDO. Slot becomes empty. Movement history recorded. Asset replacement record created. |
 
 ### US-COMP-04: View Component Movement History
 
@@ -383,7 +400,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-COMP-04 |
 | **Title** | User views full movement history of a component |
-| **Actor** | Technician, Supervisor, Warehouse Operator |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | Component exists. Component has at least one movement. |
 | **Main flow** | 1. User navigates to component detail. 2. "Movement History" section shows reverse-chronological timeline. 3. Each entry shows: date, movement type (INSTALL, REMOVE, WAREHOUSE_TRANSFER, REPAIR, SCRAP), from/to location, related replacement task or corrective event. 4. User can tap an entry for more detail. |
 | **Acceptance criteria** | All movements displayed chronologically. Each movement includes location, type, and related context. |
@@ -396,7 +413,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Title** | Technician views assigned preventive maintenance schedule |
 | **Actor** | Technician |
 | **Preconditions** | Preventive schedule exists. Technician is assigned tasks. |
-| **Main flow** | 1. Technician taps "Preventive" tab. 2. App displays list of scheduled activities. 3. Each row shows: title, due date, asset, priority, status badge. 4. List grouped by: Overdue (red), Today, This Week, This Month. 5. User taps an activity → navigates to schedule detail with template steps. |
+| **Main flow** | 1. Technician taps "Preventive" tab. 2. App displays list of scheduled activities. 3. Each row shows: title, due date, asset, priority, status badge. 4. List grouped by: Overdue (red), Today, This Week, This Month. 5. User taps an activity â†’ navigates to schedule detail with template steps. |
 | **Alternate flows** | **No schedules:** Empty state "No preventive tasks scheduled". **Overdue tasks:** Shown at top with red badge. |
 | **Acceptance criteria** | Schedule loads with grouping. Overdue tasks prioritized. Tapping navigates to detail. |
 | **Priority** | P0 |
@@ -409,7 +426,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Title** | Technician executes a preventive maintenance task and submits report |
 | **Actor** | Technician |
 | **Preconditions** | Preventive schedule exists. Technician has been assigned or is acting ad-hoc. |
-| **Main flow** | 1. Technician opens schedule detail. 2. Views checklist of tasks/steps from template. 3. Performs each step. 4. Marks each step as completed or N/A. 5. Adds optional notes per step. 6. Captures photos. 7. Records replaced consumables. 8. Captures supervisor signature. 9. Captures own signature. 10. Taps "Submit Report". 11. System validates and submits report. 12. Schedule status updated. |
+| **Main flow** | 1. Technician opens schedule detail. 2. Views checklist of tasks/steps from template. 3. Performs each step. 4. Marks each step as completed or N/A. 5. Adds optional notes per step. 6. Captures photos. 7. Records replaced consumables. 8. Captures signatures from all participating workers. 10. Taps "Submit Report". 11. System validates and submits report. 12. Schedule status updated. |
 | **Alternate flows** | **Skipped step (N/A):** Marked with N/A status, reason required. **Deferred task:** Option to defer to next cycle with notes. |
 | **Acceptance criteria** | Template steps shown as checklist. Each step completable. Photos attachable per step. Signatures required. Submission locks the report. |
 | **Priority** | P0 |
@@ -433,7 +450,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-SIG-01 |
 | **Title** | User captures their signature on the report using PencilKit |
-| **Actor** | Technician, Supervisor |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | Report is in DRAFT state. User is on the signature step. |
 | **Main flow** | 1. User taps "Add Signature". 2. Full-screen PencilKit canvas opens. 3. "Sign here" guide line displayed. 4. User signs with finger or Apple Pencil. 5. User taps "Confirm". 6. Canvas rendered as PNG image. 7. Signature uploaded as attachment. 8. Participant record created linking user + report + signature. 9. Signature thumbnail shown in report. |
 | **Alternate flows** | **Clear signature:** User taps "Clear" to reset canvas. **Re-sign:** User can delete existing signature and re-sign. |
@@ -449,8 +466,8 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Actor** | Technician |
 | **Preconditions** | Report is in DRAFT state. Both old and new assets exist in the system. |
 | **Main flow** | 1. User taps "Record Replacement" on report form. 2. Selects old asset (removed/replaced component). 3. Selects new asset (installed component). 4. Selects replacement reason (failed, worn, upgrade). 5. Adds notes (optional). 6. Taps "Save". 7. Replacement record added to report. 8. Old asset's status updated to REMOVED. 9. New asset linked to old asset's position via replacement chain. |
-| **Alternate flows** | **New asset from warehouse:** Select "From Warehouse" → show warehouse stock list. **New asset not in system:** Free-text entry (post-MVP). **Wrong asset selected:** Allow delete and reselect before submission. |
-| **Acceptance criteria** | Replacement record created. Old asset status = REMOVED. New asset inherits position. Replacement chain documented (old → new). Visible in asset history. |
+| **Alternate flows** | **New asset from warehouse:** Select "From Warehouse" â†’ show warehouse stock list. **New asset not in system:** Free-text entry (post-MVP). **Wrong asset selected:** Allow delete and reselect before submission. |
+| **Acceptance criteria** | Replacement record created. Old asset status = REMOVED. New asset inherits position. Replacement chain documented (old â†’ new). Visible in asset history. |
 | **Priority** | P1 |
 
 ### US-ASSIGN-01: Assign Technician to Event
@@ -458,11 +475,11 @@ The smallest production-valuable system that replaces the current paper-based pr
 | Field | Value |
 |-------|-------|
 | **ID** | US-ASSIGN-01 |
-| **Title** | Supervisor assigns one or more technicians to a corrective event |
-| **Actor** | Supervisor |
+| **Title** | Coordinator assigns one or more technicians to a corrective event |
+| **Actor** | Coordinator |
 | **Preconditions** | Event exists in OPEN status. Technicians exist in the system. |
-| **Main flow** | 1. Supervisor opens event detail. 2. Taps "Assign Technicians". 3. Shows list of available technicians. 4. Supervisor selects one or more. 5. Taps "Confirm". 6. Technicians receive event in their corrective list. |
-| **Alternate flows** | **Reassign:** Supervisor can remove and reassign technicians. |
+| **Main flow** | 1. Coordinator opens event detail. 2. Taps "Assign Technicians". 3. Shows list of available technicians. 4. Coordinator selects one or more. 5. Taps "Confirm". 6. Technicians receive event in their corrective list. |
+| **Alternate flows** | **Reassign:** Coordinator can remove and reassign technicians. |
 | **Acceptance criteria** | Technician list loads. Multi-select works. Technicians see event immediately after assignment. |
 | **Priority** | P1 |
 
@@ -472,9 +489,9 @@ The smallest production-valuable system that replaces the current paper-based pr
 |-------|-------|
 | **ID** | US-HIST-01 |
 | **Title** | User views complete maintenance history for an asset |
-| **Actor** | Technician, Supervisor, Coordinator |
+| **Actor** | Technician, Coordinator, Boss, Administrator |
 | **Preconditions** | Asset exists. Previous events/reports exist. |
-| **Main flow** | 1. User navigates to asset detail. 2. Taps "History" section. 3. App shows chronological list of all events, reports, replacements, movements. 4. Each entry tappable → navigates to that entry's detail. 5. Filters available: "All / Corrective / Preventive / Replacements / Moves". |
+| **Main flow** | 1. User navigates to asset detail. 2. Taps "History" section. 3. App shows chronological list of all events, reports, replacements, movements. 4. Each entry tappable â†’ navigates to that entry's detail. 5. Filters available: "All / Corrective / Preventive / Replacements / Moves". |
 | **Alternate flows** | **No history:** Empty state with CTA to "Create first event". |
 | **Acceptance criteria** | History entries chronologically sorted. Filters work. Each entry navigates to detail. Loading state while fetching. |
 | **Priority** | P1 |
@@ -487,39 +504,39 @@ The smallest production-valuable system that replaces the current paper-based pr
 
 ```
 [App Launch]
-    │
-    ├── [Has valid stored token?] ──Yes──→ [Navigate to Main Tab View]
-    │
-    └── No
-         │
-         ▼
+    â”‚
+    â”œâ”€â”€ [Has valid stored token?] â”€â”€Yesâ”€â”€â†’ [Navigate to Main Tab View]
+    â”‚
+    â””â”€â”€ No
+         â”‚
+         â–¼
     [Login Screen]
-         │
-         ├── [Enter email + password]
-         │       │
-         │       ▼
-         │   [Tap "Sign In"]
-         │       │
-         │       ▼
-         │   [Validate locally] ──Invalid──→ [Show inline error "Enter valid email"]
-         │       │
-         │       ▼
-         │   [POST /api/v1/auth/login]
-         │       │
-         │       ├── [200 OK] ──→ [Store tokens in Keychain]
-         │       │                     │
-         │       │                     ▼
-         │       │                [Navigate to Main Tab View]
-         │       │
-         │       ├── [401] ──→ [Show "Invalid email or password"]
-         │       │
-         │       └── [Network error] ──→ [Show "No network connection" alert]
-         │                                     │
-         │                                     └── [Retry?] ──→ [Return to login]
-         │
-         └── [Version check] (optional background check)
-                 │
-                 └── [Update available] ──→ [Show "Update required" modal]
+         â”‚
+         â”œâ”€â”€ [Enter email + password]
+         â”‚       â”‚
+         â”‚       â–¼
+         â”‚   [Tap "Sign In"]
+         â”‚       â”‚
+         â”‚       â–¼
+         â”‚   [Validate locally] â”€â”€Invalidâ”€â”€â†’ [Show inline error "Enter valid email"]
+         â”‚       â”‚
+         â”‚       â–¼
+         â”‚   [POST /api/v1/auth/login]
+         â”‚       â”‚
+         â”‚       â”œâ”€â”€ [200 OK] â”€â”€â†’ [Store tokens in Keychain]
+         â”‚       â”‚                     â”‚
+         â”‚       â”‚                     â–¼
+         â”‚       â”‚                [Navigate to Main Tab View]
+         â”‚       â”‚
+         â”‚       â”œâ”€â”€ [401] â”€â”€â†’ [Show "Invalid email or password"]
+         â”‚       â”‚
+         â”‚       â””â”€â”€ [Network error] â”€â”€â†’ [Show "No network connection" alert]
+         â”‚                                     â”‚
+         â”‚                                     â””â”€â”€ [Retry?] â”€â”€â†’ [Return to login]
+         â”‚
+         â””â”€â”€ [Version check] (optional background check)
+                 â”‚
+                 â””â”€â”€ [Update available] â”€â”€â†’ [Show "Update required" modal]
 ```
 
 **Validation points:**
@@ -537,33 +554,33 @@ The smallest production-valuable system that replaces the current paper-based pr
 
 ```
 [Assets Tab]
-    │
-    ├── [Hierarchy browse] (see 4.3)
-    │
-    └── [Tap Search Bar]
-            │
-            ▼
+    â”‚
+    â”œâ”€â”€ [Hierarchy browse] (see 4.3)
+    â”‚
+    â””â”€â”€ [Tap Search Bar]
+            â”‚
+            â–¼
     [Search becomes active]
-            │
-            ├── [Type 3+ characters]
-            │       │
-            │       ▼
-            │   [300ms debounce]
-            │       │
-            │       ▼
-            │   [GET /api/v1/assets?q={query}]
-            │       │
-            │       ├── [Results found] ──→ [Show results list]
-            │       │                           │
-            │       │                           ├── [Tap result] ──→ [Asset Detail]
-            │       │                           │
-            │       │                           └── [Scroll results]
-            │       │
-            │       └── [No results] ──→ [Show empty state "No assets found"]
-            │
-            ├── [Type <3 chars] ──→ [Show recent searches or suggestions]
-            │
-            └── [Tap Cancel / Clear] ──→ [Dismiss search]
+            â”‚
+            â”œâ”€â”€ [Type 3+ characters]
+            â”‚       â”‚
+            â”‚       â–¼
+            â”‚   [300ms debounce]
+            â”‚       â”‚
+            â”‚       â–¼
+            â”‚   [GET /api/v1/assets?q={query}]
+            â”‚       â”‚
+            â”‚       â”œâ”€â”€ [Results found] â”€â”€â†’ [Show results list]
+            â”‚       â”‚                           â”‚
+            â”‚       â”‚                           â”œâ”€â”€ [Tap result] â”€â”€â†’ [Asset Detail]
+            â”‚       â”‚                           â”‚
+            â”‚       â”‚                           â””â”€â”€ [Scroll results]
+            â”‚       â”‚
+            â”‚       â””â”€â”€ [No results] â”€â”€â†’ [Show empty state "No assets found"]
+            â”‚
+            â”œâ”€â”€ [Type <3 chars] â”€â”€â†’ [Show recent searches or suggestions]
+            â”‚
+            â””â”€â”€ [Tap Cancel / Clear] â”€â”€â†’ [Dismiss search]
 ```
 
 **Optimistic UI:**
@@ -577,24 +594,24 @@ The smallest production-valuable system that replaces the current paper-based pr
 ### 4.3 Hierarchy Drill-Down Flow
 
 ```
-[Assets Tab → Top-Level]
-    │
-    ├── [Pull-to-refresh] ──→ [Fetch children for current level]
-    │
-    ├── [Tap disclosure chevron or row]
-    │       │
-    │       ▼
-    │   [GET /api/v1/assets/{id}/children?page=1&per_page=50]
-    │       │
-    │       ├── [Has children] ──→ [Push next level onto navigation stack]
-    │       │                           │
-    │       │                           ├── [Tap child] ──→ Continue drill-down
-    │       │                           │   ...
-    │       │                           └── [Tap leaf asset (LRU)] ──→ Asset Detail
-    │       │
-    │       └── [No children / leaf] ──→ [Navigate to Asset Detail]
-    │
-    └── [Long press row] ──→ [Context menu: View Detail, Copy Serial]
+[Assets Tab â†’ Top-Level]
+    â”‚
+    â”œâ”€â”€ [Pull-to-refresh] â”€â”€â†’ [Fetch children for current level]
+    â”‚
+    â”œâ”€â”€ [Tap disclosure chevron or row]
+    â”‚       â”‚
+    â”‚       â–¼
+    â”‚   [GET /api/v1/assets/{id}/children?page=1&per_page=50]
+    â”‚       â”‚
+    â”‚       â”œâ”€â”€ [Has children] â”€â”€â†’ [Push next level onto navigation stack]
+    â”‚       â”‚                           â”‚
+    â”‚       â”‚                           â”œâ”€â”€ [Tap child] â”€â”€â†’ Continue drill-down
+    â”‚       â”‚                           â”‚   ...
+    â”‚       â”‚                           â””â”€â”€ [Tap leaf asset (LRU)] â”€â”€â†’ Asset Detail
+    â”‚       â”‚
+    â”‚       â””â”€â”€ [No children / leaf] â”€â”€â†’ [Navigate to Asset Detail]
+    â”‚
+    â””â”€â”€ [Long press row] â”€â”€â†’ [Context menu: View Detail, Copy Serial]
 ```
 
 **Navigation transitions:**
@@ -610,61 +627,61 @@ The smallest production-valuable system that replaces the current paper-based pr
 ### 4.4 Corrective Event Reporting Flow
 
 ```
-[Corrective Tab → Event List]
-    │
-    ├── [Tap event] ──→ [Event Detail]
-    │                       │
-    │                       ├── [Status: OPEN]
-    │                       │       │
-    │                       │       ├── [Tap "Start Maintenance"] ──→ [Status: IN_PROGRESS]
-    │                       │       │                                       │
-    │                       │       │                                       ▼
-    │                       │       │                                  [Button → "Resolve"]
-    │                       │       │
-    │                       │       └── [Tap "Create Report"]
-    │                       │               │
-    │                       │               ▼
-    │                       │          [Report Form (DRAFT)]
-    │                       │               │
-    │                       │               ├── [Fill work description] ──→ Auto-save every 30s
-    │                       │               ├── [Add tasks] ──→ Select task type, add notes
-    │                       │               ├── [Add photos] ──→ Camera / Gallery → Upload
-    │                       │               ├── [Record replacements] ──→ Select old+new asset
-    │                       │               ├── [Add supervisor signature] ──→ PencilKit
-    │                       │               ├── [Add own signature] ──→ PencilKit
-    │                       │               │
-    │                       │               └── [Tap "Submit"]
-    │                       │                       │
-    │                       │                       ├── [Validation OK] ──→ [POST submit]
-    │                       │                       │                            │
-    │                       │                       │                            ▼
-    │                       │                       │                       [Status: SUBMITTED]
-    │                       │                       │                            │
-    │                       │                       │                            ▼
-    │                       │                       │                 [Event Timeline Updated]
-    │                       │                       │
-    │                       │                       └── [Validation fail] ──→ [Highlight errors]
-    │                       │
-    │                       ├── [Status: IN_PROGRESS]
-    │                       │       │
-    │                       │       ├── [Tap "Resolve"] ──→ [Add notes] ──→ [Status: RESOLVED]
-    │                       │       │
-    │                       │       └── [View reports] ──→ [List of submitted reports]
-    │                       │
-    │                       └── [Status: RESOLVED]
-    │                               │
-    │                               ├── [Supervisor: "Close Event"] ──→ [Status: CLOSED]
-    │                               └── [Supervisor: "Reopen"] ──→ [Status: IN_PROGRESS]
-    │
-    └── [Tap "+" (Supervisor)] ──→ [Create Event Form]
-                                        │
-                                        ├── [Select asset] ──→ Search/select asset
-                                        ├── [Set severity]
-                                        ├── [Add description]
-                                        ├── [Add initial photo (optional)]
-                                        └── [Tap "Create"] ──→ [Event created (OPEN)]
-                                              │
-                                              └── [Assign technicians] ──→ [Select from list]
+[Corrective Tab â†’ Event List]
+    â”‚
+    â”œâ”€â”€ [Tap event] â”€â”€â†’ [Event Detail]
+    â”‚                       â”‚
+    â”‚                       â”œâ”€â”€ [Status: OPEN]
+    â”‚                       â”‚       â”‚
+    â”‚                       â”‚       â”œâ”€â”€ [Tap "Start Maintenance"] â”€â”€â†’ [Status: IN_PROGRESS]
+    â”‚                       â”‚       â”‚                                       â”‚
+    â”‚                       â”‚       â”‚                                       â–¼
+    â”‚                       â”‚       â”‚                                  [Button â†’ "Resolve"]
+    â”‚                       â”‚       â”‚
+    â”‚                       â”‚       â””â”€â”€ [Tap "Create Report"]
+    â”‚                       â”‚               â”‚
+    â”‚                       â”‚               â–¼
+    â”‚                       â”‚          [Report Form (DRAFT)]
+    â”‚                       â”‚               â”‚
+    â”‚                       â”‚               â”œâ”€â”€ [Fill work description] â”€â”€â†’ Auto-save every 30s
+    â”‚                       â”‚               â”œâ”€â”€ [Add tasks] â”€â”€â†’ Select task type, add notes
+    â”‚                       â”‚               â”œâ”€â”€ [Add photos] â”€â”€â†’ Camera / Gallery â†’ Upload
+    â”‚                       â”‚               â”œâ”€â”€ [Record replacements] â”€â”€â†’ Select old+new asset
+    â”‚                       â”‚               â”œâ”€â”€ [Add participant signatures] â”€â”€â†’ PencilKit
+    â”‚                       â”‚               â”œâ”€â”€ [Add own signature] â”€â”€â†’ PencilKit
+    â”‚                       â”‚               â”‚
+    â”‚                       â”‚               â””â”€â”€ [Tap "Submit"]
+    â”‚                       â”‚                       â”‚
+    â”‚                       â”‚                       â”œâ”€â”€ [Validation OK] â”€â”€â†’ [POST submit]
+    â”‚                       â”‚                       â”‚                            â”‚
+    â”‚                       â”‚                       â”‚                            â–¼
+    â”‚                       â”‚                       â”‚                       [Status: SUBMITTED]
+    â”‚                       â”‚                       â”‚                            â”‚
+    â”‚                       â”‚                       â”‚                            â–¼
+    â”‚                       â”‚                       â”‚                 [Event Timeline Updated]
+    â”‚                       â”‚                       â”‚
+    â”‚                       â”‚                       â””â”€â”€ [Validation fail] â”€â”€â†’ [Highlight errors]
+    â”‚                       â”‚
+    â”‚                       â”œâ”€â”€ [Status: IN_PROGRESS]
+    â”‚                       â”‚       â”‚
+    â”‚                       â”‚       â”œâ”€â”€ [Tap "Resolve"] â”€â”€â†’ [Add notes] â”€â”€â†’ [Status: RESOLVED]
+    â”‚                       â”‚       â”‚
+    â”‚                       â”‚       â””â”€â”€ [View reports] â”€â”€â†’ [List of submitted reports]
+    â”‚                       â”‚
+    â”‚                       â””â”€â”€ [Status: RESOLVED]
+    â”‚                               â”‚
+    â”‚                               â”œâ”€â”€ [Coordinator: "Close Event"] â”€â”€â†’ [Status: CLOSED]
+    â”‚                               â””â”€â”€ [Coordinator: "Reopen"] â”€â”€â†’ [Status: IN_PROGRESS]
+    â”‚
+    â””â”€â”€ [Tap "+" (Technician/Coordinator)] â”€â”€â†’ [Create Event Form]
+                                        â”‚
+                                        â”œâ”€â”€ [Select asset] â”€â”€â†’ Search/select asset
+                                        â”œâ”€â”€ [Set severity]
+                                        â”œâ”€â”€ [Add description]
+                                        â”œâ”€â”€ [Add initial photo (optional)]
+                                        â””â”€â”€ [Tap "Create"] â”€â”€â†’ [Event created (OPEN)]
+                                              â”‚
+                                              â””â”€â”€ [Assign technicians] â”€â”€â†’ [Select from list]
 ```
 
 **Optimistic UI:**
@@ -688,102 +705,102 @@ The smallest production-valuable system that replaces the current paper-based pr
 ### 4.5 Preventive Maintenance Execution Flow
 
 ```
-[Preventive Tab → Schedule List]
-    │
-    ├── [Tap scheduled activity]
-    │       │
-    │       ▼
-    │   [Schedule Detail → Template Steps]
-    │       │
-    │       ├── [Tap "Execute"]
-    │       │       │
-    │       │       ▼
-    │       │   [Preventive Report Form (DRAFT)]
-    │       │       │
-    │       │       ├── [Step 1] ──→ Check completed / N/A / Failed
-    │       │       │   ├── [Completed] → Add notes (optional)
-    │       │       │   ├── [N/A] → Add reason
-    │       │       │   └── [Failed] → Add notes → Creates corrective event?
-    │       │       ├── [Step 2] ──→ Same
-    │       │       ├── ...
-    │       │       ├── [Add photos per step or overall]
-    │       │       ├── [Add supervisor signature]
-    │       │       ├── [Add own signature]
-    │       │       └── [Submit]
-    │       │
-    │       └── [Cancel] ──→ [Confirm discard] ──→ Return to list
-    │
-    └── [Overdue section at top] ──→ Tap to prioritize
+[Preventive Tab â†’ Schedule List]
+    â”‚
+    â”œâ”€â”€ [Tap scheduled activity]
+    â”‚       â”‚
+    â”‚       â–¼
+    â”‚   [Schedule Detail â†’ Template Steps]
+    â”‚       â”‚
+    â”‚       â”œâ”€â”€ [Tap "Execute"]
+    â”‚       â”‚       â”‚
+    â”‚       â”‚       â–¼
+    â”‚       â”‚   [Preventive Report Form (DRAFT)]
+    â”‚       â”‚       â”‚
+    â”‚       â”‚       â”œâ”€â”€ [Step 1] â”€â”€â†’ Check completed / N/A / Failed
+    â”‚       â”‚       â”‚   â”œâ”€â”€ [Completed] â†’ Add notes (optional)
+    â”‚       â”‚       â”‚   â”œâ”€â”€ [N/A] â†’ Add reason
+    â”‚       â”‚       â”‚   â””â”€â”€ [Failed] â†’ Add notes â†’ Creates corrective event?
+    â”‚       â”‚       â”œâ”€â”€ [Step 2] â”€â”€â†’ Same
+    â”‚       â”‚       â”œâ”€â”€ ...
+    â”‚       â”‚       â”œâ”€â”€ [Add photos per step or overall]
+    â”‚       â”‚       â”œâ”€â”€ [Add participant signatures]
+    â”‚       â”‚       â”œâ”€â”€ [Add own signature]
+    â”‚       â”‚       â””â”€â”€ [Submit]
+    â”‚       â”‚
+    â”‚       â””â”€â”€ [Cancel] â”€â”€â†’ [Confirm discard] â”€â”€â†’ Return to list
+    â”‚
+    â””â”€â”€ [Overdue section at top] â”€â”€â†’ Tap to prioritize
 ```
 
 ### 4.6 Replacement Workflow
 
 ```
-[Report Form → "Record Replacement"]
-    │
-    ▼
+[Report Form â†’ "Record Replacement"]
+    â”‚
+    â–¼
 [Step 1: Select Old Asset]
-    │
-    ├── [Current asset (auto-selected if context known)]
-    └── [Search/select different asset]
-    │
-    ▼
+    â”‚
+    â”œâ”€â”€ [Current asset (auto-selected if context known)]
+    â””â”€â”€ [Search/select different asset]
+    â”‚
+    â–¼
 [Step 2: Select New Asset]
-    │
-    ├── [Search asset hierarchy]
-    ├── [Browse warehouse stock]
-    │       │
-    │       └── [Select from stock list → marks as issued]
-    └── [Enter serial manually (future)]
-    │
-    ▼
+    â”‚
+    â”œâ”€â”€ [Search asset hierarchy]
+    â”œâ”€â”€ [Browse warehouse stock]
+    â”‚       â”‚
+    â”‚       â””â”€â”€ [Select from stock list â†’ marks as issued]
+    â””â”€â”€ [Enter serial manually (future)]
+    â”‚
+    â–¼
 [Step 3: Select Reason]
-    │
-    ├── Failed
-    ├── Worn / End of Life
-    ├── Upgrade
-    └── Other (free text)
-    │
-    ▼
+    â”‚
+    â”œâ”€â”€ Failed
+    â”œâ”€â”€ Worn / End of Life
+    â”œâ”€â”€ Upgrade
+    â””â”€â”€ Other (free text)
+    â”‚
+    â–¼
 [Step 4: Add Notes (optional)]
-    │
-    ▼
+    â”‚
+    â–¼
 [Save]
-    │
-    ├── [Replacement added to report]
-    ├── [Old asset: status → REMOVED]
-    ├── [New asset: linked to position]
-    └── [Both updated in asset history]
+    â”‚
+    â”œâ”€â”€ [Replacement added to report]
+    â”œâ”€â”€ [Old asset: status â†’ REMOVED]
+    â”œâ”€â”€ [New asset: linked to position]
+    â””â”€â”€ [Both updated in asset history]
 ```
 
 ### 4.7 Attachment Upload Flow
 
 ```
-[Report Form → "Add Photo"]
-    │
-    ├── [Action Sheet]
-    │   ├── [📷 Take Photo] ──→ [Camera opens (AVCaptureSession)]
-    │   │                           │
-    │   │                           └── [Photo captured] ──→ [Thumbnail in grid]
-    │   │                                                            │
-    │   │                                                   [Upload in background]
-    │   │                                                            │
-    │   │                                                   ├── [Success] ──→ [Green check badge]
-    │   │                                                   └── [Failure] ──→ [Red error badge]
-    │   │                                                                         │
-    │   │                                                                   [Tap to retry]
-    │   │
-    │   └── [🖼 Choose from Library] ──→ [PhotosPicker opens]
-    │                                       │
-    │                                       └── [Select (multi)] ──→ [Thumbnails in grid]
-    │                                                                        │
-    │                                                               [Upload batch]
-    │
-    └── [Tap existing thumbnail]
-            │
-            ├── [Full screen preview]
-            ├── [Share]
-            └── [Delete (with confirmation)]
+[Report Form â†’ "Add Photo"]
+    â”‚
+    â”œâ”€â”€ [Action Sheet]
+    â”‚   â”œâ”€â”€ [ðŸ“· Take Photo] â”€â”€â†’ [Camera opens (AVCaptureSession)]
+    â”‚   â”‚                           â”‚
+    â”‚   â”‚                           â””â”€â”€ [Photo captured] â”€â”€â†’ [Thumbnail in grid]
+    â”‚   â”‚                                                            â”‚
+    â”‚   â”‚                                                   [Upload in background]
+    â”‚   â”‚                                                            â”‚
+    â”‚   â”‚                                                   â”œâ”€â”€ [Success] â”€â”€â†’ [Green check badge]
+    â”‚   â”‚                                                   â””â”€â”€ [Failure] â”€â”€â†’ [Red error badge]
+    â”‚   â”‚                                                                         â”‚
+    â”‚   â”‚                                                                   [Tap to retry]
+    â”‚   â”‚
+    â”‚   â””â”€â”€ [ðŸ–¼ Choose from Library] â”€â”€â†’ [PhotosPicker opens]
+    â”‚                                       â”‚
+    â”‚                                       â””â”€â”€ [Select (multi)] â”€â”€â†’ [Thumbnails in grid]
+    â”‚                                                                        â”‚
+    â”‚                                                               [Upload batch]
+    â”‚
+    â””â”€â”€ [Tap existing thumbnail]
+            â”‚
+            â”œâ”€â”€ [Full screen preview]
+            â”œâ”€â”€ [Share]
+            â””â”€â”€ [Delete (with confirmation)]
 ```
 
 **Upload strategy:**
@@ -795,34 +812,34 @@ The smallest production-valuable system that replaces the current paper-based pr
 ### 4.8 Offline Draft Recovery Flow
 
 ```
-[Report Form → Network Drops]
-    │
-    ├── [Auto-save fires] ──→ [Draft saved to local SwiftData / JSON]
-    │
-    ├── [User continues editing] ──→ [All changes saved locally]
-    │
-    ├── [User taps Submit]
-    │       │
-    │       ├── [No network] ──→ [Show "No network connection. Report will be submitted when connected."]
-    │       │                         │
-    │       │                         └── [Save to pending queue]
-    │       │                               │
-    │       │                               └── [Badge on tab: "1 pending"]
-    │       │
-    │       └── [Network restored]
-    │               │
-    │               ├── [Auto-retry pending submissions]
-    │               │       │
-    │               │       ├── [Success] ──→ [Remove from queue, clear badge]
-    │               │       └── [Failure] ──→ [Keep in queue, retry later]
-    │               │
-    │               └── [User returns to app] ──→ [Pending queue checked]
-    │
-    └── [User closes app / navigates away]
-            │
-            ├── [Draft saved] ──→ [Next open: "You have an unsaved report. Continue editing?"]
-            │
-            └── [Draft discarded] ──→ [No recovery possible]
+[Report Form â†’ Network Drops]
+    â”‚
+    â”œâ”€â”€ [Auto-save fires] â”€â”€â†’ [Draft saved to local SwiftData / JSON]
+    â”‚
+    â”œâ”€â”€ [User continues editing] â”€â”€â†’ [All changes saved locally]
+    â”‚
+    â”œâ”€â”€ [User taps Submit]
+    â”‚       â”‚
+    â”‚       â”œâ”€â”€ [No network] â”€â”€â†’ [Show "No network connection. Report will be submitted when connected."]
+    â”‚       â”‚                         â”‚
+    â”‚       â”‚                         â””â”€â”€ [Save to pending queue]
+    â”‚       â”‚                               â”‚
+    â”‚       â”‚                               â””â”€â”€ [Badge on tab: "1 pending"]
+    â”‚       â”‚
+    â”‚       â””â”€â”€ [Network restored]
+    â”‚               â”‚
+    â”‚               â”œâ”€â”€ [Auto-retry pending submissions]
+    â”‚               â”‚       â”‚
+    â”‚               â”‚       â”œâ”€â”€ [Success] â”€â”€â†’ [Remove from queue, clear badge]
+    â”‚               â”‚       â””â”€â”€ [Failure] â”€â”€â†’ [Keep in queue, retry later]
+    â”‚               â”‚
+    â”‚               â””â”€â”€ [User returns to app] â”€â”€â†’ [Pending queue checked]
+    â”‚
+    â””â”€â”€ [User closes app / navigates away]
+            â”‚
+            â”œâ”€â”€ [Draft saved] â”€â”€â†’ [Next open: "You have an unsaved report. Continue editing?"]
+            â”‚
+            â””â”€â”€ [Draft discarded] â”€â”€â†’ [No recovery possible]
 ```
 
 ---
@@ -843,18 +860,18 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Hierarchy Browser** | Explore asset tree | Drill-down, search, pull-to-refresh | Level title, children list with icons, breadcrumb | Assets tab | `GET /assets/{id}/children`, `GET /assets/{id}/subtree` | All | Cache last-viewed level | Asset type icons |
 | **Asset Search** | Find asset by serial/name | Type query, select result | Results with breadcrumb, recent searches | Search bar on Hierarchy | `GET /assets?q=...` | All | Cache recent results | Asset type icons |
 | **Asset Detail** | View asset info & history | View hierarchy position, view history, start event | Name, serial, part number, breadcrumb, children, events, history | Hierarchy tap, search result | `GET /assets/{id}` | All | Show cached detail if available | Asset photos (optional) |
-| **Move Asset** | Reassign asset parent | Select new parent, confirm | Current position, selectable new parent | Asset Detail → Move | `POST /assets/{id}/move` | Coordinator | Not available offline | None |
+| **Move Asset** | Reassign asset parent | Select new parent, confirm | Current position, selectable new parent | Asset Detail â†’ Move | `POST /assets/{id}/move` | Coordinator | Not available offline | None |
 
 ### 5.3 Corrective Module
 
 | Screen | Purpose | Primary Actions | Data Displayed | Entry Points | API Endpoints | Required Role | Offline Behavior | Media |
 |--------|---------|----------------|----------------|--------------|---------------|---------------|------------------|-------|
-| **Event List** | View open events | Filter, pull-to-refresh, create event (+ if supervisor) | Event rows with severity, status, asset, time | Corrective tab | `GET /corrective-events` | Tech/Sup | Show cached list | None |
-| **Event Detail** | View event info & timeline | Start, resolve, close, create report, assign techs | Status, severity, description, asset, timeline, reports | Event list tap | `GET /corrective-events/{id}` | Tech/Sup | Show cached timeline | Initial photo |
-| **Create Event** | Start new corrective event | Select asset, set severity, describe, add photo | Asset search, severity picker, description field | Event list → + | `POST /corrective-events` | Supervisor | Save as draft locally | Initial photo |
-| **Assign Technicians** | Assign techs to event | Select/deselect techs, confirm | Available techs list | Event Detail → Assign | `POST /corrective-events/{id}/assign` planned | Supervisor | Not available offline | None |
-| **Report Form** | Fill shift report | Add tasks, photos, signatures, replacements, submit | Tasks, attachments, signatures, replacements | Event Detail → Create Report | `POST /corrective-events/{id}/reports`, `PATCH /corrective-reports/{id}` | Tech/Sup | Auto-save draft every 30s. Queue submit. | Photos, signatures |
-| **Report Detail** | View submitted report | View tasks, photos, signatures, print/share | Full report content | Event timeline tap, asset history | `GET /corrective-reports/{id}` | Tech/Sup | Show cached report | Photos, signatures |
+| **Event List** | View open events | Filter, pull-to-refresh, create event (+ for Technician/Coordinator) | Event rows with severity, status, asset, time | Corrective tab | `GET /corrective-events` | Tech/Coord/Boss | Show cached list | None |
+| **Event Detail** | View event info & timeline | Start, resolve, close, create report, assign techs | Status, severity, description, asset, timeline, reports | Event list tap | `GET /corrective-events/{id}` | Tech/Coord/Boss | Show cached timeline | Initial photo |
+| **Create Event** | Start new corrective event | Select asset, set severity, describe, add photo | Asset search, severity picker, description field | Event list â†’ + | `POST /corrective-events` | Technician/Coordinator | Save as draft locally | Initial photo |
+| **Assign Technicians** | Assign techs to event | Select/deselect techs, confirm | Available techs list | Event Detail â†’ Assign | `POST /corrective-events/{id}/assign` planned | Coordinator | Not available offline | None |
+| **Report Form** | Fill shift report | Add tasks, photos, signatures, replacements, submit | Tasks, attachments, signatures, replacements | Event Detail â†’ Create Report | `POST /corrective-events/{id}/reports`, `PATCH /corrective-reports/{id}` | Tech/Coord/Boss | Auto-save draft every 30s. Queue submit. | Photos, signatures |
+| **Report Detail** | View submitted report | View tasks, photos, signatures, print/share | Full report content | Event timeline tap, asset history | `GET /corrective-reports/{id}` | Tech/Coord/Boss | Show cached report | Photos, signatures |
 
 ### 5.4 Preventive Module
 
@@ -862,27 +879,27 @@ The smallest production-valuable system that replaces the current paper-based pr
 |--------|---------|----------------|----------------|--------------|---------------|---------------|------------------|-------|
 | **Schedule List** | View PM schedule | Filter (overdue/today/week/month), pull-to-refresh | Activity rows with due date, asset, status | Preventive tab | `GET /schedules` | All | Show cached list | None |
 | **Schedule Detail** | View PM activity | Execute, view template steps | Template steps, asset, due date, assigned techs | Schedule list tap | `GET /schedules/{id}` | Tech | Show cached template | Template diagrams (future) |
-| **PM Report Form** | Execute PM report | Complete steps, add photos, sign, submit | Step checklist, notes, photos, signatures | Schedule Detail → Execute | `POST /preventive-reports`, `PATCH /preventive-reports/{id}` | Tech | Auto-save, queue submit | Photos, signatures |
+| **PM Report Form** | Execute PM report | Complete steps, add photos, sign, submit | Step checklist, notes, photos, signatures | Schedule Detail â†’ Execute | `POST /preventive-reports`, `PATCH /preventive-reports/{id}` | Tech | Auto-save, queue submit | Photos, signatures |
 | **PM Report Detail** | View submitted PM report | View completed steps, photos, signatures | Completed checklist with notes | Schedule detail, asset history | `GET /preventive-reports/{id}` | All | Show cached | Photos, signatures |
 
 ### 5.5 Components Module
 
 | Screen | Purpose | Primary Actions | Data Displayed | Entry Points | API Endpoints | Required Role | Offline Behavior | Media |
 |--------|---------|----------------|----------------|--------------|---------------|---------------|------------------|-------|
-| **Component List** | Browse all components with filters | Filter by status/type, search by serial, tap detail | Component cards: type icon, serial, current location, status badge | Tab "Components" | `GET /api/v1/components` | All | Show cached list | — |
-| **Component Detail** | View component info + movement history | View current slot, view movement timeline, navigate to asset | Header: type, serial, status. Sections: current location, movements timeline | Component list tap | `GET /api/v1/components/{id}` | All | Cached detail | — |
+| **Component List** | Browse all components with filters | Filter by status/type, search by serial, tap detail | Component cards: type icon, serial, current location, status badge | Tab "Components" | `GET /api/v1/components` | All | Show cached list | â€” |
+| **Component Detail** | View component info + movement history | View current slot, view movement timeline, navigate to asset | Header: type, serial, status. Sections: current location, movements timeline | Component list tap | `GET /api/v1/components/{id}` | All | Cached detail | â€” |
 | **Register Component** | Register new component in inventory | Select type, enter serial, add location, confirm | Form fields: type picker, serial input, location selector, notes | Components tab "+" | `POST /api/v1/components` | Warehouse Operator | Queue on disconnect | Camera for serial scan |
-| **Slot Locations** | View slot hierarchy per equipment kind | Browse by equipment kind, view slot detail, see occupancy | Expandable tree of slots, occupancy indicator per slot | Components tab → Slots | `GET /api/v1/slot-locations` | All | Cached tree | — |
+| **Slot Locations** | View slot hierarchy per equipment kind | Browse by equipment kind, view slot detail, see occupancy | Expandable tree of slots, occupancy indicator per slot | Components tab â†’ Slots | `GET /api/v1/slot-locations` | All | Cached tree | â€” |
 | **Slot Detail** | View single slot with image and occupancy | View slot image, see current occupant, navigate to component | Slot info, image viewer, current component card | Slot location tap | `GET /api/v1/slot-locations/{id}` | All | Cached detail | Slot image |
-| **Physical Locations** | Browse warehouse zones and shelves | View hierarchy of warehouse locations | Tree view of location hierarchy | Components tab → Locations | `GET /api/v1/locations` | All | Cached tree | — |
+| **Physical Locations** | Browse warehouse zones and shelves | View hierarchy of warehouse locations | Tree view of location hierarchy | Components tab â†’ Locations | `GET /api/v1/locations` | All | Cached tree | â€” |
 
 ### 5.6 Common / Shared Screens
 
 | Screen | Purpose | Primary Actions | Data Displayed | Entry Points | API Endpoints | Required Role | Offline Behavior | Media |
 |--------|---------|----------------|----------------|--------------|---------------|---------------|------------------|-------|
-| **Signature Pad** | Capture signature via PencilKit | Sign, clear, confirm | White canvas with guide line | Report form → Add Signature | `POST /.../signatures` | All | Queue upload | Signature PNG |
+| **Signature Pad** | Capture signature via PencilKit | Sign, clear, confirm | White canvas with guide line | Report form â†’ Add Signature | `POST /.../signatures` | All | Queue upload | Signature PNG |
 | **Photo Viewer** | Full-screen photo preview | Zoom, pan, share, delete | Full resolution image | Attachment thumbnail tap | `GET /attachments/{id}` | All | Show cached thumbnail | Photo |
-| **Camera Capture** | Take photo for report | Capture, retake, use | Camera viewfinder | Report form → Add Photo | Upload via multipart | All | Queue upload | Photo |
+| **Camera Capture** | Take photo for report | Capture, retake, use | Camera viewfinder | Report form â†’ Add Photo | Upload via multipart | All | Queue upload | Photo |
 
 ---
 
@@ -891,23 +908,23 @@ The smallest production-valuable system that replaces the current paper-based pr
 ### 6.1 Navigation Philosophy
 
 - **Predictable:** Users always know where they are and how to go back. Breadcrumb in asset hierarchy. Back swipe everywhere.
-- **Minimal taps:** High-frequency actions (view events, start report) are 1–2 taps from the tab bar.
+- **Minimal taps:** High-frequency actions (view events, start report) are 1â€“2 taps from the tab bar.
 - **Context-preserving:** Navigating to a report from the event timeline keeps the event context. Navigating back returns to the same scroll position.
 - **Modal for creation:** Sheets for forms (create event, create report). Push for drill-down (hierarchy, detail views).
 
 ### 6.2 Tab Structure
 
 ```
-┌─────────────┬──────────────┬──────────────┬──────────────┬─────────────┐
-│  Corrective  │  Preventive  │   Assets     │  Components  │  Profile     │  (Dashboard)│
-│  (Tab 1)     │  (Tab 2)     │  (Tab 3)     │  (Tab 4)     │  (Tab 5)     │  Future     │
-│             │              │              │              │              │             │
-│  Icon:      │  Icon:       │  Icon:       │  Icon:       │  Icon:       │             │
-│  wrench     │  calendar    │  cube        │  chip        │  person      │             │
-│             │              │              │  (cpu)       │              │             │
-│  Badge:     │  Badge:      │              │  Badge:      │              │             │
-│  open count │  overdue cnt │              │  low stock   │              │             │
-└─────────────┴──────────────┴──────────────┴──────────────┴──────────────┴─────────────┘
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  Corrective  â”‚  Preventive  â”‚   Assets     â”‚  Components  â”‚  Profile     â”‚  (Dashboard)â”‚
+â”‚  (Tab 1)     â”‚  (Tab 2)     â”‚  (Tab 3)     â”‚  (Tab 4)     â”‚  (Tab 5)     â”‚  Future     â”‚
+â”‚             â”‚              â”‚              â”‚              â”‚              â”‚             â”‚
+â”‚  Icon:      â”‚  Icon:       â”‚  Icon:       â”‚  Icon:       â”‚  Icon:       â”‚             â”‚
+â”‚  wrench     â”‚  calendar    â”‚  cube        â”‚  chip        â”‚  person      â”‚             â”‚
+â”‚             â”‚              â”‚              â”‚  (cpu)       â”‚              â”‚             â”‚
+â”‚  Badge:     â”‚  Badge:      â”‚              â”‚  Badge:      â”‚              â”‚             â”‚
+â”‚  open count â”‚  overdue cnt â”‚              â”‚  low stock   â”‚              â”‚             â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
 ```
 
 - Tab bar uses SF Symbols with selected/unselected states.
@@ -922,7 +939,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 | **Sheet (modal)** | Create event, create report, search, move asset, assign techs | Slide-up from bottom. Pull-down to dismiss. |
 | **Full-screen cover** | Camera capture, signature pad | Slide-up, no pull-down dismiss. |
 | **Popover (iPad)** | Quick actions, pickers (severity, reason) | Popover from source rect. |
-| **Context menu** | Long press on asset row → View Detail, Copy Serial | iOS standard peek. |
+| **Context menu** | Long press on asset row â†’ View Detail, Copy Serial | iOS standard peek. |
 
 ### 6.4 Modal Usage
 
@@ -955,7 +972,7 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 
 - **List-based drill-down** (not tree view). Each level is a separate screen in the `NavigationStack`.
 - **Rows** show: asset type icon (SF Symbol), name, serial number (truncated), disclosure indicator.
-- **Depth indicator:** Breadcrumb at top: `Train 101 → Car A → HVAC System → ...`
+- **Depth indicator:** Breadcrumb at top: `Train 101 â†’ Car A â†’ HVAC System â†’ ...`
 - **Leaf nodes (LRUs):** No disclosure indicator. Tap navigates to asset detail.
 - **Lazy loading:** Each level fetches children on appear. Pull-to-refresh at top level.
 
@@ -966,9 +983,9 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 - **Auto-save:** Draft reports auto-save every 30 seconds. Visual indicator "Saved" / "Saving...".
 - **Keyboard handling:** Scroll to active field. Keyboard toolbar with "Done" / "Next".
 - **Photo grid:** Horizontally scrollable row of thumbnails with "+" add button.
-- **Signature step:** Dedicated section with "Add Signature" button → opens full-screen PencilKit.
+- **Signature step:** Dedicated section with "Add Signature" button â†’ opens full-screen PencilKit.
 - **Section completion:** Each of the 6 report sections shows a completion toggle (green checkmark / empty circle). Sections can be completed independently.
-- **Stop Here:** A "Stop Here" button in the report footer opens a section picker sheet. Selecting a stop point disables subsequent sections and submits the report as SECTIONAL_DRAFT.
+- **Stop Here:** A "Stop Here" button in the report footer opens a section picker sheet. Selecting a stop point stores a marker used to hide later blank fields in the generated PDF.
 
 ### 6.9 Error UX
 
@@ -995,9 +1012,9 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 
 ### 6.11 Animation Philosophy
 
-- **Purposeful:** Every animation communicates something — hierarchy drill-down, status change, submission success.
+- **Purposeful:** Every animation communicates something â€” hierarchy drill-down, status change, submission success.
 - **Subtle:** 0.3s ease-in-out defaults. No gratuitous bounce or parallax.
-- **Status transitions:** Button morphs (e.g., "Start" → spinner → "In Progress" with checkmark).
+- **Status transitions:** Button morphs (e.g., "Start" â†’ spinner â†’ "In Progress" with checkmark).
 - **List changes:** Animated inserts/removes for status filter changes.
 - **Navigation:** Standard iOS stack transitions. `matchedGeometryEffect` for asset type icon during hierarchy drill-down.
 - **Tab switching:** Cross-dissolve between tab root views (no slide).
@@ -1103,7 +1120,7 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 | Component | Design | Usage |
 |-----------|--------|-------|
 | **Status badge** | Pill shape, colored background, white text | Event status, report status, asset status |
-| **Severity badge** | Pill shape, colored icon + text | Event severity (critical → red, high → orange, etc.) |
+| **Severity badge** | Pill shape, colored icon + text | Event severity (critical â†’ red, high â†’ orange, etc.) |
 | **Count badge** | Small red circle with white number | Tab bar badge, unread count |
 | **Role chip** | Small rounded rect with role name | User role display |
 | **Filter chip** | Tappable pill, selected/unselected state | Quick filters on list screens |
@@ -1120,9 +1137,9 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 
 | Type | Preview |
 |------|---------|
-| **Photo** | Square thumbnail, 80x80pt. Tap → full-screen viewer with zoom/pan. Long press → share sheet. |
+| **Photo** | Square thumbnail, 80x80pt. Tap â†’ full-screen viewer with zoom/pan. Long press â†’ share sheet. |
 | **Signature** | Slightly smaller thumbnail, white background, ink color preserved. Shows signer name below. |
-| **PDF** (future) | Document icon with page count badge. Tap → QuickLook preview. |
+| **PDF** (future) | Document icon with page count badge. Tap â†’ QuickLook preview. |
 
 ### 7.11 Dark Mode Strategy
 
@@ -1163,13 +1180,13 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 |-----------------|---------------|-------------|--------------|------------|---------|-------------------|
 | Authenticate user | `POST /auth/login` | Login | `LoginViewModel` | None | Token in Keychain | No |
 | Refresh token | `POST /auth/refresh` | (interceptor) | `AuthInterceptor` | None | Token in Keychain | No |
-| Search assets | `GET /assets?q=...` | Asset Search, Create Event → Asset Picker | `AssetSearchViewModel`, `AssetPickerViewModel` | Offset | Recent results | Show previous results |
+| Search assets | `GET /assets?q=...` | Asset Search, Create Event â†’ Asset Picker | `AssetSearchViewModel`, `AssetPickerViewModel` | Offset | Recent results | Show previous results |
 | List children | `GET /assets/{id}/children` | Hierarchy Browser | `HierarchyViewModel` | Cursor | Level cache | No |
-| Get subtree | `GET /assets/{id}/subtree` | Asset Detail → Children tab | `AssetDetailViewModel` | None | Level cache | No |
-| Get ancestors | `GET /assets/{id}/ancestors` | Hierarchy Browser → breadcrumb | `HierarchyViewModel` | None | Level cache | No |
+| Get subtree | `GET /assets/{id}/subtree` | Asset Detail â†’ Children tab | `AssetDetailViewModel` | None | Level cache | No |
+| Get ancestors | `GET /assets/{id}/ancestors` | Hierarchy Browser â†’ breadcrumb | `HierarchyViewModel` | None | Level cache | No |
 | Get asset detail | `GET /assets/{id}` | Asset Detail | `AssetDetailViewModel` | None | Detail cache | No |
-| Get asset history | `GET /assets/{id}/history` | Asset Detail → History | `AssetDetailViewModel` | Offset | History cache | No |
-| Create asset | `POST /assets` | (future — admin panel) | — | None | — | No |
+| Get asset history | `GET /assets/{id}/history` | Asset Detail â†’ History | `AssetDetailViewModel` | Offset | History cache | No |
+| Create asset | `POST /assets` | (future â€” admin panel) | â€” | None | â€” | No |
 | Move asset | `POST /assets/{id}/move` | Move Asset | `MoveAssetViewModel` | None | Invalidate caches | Yes (UI before API) |
 | List events | `GET /corrective-events` | Event List | `EventListViewModel` | Offset | List cache | No |
 | Get event detail | `GET /corrective-events/{id}` | Event Detail | `EventDetailViewModel` | None | Detail cache | No |
@@ -1182,13 +1199,13 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 | Get report detail | `GET /corrective-reports/{id}` | Report Detail | `ReportDetailViewModel` | None | Detail cache | No |
 | Add task | `POST /corrective-reports/{id}/tasks` | Report Form | `ReportFormViewModel` | None | Draft save | Yes (add task row) |
 | Add signature | `POST /corrective-reports/{id}/signatures` | Signature Pad | `SignatureViewModel` | None | Queue offline | Yes (show thumbnail) |
-| Upload attachment | `POST /reports/{type}/{id}/attachments` | Report Form → Camera/Gallery | `AttachmentViewModel` | None | Queue offline | Yes (show thumbnail) |
+| Upload attachment | `POST /reports/{type}/{id}/attachments` | Report Form â†’ Camera/Gallery | `AttachmentViewModel` | None | Queue offline | Yes (show thumbnail) |
 | Download attachment | `GET /attachments/{id}` | Photo Viewer | `PhotoViewerViewModel` | None | Thumbnail cache | No |
 | List schedules | `GET /schedules` | Schedule List | `ScheduleListViewModel` | Offset | List cache | No |
 | Get schedule detail | `GET /schedules/{id}` | Schedule Detail | `ScheduleDetailViewModel` | None | Detail cache | No |
 | Create PM report | `POST /preventive-reports` | PM Report Form | `PMReportFormViewModel` | None | Invalidate schedule | Yes |
 | Submit PM report | `POST /preventive-reports/{id}/submit` | PM Report Form | `PMReportFormViewModel` | None | Invalidate | Yes |
-| Record replacement | (within report) | Report Form → Replacement | `ReplacementViewModel` | None | Invalidate asset history | Yes |
+| Record replacement | (within report) | Report Form â†’ Replacement | `ReplacementViewModel` | None | Invalidate asset history | Yes |
 | Assign technicians | `POST /corrective-events/{id}/assign` (future) | Assign Technicians | `AssignTechViewModel` | None | Invalidate event | Yes |
 
 ### 8.2 Where Pagination Exists
@@ -1231,7 +1248,7 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 
 ## 9. Incremental Frontend Delivery Plan
 
-### 9.1 Phase 1: Foundation & Navigation (Week 1–2)
+### 9.1 Phase 1: Foundation & Navigation (Week 1â€“2)
 
 **Goal:** Working navigation shell with mock data.
 
@@ -1250,7 +1267,7 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 
 **Testing:** SwiftUI previews for all components and screens with mock data.
 
-### 9.2 Phase 2: Corrective Module (Week 3–4)
+### 9.2 Phase 2: Corrective Module (Week 3â€“4)
 
 **Goal:** Full corrective maintenance flow with mock data.
 
@@ -1264,7 +1281,7 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 | Camera integration | `AVCaptureSession` wrapper. Resize to 1920px. |
 | Photo grid component | Horizontal scroll, add/delete, full-screen preview. |
 | Report detail | Read-only view of submitted report. Photo gallery. |
-| Signature capture flow | Full canvas → confirm → upload simulation. |
+| Signature capture flow | Full canvas â†’ confirm â†’ upload simulation. |
 
 **Testing:** SwiftUI previews, focus on form validation, signature pad, photo interactions.
 
@@ -1286,7 +1303,7 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 
 **Testing:** Full integration tests with mock API. Edge case testing (network drop, validation, empty states).
 
-### 9.4 Phase 4: Real API Integration (Week 6–7)
+### 9.4 Phase 4: Real API Integration (Week 6â€“7)
 
 **Goal:** Replace mocks with real API client. End-to-end flows.
 
@@ -1295,11 +1312,11 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 | `APIClient` real implementation | URLSession, JWT injection, error mapping |
 | `AuthInterceptor` | 401 handling, token refresh, request retry |
 | `KeychainManager` | Secure token storage |
-| Login → real API | Replace mock login. Token management. |
-| Asset → real API | Replace mock hierarchy with real children/subtree endpoints |
-| Corrective → real API | Replace mock events, reports, signatures |
-| Preventive → real API | Replace mock schedules, reports |
-| File upload → real API | Multipart upload with progress |
+| Login â†’ real API | Replace mock login. Token management. |
+| Asset â†’ real API | Replace mock hierarchy with real children/subtree endpoints |
+| Corrective â†’ real API | Replace mock events, reports, signatures |
+| Preventive â†’ real API | Replace mock schedules, reports |
+| File upload â†’ real API | Multipart upload with progress |
 | Pagination implementation | Offset and cursor-based. Infinite scroll. |
 
 **Testing:** `APIClient` unit tests with `URLProtocol` mocking. Full E2E with test backend.
@@ -1326,7 +1343,7 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 3. **Build `MockAPIClient`** implementing the protocol with fake JSON files + configurable delays.
 4. **Build screens against `MockAPIClient`** injected via environment or init.
 5. **Write SwiftUI previews** using `MockAPIClient` in `.previewEnvironment`.
-6. **Replace with real `APIClient`** when API is ready — no UI changes needed.
+6. **Replace with real `APIClient`** when API is ready â€” no UI changes needed.
 
 ### 9.7 SwiftUI Preview Strategy
 
@@ -1343,3 +1360,5 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1 | 2026-06-06 | Initial product specification and UX blueprint |
+
+

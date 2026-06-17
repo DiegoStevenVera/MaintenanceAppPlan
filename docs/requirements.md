@@ -1,8 +1,8 @@
 ﻿# Requirements Document
 
-**Version:** 0.1 (Draft)
+**Version:** 0.2 (Draft)
 **Phase:** Phase 2 — Requirements Definition
-**Last Updated:** 2026-06-06
+**Last Updated:** 2026-06-16
 
 ---
 
@@ -40,6 +40,21 @@ The initial scope includes two operational modules:
 
 The platform is designed for modular growth. Future modules, systems, and maintenance disciplines must be supported without structural redesign.
 
+### 1.2.1 Current Planning Decisions
+
+The following decisions supersede earlier draft assumptions:
+
+- The initial device target is shared iPad devices used by the maintenance team. iPhone support is future and depends on corporate security approval.
+- v1 is local-first: the app and backend will initially run in a local demonstration/development environment, such as an iPad connected to a Mac-hosted backend.
+- The long-term deployment target is not approved yet. The architecture must allow on-premise, Azure, or AWS without coupling domain logic to any provider.
+- PDF generation is required from the first version, even if the first templates are simple and use raw report data.
+- Email delivery in v1 uses the iOS Share Sheet to share the generated PDF. Backend-managed email is future.
+- The role formerly called "Supervisor" is now called "Boss". The Boss has read-only operational visibility and metrics access.
+- The four application roles are Technician, Coordinator, Boss, and Administrator.
+- Preventive and corrective maintenance use the same activity lifecycle: SCHEDULED, IN_PROGRESS, COMPLETED, CLOSED.
+- Reports may be edited while the maintenance activity is not CLOSED. Edits create report versions. Once the maintenance activity is CLOSED, editing requires a Coordinator to reopen the activity.
+- Assets and components are modeled with one unified Asset model. "Component" is an operational category of Asset, not a separate primary entity in v1.
+
 ### 1.3 Core Principles
 
 - Centralize maintenance operational records.
@@ -60,6 +75,11 @@ The platform is designed for modular growth. Future modules, systems, and mainte
 | System | Maintenance discipline or domain (e.g., Signaling, Infrastructure, Civil, Networking) |
 | Subsystem | Technical subdivision within a system (e.g., ATS, CBTC, IXL) |
 | Corrective Event | An unplanned incident or failure that initiates corrective maintenance; may span multiple shifts and generate multiple reports |
+| Maintenance Activity | A preventive or corrective maintenance work item that moves through SCHEDULED, IN_PROGRESS, COMPLETED, and CLOSED states |
+| Maintenance Report | The operational document generated from a maintenance activity. It may have versions while the activity is still editable |
+| Asset | Any trackable technical item, including trains, cabinets, servers, cards, fans, software, tools, and replaceable parts |
+| Component | A smaller or replaceable Asset category. It is not a separate top-level entity in v1 |
+| Boss | Read-only leadership role formerly referred to as Supervisor in older draft documents |
 
 ---
 
@@ -69,27 +89,30 @@ The platform is designed for modular growth. Future modules, systems, and mainte
 
 | Actor | Role Description | System Interaction |
 |-------|-----------------|-------------------|
-| **Technician** | Maintenance worker executing preventive and corrective activities on field equipment. Performs inspections, replacements, and documentation. Uses shared iPad devices. | Creates and completes preventive and corrective reports. Records asset replacements. Signs reports with drawn signature. Logs tools and materials used. |
-| **Coordinator** | A technician with additional administrative responsibilities. Assigns weekly activities and shift schedules. Also performs maintenance work. | All technician capabilities. Additionally assigns activities and shifts (future capability). No elevated privileges on report content. |
-| **Maintenance Manager** | Oversees maintenance operations. Requires visibility into operational metrics. | View-only access to reports, summaries, and dashboards (future). No field-level editing. |
-| **Project Manager** | Oversees project-level maintenance performance. Requires high-level visibility. | View-only access to aggregated reports, statistics, and summaries (future). |
+| **Technician** | Maintenance worker executing preventive and corrective activities on field equipment. Performs inspections, replacements, and documentation. Uses shared iPad devices. Also called mantenedor. | Creates and edits reports while the activity is editable. Records asset replacements. Signs reports with drawn signature. Logs tools and materials used. Can create corrective events in v1. |
+| **Coordinator** | Maintenance coordinator responsible for reviewing, closing, reopening, planning, documentation, and monthly work schedules. May also perform maintenance work. | All technician capabilities. Can close and reopen maintenance activities. Future: manages planning, schedules, and documentation workflows. |
+| **Boss** | Leadership/read-only role focused on metrics and operational visibility. Formerly called Supervisor in older drafts. | Read-only access to reports, maintenance activity details, summaries, and dashboards. No operational edits. |
+| **Administrator** | System administrator with access to all capabilities. | Has all permissions from Technician, Coordinator, and Boss. Manages users, catalogs, configuration, and future admin features. |
 | **Engineering Team** (External) | Defines technical maintenance procedures, equipment architecture, and hierarchy rules. External to the system. | Does not interact with the platform directly. Provides procedure definitions that must be loaded or entered by the maintenance team. |
-| **Warehouse Team** (External) | Manages spare parts and tool inventory. External to the application. | Does not interact with the platform directly. Inventory data is maintained in a separate system; the platform maintains its own best-effort view of warehouse stock. |
+| **Warehouse Team** (External) | Manages spare parts and tool inventory. External to the application initially. | The platform must show stock availability for replacement workflows, but the external warehouse process remains the operational source until a future integration exists. |
 
 ### 2.2 Actor Privileges Summary
 
-| Capability | Technician | Coordinator | Manager | Project Manager |
-|------------|-----------|-------------|---------|-----------------|
-| Create preventive report | Yes | Yes | No | No |
-| Complete preventive report | Yes | Yes | No | No |
-| Create corrective event | Yes (first on site) | Yes | No | No |
-| Create corrective report | Yes | Yes | No | No |
-| Sign report | Yes (own signature) | Yes (own signature) | No | No |
-| Asset replacement | Yes | Yes | No | No |
-| View own reports | Yes | Yes | Yes | Yes |
+| Capability | Technician | Coordinator | Boss | Administrator |
+|------------|-----------|-------------|------|---------------|
+| Create preventive report | Yes | Yes | No | Yes |
+| Complete preventive report | Yes | Yes | No | Yes |
+| Create corrective event | Yes (v1) | Yes | No | Yes |
+| Create corrective report | Yes | Yes | No | Yes |
+| Edit report while activity is editable | Yes | Yes | No | Yes |
+| Sign report as participant | Yes | Yes | No, unless participating operationally | Yes |
+| Asset replacement | Yes | Yes | No | Yes |
+| Resolve / complete maintenance activity | Yes | Yes | No | Yes |
+| Close maintenance activity | No | Yes | No | Yes |
+| Reopen closed maintenance activity | No | Yes | No | Yes |
 | View all reports | Yes | Yes | Yes | Yes |
-| Assign weekly activities | No | Yes (future) | No | No |
-| Assign shift schedule | No | Yes (future) | No | No |
+| Assign weekly activities | No | Yes (future) | No | Yes |
+| Assign shift schedule | No | Yes (future) | No | Yes |
 | View dashboards / summaries | Yes | Yes | Yes | Yes |
 
 ---
@@ -215,26 +238,26 @@ Assets in the system form a recursive tree structure where:
 
 #### 6.1.2 Asset Types
 
-Assets must support categorization by type. Examples include:
+Assets must support categorization by type and category. The v1 model uses one unified Asset entity for all trackable technical items. "Component" is a category of Asset, not a separate primary entity.
 
-| Asset Type | Examples | Has Serial Number | Has Part Number | Has Version |
-|------------|----------|-------------------|-----------------|-------------|
-| Large Equipment | Train, Cabinet, Zone Controller | Typically yes | Typically yes | No |
-| Small Equipment | CC, BTM, TOD, Server, Fan | Typically yes | Typically yes | No |
-| Component | Card (CIER, MTORE), PCSG, SCCR | Always | Always | No |
-| Software | ATS, CBTC application | No | No | Yes (version) |
-| Workstation | Monitor, CPU, Keyboard | Typically yes | Typically yes | No |
-| Tool (inventory) | Any maintenance tool | Yes | Typically yes | No |
+| Asset Category | Examples | Has Serial Number | Has Part Number | Has Version |
+|----------------|----------|-------------------|-----------------|-------------|
+| Large Equipment | Train, Cabinet, Zone Controller | Optional | Usually via AssetType | No |
+| Equipment | CC, BTM, TOD, Server, Fan, Workstation | Usually | Via AssetType | No |
+| Component | Card (CIER, MTORE), PCSG, SCCR, replaceable server module | Usually | Via AssetType | No |
+| Software | ATS, CBTC application | No | No | Yes |
+| Tool | Maintenance tools and measuring equipment | Usually | Via AssetType when applicable | No |
 
 #### 6.1.3 Asset Identity
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-ASM-001 | Every physical asset shall be uniquely identified by its serial number, when available. | High |
-| FR-ASM-002 | Every asset type shall be identified by its part number, when available. | High |
+| FR-ASM-002 | Part number identifies the AssetType, not the individual Asset instance. Assets of the same type may share the same part number. | High |
 | FR-ASM-003 | Software assets shall be identified by name and version number, not serial number. | High |
 | FR-ASM-004 | The system must allow assets without serial numbers (e.g., trains, large cabinets where serial is not assigned). | High |
 | FR-ASM-005 | The combination of (parent asset, slot/position, type) must be unique within the parent. | High |
+| FR-ASM-022 | Every asset without a serial number must have a unique internal code generated or assigned by the system. | High |
 
 #### 6.1.4 Hierarchy Rules
 
@@ -350,8 +373,9 @@ Key characteristics:
 | FR-PRV-011 | The system must support capturing a drawn signature from each participating technician at report completion. | High |
 | FR-PRV-012 | The system must allow multiple technicians to sign the same preventive report (all participants in the shift). | High |
 | FR-PRV-013 | A preventive report must be completed within a single shift. No partial or handover reports for preventive activities. | High |
-| FR-PRV-014 | Once signed and submitted, a preventive report must be immutable and preserved as a historical record. | High |
+| FR-PRV-014 | Preventive reports remain editable while the maintenance activity is SCHEDULED, IN_PROGRESS, or COMPLETED. Each finalized edit creates a new report version. Once the activity is CLOSED, editing is blocked unless the Coordinator reopens the activity. | High |
 | FR-PRV-015 | The system must support versioning of activity procedures (e.g., when the Engineering team updates a maintenance manual). | Medium |
+| FR-PRV-018 | A preventive activity usually produces one main maintenance report, but the system must support additional report types for exceptional activities, such as track circuit calibration reports. | Medium |
 
 ### 7.5 Historical Records
 
@@ -391,14 +415,15 @@ Corrective maintenance is reactive, triggered by unexpected incidents or failure
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-COR-008 | Each Corrective Report must capture: technician(s) involved, shift identification, date/time, SAP notification code (typed manually), subsystem, equipment affected, failure description, fault type. | High |
-| FR-COR-009 | The system must support recording maintenance actions/tasks in a semi-structured format: each task has a type (defined in system configuration) and a description. | High |
+| FR-COR-009 | The system must support recording maintenance actions/tasks in a semi-structured dynamic form: each task has a type (defined in system configuration) and a description. Specialized fields appear only for task types that require them. | High |
 | FR-COR-010 | Task types must be configurable per system/subsystem and may include: "Component Replacement", "Inspection", "Cleaning", "Adjustment", "Measurement", "Software Action", "Other." | Medium |
 | FR-COR-011 | When the task type is "Component Replacement", the system must invoke the asset replacement workflow (see FR-ASM-013 through FR-ASM-017). | High |
 | FR-COR-012 | The system must support logging tools used in the corrective activity by serial number. | High |
 | FR-COR-013 | The system must support image attachments captured or uploaded during the corrective report. | High |
 | FR-COR-014 | The system must support free-text comments/observations. | High |
 | FR-COR-015 | Each corrective report must be signed by all participating technicians before submission. | High |
-| FR-COR-016 | Once signed and submitted, a corrective report must be immutable. | High |
+| FR-COR-016 | Corrective reports remain editable while the corrective event is IN_PROGRESS or COMPLETED. Each finalized edit creates a new report version. Once the corrective event is CLOSED, editing is blocked unless the Coordinator reopens the event. | High |
+| FR-COR-019 | Corrective reports must not be constrained to a fixed 6-section structure. The UI should follow the real corrective report format and use dynamic blocks, especially for component replacement activities. | High |
 
 ### 8.4 Asset Replacement Sub-Workflow
 
@@ -413,7 +438,7 @@ The asset replacement sub-workflow within corrective maintenance is defined in t
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-COR-017 | A Corrective Event may be closed by the coordinator or a technician when all shift reports are completed and the incident is resolved. | Medium |
+| FR-COR-017 | A Corrective Event may be marked COMPLETED/RESOLVED by a Technician or Coordinator when the work is finished. Only the Coordinator or Administrator may close it definitively. | High |
 | FR-COR-018 | Closed events must remain fully accessible for historical review. | High |
 
 ---
@@ -443,7 +468,7 @@ The asset replacement sub-workflow within corrective maintenance is defined in t
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-RPT-006 | The system must support future generation of: summary reports (aggregated counts by type, by subsystem, by month), asset replacement reports, maintenance frequency reports, technician workload reports. | Low |
-| FR-RPT-007 | The system architecture must not prevent future dashboard and analytics capabilities for Manager and Project Manager roles. | Medium |
+| FR-RPT-007 | The system architecture must not prevent future dashboard and analytics capabilities for Boss and Administrator roles. | Medium |
 
 ---
 ## 10. Traceability Requirements
@@ -470,9 +495,10 @@ The asset replacement sub-workflow within corrective maintenance is defined in t
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-TRC-009 | Submitted reports must be immutable. No editing, deletion, or amendment after final signature. | High |
-| FR-TRC-010 | If a correction is needed after submission, the system must support creating an addendum or corrective supplement linked to the original report. | Medium |
+| FR-TRC-009 | Report versions must be preserved. Editing an existing report creates a new version while retaining the previous generated PDF and data snapshot. | High |
+| FR-TRC-010 | If a correction is needed after the activity is CLOSED, the Coordinator must reopen the maintenance activity before a new report version can be created. | High |
 | FR-TRC-011 | Signatures must be stored as part of the report and must be verifiably linked to the authenticated user. | High |
+| FR-TRC-012 | In v1, participant signatures are drawn on the shared iPad after selecting the participant name. Strong per-user approval workflows are future functionality. | Medium |
 
 ---
 
@@ -482,9 +508,9 @@ The asset replacement sub-workflow within corrective maintenance is defined in t
 
 | ID | Constraint | Impact |
 |----|------------|--------|
-| OC-001 | The primary device is a shared iPad (4 devices available for a team of 10 technicians). Session management must support rapid user switching. | Authentication must be quick; session timeout must balance security with usability. |
+| OC-001 | The primary device is a shared iPad (2 devices currently available for the team). Session management must support shared-device operation. | Authentication must be quick; session timeout must balance security with usability. |
 | OC-002 | Devices operate in field conditions: tunnels, outdoor stations, technical rooms with limited lighting. UI must be high contrast, large touch targets, minimal text input. | Search and selection via hierarchical navigation and filtering preferred over typing. |
-| OC-003 | No handheld iOS devices initially (iPhone) due to security policies. Future mobile support is undetermined. | UI optimization for iPhone is out of scope. |
+| OC-003 | iPhone support is future and depends on corporate security approval. | iPad UX is the initial target; iPhone optimization is out of scope for v1. |
 
 ### 11.2 External Dependencies
 
@@ -493,7 +519,7 @@ The asset replacement sub-workflow within corrective maintenance is defined in t
 | OC-004 | The PCON annual plan is an external Excel file. No direct integration. | The system must support manual input or import of planned activities. |
 | OC-005 | Weekly activity scheduling is done in Excel by the coordinator. | The system must accommodate flexibility in which activities are executed vs planned. |
 | OC-006 | SAP notification codes are reference fields only. No real-time SAP integration. | SAP code is a manually entered text field. Future integration anticipated. |
-| OC-007 | Warehouse inventory is maintained by a different area; the platform's view is best-effort. | The system must handle cases where the warehouse view is outdated or incomplete. |
+| OC-007 | Warehouse inventory is maintained by a different area, but v1 must allow technicians to consult available stock for replacement workflows. | The system must handle cases where the warehouse view is outdated or incomplete. |
 | OC-008 | Shift schedules are managed in Excel by the coordinator. | Technician assignment to shifts is out of scope; technicians self-identify. |
 
 ### 11.3 Workflow Constraints
@@ -502,7 +528,7 @@ The asset replacement sub-workflow within corrective maintenance is defined in t
 |----|------------|--------|
 | OC-009 | Preventive maintenance is single-shift only. | No partial completion or handover for preventive reports. |
 | OC-010 | Corrective maintenance may span multiple shifts. | Event-level aggregation required; each shift produces independent reports. |
-| OC-011 | No approval workflows exist currently (signatures are informational, not approval gates). | Report completion is final upon signature; no manager approval step. |
+| OC-011 | Participant signatures are sufficient for report PDF generation. Closing the maintenance activity is a Coordinator action, not a Boss approval workflow. | Report completion and activity closure are separate states. |
 | OC-012 | No formal incident classification system exists yet. Failure types are free text. | Corrective event classification must support future standardization without breaking existing data. |
 
 ---
@@ -603,12 +629,12 @@ The platform should store data in a structure that supports future:
 | Shift Schedule Management | External Excel | Native module with coordinator assignment, shift calendar |
 | Inventory/Warehouse Management | Best-effort platform view | Full inventory sync with warehouse system |
 | Corrective Procedure Standardization | Free text task types | Structured procedure library per subsystem |
-| Dashboards | None | Manager and Project Manager views with KPIs |
+| Dashboards | None | Boss and Administrator views with KPIs |
 | SAP Integration | Manual reference code | API-based notification creation and status updates |
-| Approval Workflows | Not required | Coordinator/Manager approval gates for report closure |
+| Approval Workflows | Not required | Future approval gates, if needed, must remain separate from Coordinator closure |
 | Notification System | Email only (manual) | In-app notifications, automated email alerts |
 | Offline Mode | None | Full offline capability with sync |
-| Mobile (iPhone) | Out of scope | Future mobile optimization |
+| Mobile (iPhone) | Out of scope for v1 | Future mobile optimization after corporate security approval |
 | Corrective Classification | Free text failure types | Standardized taxonomy with criticality levels |
 | Lead Technician Role | Not defined | Role with elevated field privileges |
 
@@ -629,7 +655,7 @@ The following items were clarified during the requirements review. Items marked 
 | OQ-007 | What information does the weekly activity scheduling Excel contain, and what is the format? | The Excel table contains: Date, Start hour, Maximum end hour, Description, Code (a code different from SAP). A future module may manage this natively. | Coordinator | Resolved |
 | OQ-008 | Should the platform support multiple languages? | Yes, in the future. Not required for initial version. | Product | Resolved |
 | OQ-009 | Are there any regulatory or compliance requirements? | None identified at this moment. | Legal / Compliance | Resolved |
-| OQ-010 | What is the expected frequency of corrective events per month? | Unknown. Cannot estimate at this time. | Maintenance Manager | Pending |
+| OQ-010 | What is the expected frequency of corrective events per month? | Unknown. Cannot estimate at this time. | Maintenance Team | Pending |
 | OQ-011 | Should the platform support a "Quick Search" across all assets by serial number or part number? | Yes. This should be available from the main screen. | Technician Team | Resolved |
 | OQ-012 | How should the system prevent two technicians from working on the same corrective event simultaneously? | Implement a "Start Maintenance" action (without requiring any fields or details) that changes the event status to "In Progress." This status is visible to all users, preventing overlap. | Coordinator | Resolved |
 

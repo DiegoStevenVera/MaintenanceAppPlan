@@ -1,9 +1,22 @@
 ﻿# Architecture Blueprint
 
-**Version:** 0.2 (Draft)
+**Version:** 0.3 (Draft)
 **Phase:** Architecture — Complete
 **Based on Domain Model:** v0.3
-**Last Updated:** 2026-06-09
+**Last Updated:** 2026-06-16
+
+---
+
+## Current Architectural Clarifications
+
+- v1 is local-first for demonstration and validation. Cloud deployment is intentionally provider-neutral until on-premise, Azure, or AWS is approved.
+- The domain uses a unified Asset model. Component is an Asset category, not a separate primary aggregate for v1.
+- The role model is Technician, Coordinator, Boss, Administrator. Boss is read-only.
+- Maintenance activities use the lifecycle SCHEDULED, IN_PROGRESS, COMPLETED, CLOSED.
+- Reports are versioned while their parent maintenance activity is editable. Closing the activity freezes report editing until a Coordinator reopens it.
+- Corrective reports use dynamic blocks and real-format sections, not a fixed six-section architecture.
+- Stop Here is a report/PDF visibility marker for corrective shift handover, not a separate partial-submission state machine.
+- v1 PDF generation is required. Email sharing uses iOS Share Sheet; backend email is future.
 
 ---
 
@@ -210,17 +223,18 @@ src/
 | Aspect | Approach |
 |--------|----------|
 | **Authentication** | JWT bearer tokens. Token contains: userId, username, role, projectId. Short-lived access token (15 min) + long-lived refresh token (7 days). |
-| **Role model** | Enum-based for v1: TECHNICIAN, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER. Future RBAC evolution documented in domain model §20.3. |
+| **Role model** | Enum-based for v1: TECHNICIAN, COORDINATOR, BOSS, ADMINISTRATOR. Boss is read-only. Future RBAC can evolve later. |
 | **Resource scoping** | All data is scoped to a project. The JWT contains the user's projectId. All queries filter by this scope. Cross-project access is prohibited. |
 | **Permission checks** | Authorization logic lives in the Application layer. Each use case checks: (a) is the user authenticated? (b) does the user's role permit this action? (c) does the user's project scope match the resource? |
-| **Report ownership** | Technicians can edit only their own draft reports. Coordinators can edit any draft. No user can edit a submitted report. |
-| **Manager access** | Managers and Project Managers have read-only access to all reports and dashboards. They cannot create or modify operational data. |
+| **Report ownership** | Technicians can edit reports while the parent maintenance activity is not CLOSED. Coordinators and Administrators can reopen CLOSED activities. Boss is read-only. Each finalized edit creates a version. |
+| **Boss access** | Boss has read-only access to all reports and dashboards. Boss cannot create or modify operational data. |
 
 ### 1.13 File Storage Strategy
 
 | Aspect | Approach |
 |--------|----------|
-| **Abstraction** | FileStorage interface in shared_kernel.domain. Methods: store(file: BinaryIO, path: str) -> str, etrieve(path: str) -> BinaryIO, delete(path: str). |
+| **Abstraction** | FileStorage interface in shared_kernel.domain. Methods: store(file: BinaryIO, path: str) -> str, 
+etrieve(path: str) -> BinaryIO, delete(path: str). |
 | **v1 implementation** | Local filesystem storage. Uploaded files stored under storage/{module}/{entity_id}/{filename}. Metadata (original filename, content type, size) stored in database Attachment record. |
 | **Future implementation** | Azure Blob Storage (or equivalent) via the same interface. Migration is transparent to the application. |
 | **Path scheme** | ttachments/{report_type}/{report_id}/{uuid}{ext} where report_type = preventive or corrective. |
@@ -232,7 +246,7 @@ src/
 | Concern | Approach |
 |---------|----------|
 | **Domain event store** | All domain events are persisted to an event_store table: id, event_type, aggregate_type, aggregate_id, payload (JSON), occurred_at, correlation_id. |
-| **Submitted report immutability** | Reports with documentStatus = SUBMITTED are stored in read-only tables. No UPDATE or DELETE operations are permitted. Corrections require addendum reports. |
+| **Report versioning** | Reports are versioned. Prior versions and generated PDFs are retained. A CLOSED maintenance activity blocks further editing until reopened by Coordinator or Administrator. |
 | **Signature traceability** | Signatures are stored as image records linked to the authenticated user. The user_id is captured at signature time and stored immutably with the report. |
 | **Asset mutation audit** | Every change to Asset.parentAsset or lifecycleStatus generates an AssetAssignment record and a domain event. |
 | **User action audit** | All state-changing API calls are logged with: userId, action, resource type, resource id, timestamp, IP, correlation id. |
@@ -343,7 +357,7 @@ asset_management ◄────────────────────
 | Aggregate Root | Key Entities / VOs Inside | Repositories Needed |
 |---------------|---------------------------|---------------------|
 | CorrectiveEvent | CorrectiveEvent, ReopenRecord (VO) | CorrectiveEventRepository: findById, findByStatus, findByAsset, findOpenByAssetAndSubsystem |
-| CorrectiveReport | CorrectiveReport, CorrectiveTask (polymorphic: StandardActivity, ReplacementTask), CorrectiveReportSection (6 sections), SectionCompletionState | CorrectiveReportRepository: findByEvent, findById, findDraftByEventAndShift |
+| CorrectiveReport | CorrectiveReport, CorrectiveTask (polymorphic: StandardActivity, ReplacementTask), DynamicReportBlock, StopHereMarker | CorrectiveReportRepository: findByEvent, findById, findEditableByEventAndShift |
 | PreventiveReport | PreventiveReport, StepResult (VO), TestExecutionResult (VO), PersonnelEntry (VO) | PreventiveReportRepository: findBySchedule, findById, findByAsset |
 | MaintenanceTemplate | MaintenanceTemplate, MaintenanceStep (VO), TestDefinition (VO), TestResultOption (VO), ToolRequirement (VO), PersonnelRequirement (VO) | MaintenanceTemplateRepository: findById, findBySubsystem, findActive |
 | TaskType | TaskType | TaskTypeRepository: findBySubsystem, findById |
@@ -363,8 +377,8 @@ asset_management ◄────────────────────
 | CorrectiveEventLifecycleService | Manages state transitions: start, resolve, close, reopen. Validates preconditions (no overlapping IN_PROGRESS events, all reports submitted before resolve). | CorrectiveEvent, CorrectiveReport (query) |
 | ReportSubmissionService | Validates completeness (signatures, required fields), transitions documentStatus to SUBMITTED, updates related entities (event timeline, schedule status), publishes events. | CorrectiveReport / PreventiveReport, CorrectiveEvent (status check), MaintenanceSchedule (status update) |
 | SignatureCaptureService | Records a drawn signature for a user on a report. Validates user authentication link. | Signature, Participant |
-| ReportSectionService | Manages section-level state: mark section complete, activate Stop Here at section N, transition report to SECTIONAL_DRAFT, resume editing. | CorrectiveReport |
-| CorrectiveReportSubmissionService | Handles Stop Here-aware submission: validates that only sections 1..N are required when Stop Here is active, or all 6 sections when full. | CorrectiveReport |
+| StopHereMarkerService | Records the point up to which a corrective report should be printed/shared when work continues across shifts. | CorrectiveReport |
+| CorrectiveReportVersioningService | Creates new report versions while the parent event is not CLOSED. | CorrectiveReport |
 
 **Domain Events Published:**
 
@@ -373,7 +387,7 @@ asset_management ◄────────────────────
 | CorrectiveEventCreated | First technician starts event | eventId, eventCode, sapCode, subsystemId, affectedAssetId, timestamp |
 | CorrectiveEventStatusChanged | Event transitions state | eventId, oldStatus, newStatus, userId, reason, timestamp |
 | CorrectiveReportSubmitted | Report finalized | reportId, eventId, shift, timestamp, participantIds, assetReplacementIds |
-| CorrectiveReportStopHere | Stop Here activated | reportId, eventId, stopSectionIndex, completedSectionIds, timestamp |
+| CorrectiveReportStopHereMarked | Stop Here marker changed | reportId, eventId, markerBlockId, note, timestamp |
 | PreventiveReportSubmitted | Report finalized | reportId, templateId, scheduleId, timestamp, participantIds |
 | MaintenanceScheduleCompleted | Schedule fulfilled by report submission | scheduleId, reportId, templateId, actualDate, timestamp |
 
@@ -385,6 +399,10 @@ asset_management ◄────────────────────
 - Consumed by: Infrastructure (report immutability enforcement, timeline projection)
 
 ### 2.4 Component Inventory Module
+
+**Status:** Superseded for v1 by the unified Asset model.
+
+The earlier draft separated `Component` from `Asset`. For v1, component-like items are represented as Assets with category = COMPONENT. Warehouse stock is represented by Asset lifecycle status and location/assignment records. A separate Component Inventory bounded context may be reconsidered later only if warehouse operations become complex enough to justify it.
 
 **Package:** component_inventory
 
@@ -509,7 +527,8 @@ asset_management ◄────────────────────
 
 ### 2.8 Reporting Module (Future)
 
-**Package:** eporting
+**Package:** 
+eporting
 
 **Status:** Empty for v1. Will be built when dashboard/analytics requirements emerge.
 
@@ -552,13 +571,13 @@ Each use case below defines:
 |--------|--------|
 | **Module** | Maintenance Execution |
 | **Application Service** | SubmitCorrectiveReportService |
-| **Input DTO** | { correctiveEventId, shift, startTimestamp, endTimestamp?, sapCode?, affectedAssetId, locationSnapshotId, failureDescription, faultType, sectionData (6 sections: summary, parts, labor, tests, doc, comments), tasks[], toolUsages[], participantIds[], attachmentIds[], isStopHere?, stopSectionIndex? } |
-| **Orchestration** | 1. Load CorrectiveEvent — verify status is IN_PROGRESS. 2. Load all referenced Assets, Tools, Participants. 3. Create CorrectiveReport with documentStatus = DRAFT, all 6 sections initialized. 4. For each task: if taskType = ReplacementTask → invoke AssetReplacementService (cross-module) AND ComponentMovementService (cross-module) to create ComponentMovement records. 5. Link each AssetReplacement and ComponentMovement to the task. 6. If isStopHere: mark sections > stopSectionIndex as disabled, transition to SECTIONAL_DRAFT, publish CorrectiveReportStopHere. 7. Add all Participants with signatures. 8. Call ReportSubmissionService.submit(report) — validates signatures on only completed sections, transitions to SUBMITTED (or SUBMITTED_PARTIAL if Stop Here active). 9. Save report. 10. Publish CorrectiveReportSubmitted. |
-| **Aggregates involved** | CorrectiveEvent (read), CorrectiveReport (create), CorrectiveTask (create × N — polymorphic), AssetReplacement (create × N via Asset Management), Asset (update × N), AssetAssignment (close + create × N), ComponentMovement (create × N via Component Inventory) |
-| **Transaction scope** | Single transaction: report + tasks + sections + replacements + component movements + hierarchy updates. Largest transaction in the system. |
-| **Events emitted** | CorrectiveReportSubmitted, CorrectiveReportStopHere (if Stop Here), AssetReplacementCompleted (×N), AssetHierarchyModified (×N), ComponentInstalled (×N), ComponentRemoved (×N), ToolUsed (×N) |
-| **Validations** | Event is IN_PROGRESS. All referenced assets exist. At least one participant with signature. Section data is valid for each completed section. If isStopHere, stopSectionIndex is 1-5. If task type is ReplacementTask, AssetReplacement + ComponentMovement records must be created. |
-| **Failure scenarios** | Event not found → 404. Event CLOSED → 422 (must reopen). Missing signatures → 422. Replacement validation fails → 422. Component movement validation fails → 422. Section data invalid → 422. |
+| **Input DTO** | { correctiveEventId, shift, startTimestamp, endTimestamp?, sapCode?, affectedAssetId, locationSnapshotId, failureDescription, faultType, dynamicBlocks[], tasks[], toolUsages[], participantSignatures[], attachmentIds[], stopHereMarker? } |
+| **Orchestration** | 1. Load CorrectiveEvent — verify status is IN_PROGRESS or COMPLETED, not CLOSED. 2. Load all referenced Assets, Tools, Participants. 3. Create or update the editable CorrectiveReport version for this event and shift. 4. For each task: if taskType = ReplacementTask, invoke AssetReplacementService and stock movement services. 5. Link each AssetReplacement to the task. 6. If stopHereMarker exists, store it as a PDF/report visibility marker. 7. Add all participant signatures. 8. Finalize the current version, generate PDF, save report version. 9. Publish CorrectiveReportVersionFinalized. |
+| **Aggregates involved** | CorrectiveEvent (read), CorrectiveReport (create/update version), CorrectiveTask (create × N — polymorphic), AssetReplacement (create × N via Asset Management), Asset (update × N), AssetAssignment (close + create × N) |
+| **Transaction scope** | Single transaction: report version + tasks + replacements + hierarchy updates. PDF generation may run after commit but must be traceably linked to the finalized version. |
+| **Events emitted** | CorrectiveReportVersionFinalized, CorrectiveReportStopHereMarked (if marker), AssetReplacementCompleted (×N), AssetHierarchyModified (×N), ToolUsed (×N) |
+| **Validations** | Event is editable. All referenced assets exist. Participant signatures are present. Dynamic block data is valid. If task type is ReplacementTask, AssetReplacement and stock movement records must be created. |
+| **Failure scenarios** | Event not found → 404. Event CLOSED → 422 (must reopen). Missing participant signatures → 422. Replacement validation fails → 422. Dynamic block data invalid → 422. |
 
 ### 3.3 Use Case: Submit Preventive Report
 
@@ -714,76 +733,74 @@ Each use case below defines:
 | **Validations** | Search text is non-empty. |
 | **Failure scenarios** | Empty search → 400. No results → empty list (200). |
 
-### 3.14 Use Case: Stop Here on Corrective Report
+### 3.14 Use Case: Mark Stop Here on Corrective Report
 
 | Aspect | Detail |
 |--------|--------|
 | **Module** | Maintenance Execution |
-| **Application Service** | StopHereService |
-| **Input DTO** | { reportId, stopSectionIndex, reason?, userId } |
-| **Orchestration** | 1. Load CorrectiveReport — verify documentStatus = DRAFT. 2. Call ReportSectionService.stopHere(report, stopSectionIndex): (a) validate sections 1..stopSectionIndex-1 are complete; (b) mark stopSectionIndex as IN_PROGRESS; (c) set sections > stopSectionIndex to DISABLED; (d) transition report to SECTIONAL_DRAFT. 3. Save. 4. Publish CorrectiveReportStopHere. |
-| **Aggregates involved** | CorrectiveReport (section state transitions) |
+| **Application Service** | MarkStopHereService |
+| **Input DTO** | { reportId, markerBlockId, note?, userId } |
+| **Orchestration** | 1. Load CorrectiveReport and parent event. 2. Verify parent event is not CLOSED. 3. Store/update Stop Here marker against a dynamic block or report point. 4. Save. 5. Publish CorrectiveReportStopHereMarked. |
+| **Aggregates involved** | CorrectiveReport |
 | **Transaction scope** | Single transaction |
-| **Events emitted** | CorrectiveReportStopHere |
-| **Validations** | Report is DRAFT. stopSectionIndex is 1-5. Sections before stopSectionIndex are complete. |
-| **Failure scenarios** | Report not found → 404. Report already SUBMITTED → 422. Invalid section index → 422. |
+| **Events emitted** | CorrectiveReportStopHereMarked |
+| **Validations** | Parent event is editable. markerBlockId is valid for the report format. |
+| **Failure scenarios** | Report not found -> 404. Event CLOSED -> 422. Invalid marker -> 422. |
 
-### 3.15 Use Case: Resume Corrective Report (Next Shift)
+### 3.15 Use Case: Continue Corrective Report (Next Shift)
 
 | Aspect | Detail |
 |--------|--------|
 | **Module** | Maintenance Execution |
-| **Application Service** | ResumeCorrectiveReportService |
-| **Input DTO** | { reportId, userId } |
-| **Orchestration** | 1. Load CorrectiveReport — verify documentStatus = SECTIONAL_DRAFT. 2. Call ReportSectionService.resume(report): (a) re-enable sections > stopSectionIndex, set them to PENDING; (b) set stopSectionIndex to IN_PROGRESS; (c) transition report back to DRAFT. 3. Save. |
-| **Aggregates involved** | CorrectiveReport (section state transitions) |
+| **Application Service** | ContinueCorrectiveReportService |
+| **Input DTO** | { correctiveEventId, previousReportId?, shift, userId } |
+| **Orchestration** | 1. Load corrective event and previous shift report if provided. 2. Verify event is not CLOSED. 3. Create or open editable report data for the current shift. 4. Allow continuation after Stop Here marker and correction of previous fields when needed. 5. Save draft/version. |
+| **Aggregates involved** | CorrectiveEvent, CorrectiveReport |
 | **Transaction scope** | Single transaction |
-| **Events emitted** | None (same-draft resume is internal state change) |
-| **Validations** | Report is SECTIONAL_DRAFT. User is authorized (same or next-shift technician). |
-| **Failure scenarios** | Report not found → 404. Report not in SECTIONAL_DRAFT → 422. |
-
-### 3.16 Use Case: Register Component
+| **Events emitted** | None initially |
+| **Validations** | Event is editable. User is authorized for corrective work. |
+| **Failure scenarios** | Event/report not found -> 404. Event CLOSED -> 422. |
+### 3.16 Use Case: Register Asset in Stock
 
 | Aspect | Detail |
 |--------|--------|
-| **Module** | Component Inventory |
-| **Application Service** | RegisterComponentService |
-| **Input DTO** | { componentTypeId, serialNumber, initialLocationId?, initialStatus (default: REGISTERED), manufacturingDate?, batchNumber?, notes? } |
-| **Orchestration** | 1. Load ComponentType — verify exists and is active. 2. Verify serialNumber uniqueness within componentType. 3. Create Component with status REGISTERED. 4. If initialLocationId provided, create ComponentMovement (REGISTERED → EN_STOCK). 5. Save. |
-| **Aggregates involved** | Component (create), ComponentMovement (create if location provided), ComponentType (read) |
+| **Module** | Asset Management / Inventory |
+| **Application Service** | RegisterAssetInStockService |
+| **Input DTO** | { assetTypeId, serialNumber?, internalCode?, initialLocationId?, initialStatus = IN_STOCK, manufacturingDate?, batchNumber?, notes? } |
+| **Orchestration** | 1. Load AssetType. 2. Verify serial number or internal code uniqueness. 3. Create Asset with category from AssetType. 4. Create stock/location assignment. 5. Save. |
+| **Aggregates involved** | Asset, AssetAssignment / StockRecord, AssetType |
 | **Transaction scope** | Single transaction |
-| **Events emitted** | ComponentStatusChanged |
-| **Validations** | ComponentType exists. Serial number is unique for this type. Initial location exists if provided. |
-| **Failure scenarios** | ComponentType not found → 404. Duplicate serial number → 409. Location not found → 404. |
+| **Events emitted** | AssetCreated, AssetLifecycleStatusChanged |
+| **Validations** | AssetType exists. Serial/internal code is unique. Location exists if provided. |
+| **Failure scenarios** | AssetType not found -> 404. Duplicate identifier -> 409. Location not found -> 404. |
 
-### 3.17 Use Case: Install Component in Slot
+### 3.17 Use Case: Install Asset in Slot
 
 | Aspect | Detail |
 |--------|--------|
-| **Module** | Component Inventory (called from Maintenance Execution via ReplacementTask) |
-| **Application Service** | InstallComponentService |
-| **Input DTO** | { componentId, slotLocationId, assetId, replacementTaskId?, correctiveEventId?, userId } |
-| **Orchestration** | 1. Load Component — verify status is EN_STOCK. 2. Load SlotLocation — verify slot is empty (no Component assigned with INSTALLED status). 3. Load Asset for context. 4. Update Component: currentSlotLocation = slotLocationId, currentAsset = assetId, status = INSTALLED. 5. Create ComponentMovement with movementType = INSTALL. 6. Save. 7. Publish ComponentInstalled. |
-| **Aggregates involved** | Component (update), ComponentMovement (create), SlotLocation (read) |
+| **Module** | Asset Management |
+| **Application Service** | InstallAssetInSlotService |
+| **Input DTO** | { installedAssetId, parentAssetId, position, replacementTaskId?, correctiveEventId?, userId } |
+| **Orchestration** | 1. Load installed Asset and parent Asset. 2. Verify installed Asset is installable. 3. Verify position is available. 4. Create AssetAssignment under parent at position. 5. Update lifecycle status. 6. Save. |
+| **Aggregates involved** | Asset, AssetAssignment |
 | **Transaction scope** | Single transaction |
-| **Events emitted** | ComponentInstalled, ComponentStatusChanged |
-| **Validations** | Component exists and is EN_STOCK. Slot exists and is not occupied. Asset exists. |
-| **Failure scenarios** | Component not found → 404. Component not EN_STOCK → 422. Slot occupied → 409. Asset not found → 404. |
+| **Events emitted** | AssetHierarchyModified, AssetLifecycleStatusChanged |
+| **Validations** | Assets exist. Position is available. Installed asset is not active elsewhere. |
+| **Failure scenarios** | Asset not found -> 404. Position occupied -> 409. Asset not installable -> 422. |
 
-### 3.18 Use Case: Remove Component from Slot
+### 3.18 Use Case: Remove Asset from Slot
 
 | Aspect | Detail |
 |--------|--------|
-| **Module** | Component Inventory (called from Maintenance Execution via ReplacementTask) |
-| **Application Service** | RemoveComponentService |
-| **Input DTO** | { componentId, reason (enum: REPLACED, REMOVED_FOR_REPAIR, LOST), destinationLocationId?, replacementTaskId?, correctiveEventId?, userId } |
-| **Orchestration** | 1. Load Component — verify status is INSTALLED. 2. Clear currentSlotLocation and currentAsset. 3. Set status based on reason: REPLACED → REMOVED, REMOVED_FOR_REPAIR → EN_REPARACIÓN, LOST → PERDIDO. 4. Create ComponentMovement. 5. If destinationLocationId, create follow-up movement to that Location. 6. Save. 7. Publish ComponentRemoved + ComponentStatusChanged. |
-| **Aggregates involved** | Component (update), ComponentMovement (create), Location (read if provided) |
+| **Module** | Asset Management / Inventory |
+| **Application Service** | RemoveAssetFromSlotService |
+| **Input DTO** | { removedAssetId, reason, destinationLocationId?, replacementTaskId?, correctiveEventId?, userId } |
+| **Orchestration** | 1. Load Asset. 2. Verify it is installed/active. 3. Close current AssetAssignment. 4. Set lifecycle status according to reason. 5. If destination is provided, create stock/location assignment. 6. Save. |
+| **Aggregates involved** | Asset, AssetAssignment, Location |
 | **Transaction scope** | Single transaction |
-| **Events emitted** | ComponentRemoved, ComponentStatusChanged |
-| **Validations** | Component exists and is INSTALLED. Reason is valid. |
-| **Failure scenarios** | Component not found → 404. Component not INSTALLED → 422. |
-
+| **Events emitted** | AssetHierarchyModified, AssetLifecycleStatusChanged |
+| **Validations** | Asset exists and is installed. Reason is valid. |
+| **Failure scenarios** | Asset not found -> 404. Asset not installed -> 422. |
 ---
 
 ## 4. Persistence & Query Architecture
@@ -928,7 +945,8 @@ replaced_by_id      UUID?       FK → asset_assignment.id (self-ref for lineage
 |-------|-------------|
 | Active assignment for an asset | WHERE asset_id = ? AND deactivated_at IS NULL |
 | Assignments at a point in time | WHERE asset_id = ? AND assigned_at <= ? AND (deactivated_at IS NULL OR deactivated_at > ?) |
-| Replacement lineage | Recursive: follow eplaced_by_id chain |
+| Replacement lineage | Recursive: follow 
+eplaced_by_id chain |
 | Composition of a parent at time T | WHERE parent_asset_id = ? AND assigned_at <= T AND (deactivated_at IS NULL OR deactivated_at > T) |
 | Full history of an asset | WHERE asset_id = ? ORDER BY assigned_at ASC |
 
@@ -964,15 +982,15 @@ user_id             UUID?       The user who triggered the operation (from appli
 - Indexed by correlation_id for tracing an entire operation's event chain.
 - The event store is not a message queue. It is an audit log and a source for future read-model projection rebuilding.
 
-### 4.5 Immutable Report Persistence
+### 4.5 Report Version Persistence
 
 | Principle | Description |
 |-----------|-------------|
-| RPT-IMM-001 | Reports with documentStatus = SUBMITTED must never be modified. |
-| RPT-IMM-002 | The report tables (preventive_report, corrective_report) enforce this via application logic (not database triggers). Once documentStatus transitions to SUBMITTED, the application layer rejects all update attempts. |
-| RPT-IMM-003 | Report data is stored in normalized form (main tables for headers, child tables for tasks/step results/participants/attachments). No JSON blob storage. |
-| RPT-IMM-004 | Corrections after submission require creating a **supplementary report** or an **addendum** linked to the original. The original report remains untouched. |
-| RPT-IMM-005 | Signatures and attachments associated with a submitted report are also immutable by association. |
+| RPT-VER-001 | Reports are versioned. Each finalized edit creates a new immutable report version snapshot and generated PDF. |
+| RPT-VER-002 | Latest editable report data may be updated while the parent activity/event is not CLOSED. |
+| RPT-VER-003 | Once the parent activity/event is CLOSED, the application layer rejects edits until a Coordinator or Administrator reopens it. |
+| RPT-VER-004 | Report data is stored in normalized form where the structure is stable; dynamic corrective blocks may use structured JSON payloads if the block schema varies by task type. |
+| RPT-VER-005 | Signatures and attachments are linked to the report version they were captured for. |
 
 ### 4.6 Attachment Storage Strategy
 
@@ -980,7 +998,8 @@ user_id             UUID?       The user who triggered the operation (from appli
 |--------|----------|
 | **v1 backend** | Local filesystem under storage/attachments/{report_type}/{report_id}/ |
 | **Metadata** | Stored in ttachment table: id, report_id, report_type, file_path, original_filename, content_type, size_bytes, captured_at, step_index? |
-| **Abstraction** | FileStorage interface in shared_kernel. Method: store(file, path) → path, etrieve(path) → stream, delete(path). |
+| **Abstraction** | FileStorage interface in shared_kernel. Method: store(file, path) → path, 
+etrieve(path) → stream, delete(path). |
 | **On-premises** | Filesystem implementation. Directory structure organized by module and entity. |
 | **Cloud migration** | When migrating to Azure Blob Storage (or equivalent), only the infrastructure implementation changes. The storage path convention ({module}/{entity_type}/{entity_id}/{filename}) translates naturally to blob container paths. |
 
@@ -1592,15 +1611,16 @@ The following architectural decisions were made during the creation of this docu
 | ADR-004 | **In-Process Domain Events (No Message Broker)** | Monolith deployment, 11 users, no need for distributed messaging. Events are synchronous in transaction boundary. | Future extraction to message broker requires event schema compatibility. |
 | ADR-005 | **Local Filesystem Storage with Abstraction Layer** | Simplest v1 storage; `FileStorageService` abstraction enables future blob migration. | Backup complexity; must plan for migration path early. |
 | ADR-006 | **CQRS-Lite (No Separate Read/Write Models)** | Single model serves both purposes. Optimized projections (closure table, event store) exist within same database. | Read model tuning is per-use-case rather than architectural split. |
-| ADR-007 | **Enum User Roles (Not RBAC)** | Three roles (Technician, Supervisor, Coordinator). No requirement for custom role creation. | Future RBAC would require refactoring; document extensibility path. |
+| ADR-007 | **Enum User Roles (Not RBAC)** | Four roles (Technician, Coordinator, Boss, Administrator). No requirement for custom role creation. | Future RBAC would require refactoring; document extensibility path. |
 | ADR-008 | **Polymorphic Report References** | `Report` base with `CorrectiveReport` and `PreventiveReport` subtypes. Shared core fields, distinct behavior. | ORM mapping complexity; future evolution path to fully separate entities if divergence grows. |
 | ADR-009 | **iOS 17+ Native SwiftUI (Not React/Flutter)** | Enterprise iOS-only deployment. Premium animations, PencilKit, native camera API. | Single-platform only; future web frontend is a separate project. |
 | ADR-010 | **REST API over GraphQL** | Simple CRUD patterns, well-known ecosystem, easy to secure and cache. | Future GraphQL wrapper possible for complex hierarchy queries. |
 | ADR-011 | **JWT Bearer Tokens (Short-Lived Access + Refresh)** | Stateless auth, no server-side session storage. Refresh token rotation. | Token revocation requires blacklist or short expiry. |
 | ADR-012 | **Event Store in Same PostgreSQL Instance** | Single database for transactional data and event store (separate schema). No operational complexity. | Migration path to dedicated event store if event volume grows significantly. |
 | ADR-013 | **Optimistic Locking via `version` Column** | Concurrent modification detection for assets and reports. No pessimistic locks needed at current scale. | Retry logic required in application layer on `version` conflict. |
-| ADR-014 | **Component Inventory as Separate Bounded Context** | Components have independent lifecycle (movement, repair, scrap) from Assets. Slot hierarchy is distinct from Asset hierarchy. | Cross-context coordination via domain events. ReplacementTask triggers both AssetReplacement + ComponentMovement atomically. |
+| ADR-014 | **Unified Asset Model for Equipment and Components** | The same traceability, hierarchy, replacement, stock, and history rules apply to large equipment and smaller replaceable components. | Reduces duplication in v1. Component Inventory may be split later if inventory complexity grows. |
 | ADR-015 | **Jinja2 + WeasyPrint for PDF Generation** | PDF is a pure infrastructure concern. Jinja2 HTML templates + WeasyPrint rendering is the simplest Python PDF pipeline. No expensive report designer tooling. | Two templates (preventive/corrective). GeneratedReport entity for traceability only. Generation triggered at report submission. |
-| ADR-016 | **Corrective Report 6-Section Decomposition** | The Stop Here workflow (section-by-section progressive fill) reflects the operational reality of multi-shift corrective maintenance. Section state is tracked independently per report. | More complex report state machine (DRAFT, SECTIONAL_DRAFT, SUBMITTED, SUBMITTED_PARTIAL). Section completion validation is per-section, not all-or-nothing. |
+| ADR-016 | **Dynamic Corrective Report Blocks** | Corrective reports must follow the real report format and show specialized blocks only when needed, such as component replacement inside activities performed. | Avoids forcing a rigid six-section workflow. Requires block schemas and validation per task type. |
 | ADR-017 | **Client-Side Share Sheet for v1 Email** | iOS native UIActivityViewController (Share Sheet) for PDF sharing — zero backend complexity. Backend async notification (email/SMS) is v2. Email is a presentation concern, not a domain concern. | PDF must be downloaded to device first. No delivery tracking, no scheduled notifications in v1. |
+
 

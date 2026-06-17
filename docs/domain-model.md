@@ -2,7 +2,27 @@
 
 **Version:** 0.3 (Draft)
 **Phase:** Phase 3 — Domain Modeling
-**Last Updated:** 2026-06-09
+**Last Updated:** 2026-06-16
+
+---
+
+## 0. Clarified Domain Decisions
+
+The following decisions supersede older draft sections in this document where they conflict:
+
+- Initial device target is shared iPad. iPhone support is future.
+- v1 runs locally for demo/validation before any cloud or on-premise approval.
+- Preventive and corrective maintenance share this lifecycle: SCHEDULED, IN_PROGRESS, COMPLETED, CLOSED.
+- Reports are editable while the parent maintenance activity is not CLOSED.
+- Each finalized edit creates a new report version and generated PDF snapshot.
+- Stop Here is a corrective report/PDF visibility marker, not a SECTIONAL_DRAFT state machine.
+- Corrective reports use dynamic blocks following the real corrective format, not a fixed six-section structure.
+- Asset and Component are unified under one Asset model for v1. Component is an Asset category, not a separate primary entity.
+- Part number identifies AssetType. Serial number or internal code identifies an Asset instance.
+- The role formerly named Supervisor is now Boss. Boss is read-only.
+- Coordinator closes/reopens maintenance activities.
+
+The sections below should be updated progressively to reflect these decisions in full detail.
 
 ---
 

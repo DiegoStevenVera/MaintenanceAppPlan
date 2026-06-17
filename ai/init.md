@@ -121,9 +121,10 @@ The AI must explicitly respect the current phase.
 
 ## Infrastructure
 
-* AWS
-* ECS Fargate
-* Terraform
+* Local-first for v1 demo and validation
+* Cloud provider not yet approved
+* AWS, Azure, or on-premise deployment must remain possible
+* Terraform only after the target provider is approved
 
 ## Database
 
