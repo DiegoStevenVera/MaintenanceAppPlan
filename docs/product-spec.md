@@ -1026,40 +1026,57 @@ Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents
 
 ### 7.1 Color Philosophy
 
-- **Safe, industrial, clear.** No aggressive colors. High contrast for readability in bright outdoor environments.
-- **Neutral base** with a single accent for interactive elements.
-- **Status colors** are semantic, not decorative.
+- **Hitachi-branded, industrial, clear.** The UI uses the company logo colors as brand anchors: red, black, white, and graphite gray.
+- **Red is the primary brand accent.** Use it for primary actions, active navigation, selected controls, and key brand moments.
+- **Do not overuse red.** Red must remain visually important; avoid using it as a large background or decorative fill across operational screens.
+- **Neutral base.** Operational screens should mostly use white, near-white, black, and graphite gray so reports and field data remain easy to read.
+- **Status colors are semantic, not decorative.** Red can be used for critical/overdue/error states, but normal workflow status must still use distinct semantic colors.
+
+### 7.1.1 Brand Palette
+
+The palette is derived from the three provided Hitachi logo references:
+
+| Token | Hex | Source / Usage |
+|-------|-----|----------------|
+| `brandRed` | `#E60012` | Hitachi red logo. Primary accent, selected states, primary CTA |
+| `brandBlack` | `#000000` | Black logo variant. High contrast text and dark mode base |
+| `brandWhite` | `#FFFFFF` | White logo background / negative space. Primary app background |
+| `brandGraphite` | `#4A4A4A` | Gray "Inspire the Next" logo variant. Secondary text, icons, subdued chrome |
+| `brandRedPressed` | `#B8000E` | Pressed/active variant of brand red |
+| `brandRedSubtle` | `#FDEBEC` | Very light red tint for selected rows, alerts, and subtle brand surfaces |
 
 | Token | Hex (Light) | Hex (Dark) | Usage |
 |-------|-------------|------------|-------|
-| `backgroundPrimary` | `#FFFFFF` | `#1C1C1E` | Screen backgrounds |
-| `backgroundSecondary` | `#F5F5F7` | `#2C2C2E` | Card/grouped backgrounds |
-| `backgroundTertiary` | `#E8E8ED` | `#3A3A3C` | Fills, search bars |
-| `textPrimary` | `#1C1C1E` | `#FFFFFF` | Primary text |
-| `textSecondary` | `#6E6E73` | `#AEAEB2` | Secondary/label text |
-| `textTertiary` | `#AEAEB2` | `#636366` | Placeholder text |
-| `accent` | `#007AFF` | `#0A84FF` | Buttons, links, active states |
-| `destructive` | `#FF3B30` | `#FF453A` | Delete, errors, critical |
-| `separator` | `#D1D1D6` | `#38383A` | Dividers, borders |
+| `backgroundPrimary` | `#FFFFFF` | `#111111` | Screen backgrounds |
+| `backgroundSecondary` | `#F6F6F6` | `#1C1C1E` | Grouped backgrounds |
+| `backgroundTertiary` | `#EFEFEF` | `#2A2A2C` | Fills, search bars, disabled fields |
+| `textPrimary` | `#1F1F1F` | `#F5F5F5` | Primary text |
+| `textSecondary` | `#4A4A4A` | `#C7C7CC` | Secondary/label text |
+| `textTertiary` | `#8A8A8A` | `#8E8E93` | Placeholder text |
+| `accent` | `#E60012` | `#FF3B30` | Primary buttons, links, active states |
+| `accentPressed` | `#B8000E` | `#FF6B63` | Pressed primary controls |
+| `accentSubtle` | `#FDEBEC` | `#3A1114` | Selected rows, subtle highlights |
+| `destructive` | `#B00020` | `#FF453A` | Delete, errors, destructive confirmation |
+| `separator` | `#D9D9D9` | `#3A3A3C` | Dividers, borders |
 
 ### 7.2 Status Color System
 
 | Status | Color | Hex | Icon |
 |--------|-------|-----|------|
-| Open / Todo | Blue | `#007AFF` | `circle.fill` |
-| In Progress | Amber | `#FF9F0A` | `arrow.triangle.2.circlepath` |
-| Resolved | Teal | `#34C759` | `checkmark.circle.fill` |
-| Closed | Gray | `#8E8E93` | `lock.circle.fill` |
-| Overdue | Red | `#FF3B30` | `exclamationmark.circle.fill` |
-| Draft | Light Blue | `#5AC8FA` | `doc.text` |
-| Submitted | Green | `#34C759` | `checkmark.seal.fill` |
-| Rejected | Red | `#FF3B30` | `xmark.seal.fill` |
+| Scheduled | Graphite | `#4A4A4A` | `calendar` |
+| In Progress | Amber | `#C77800` | `arrow.triangle.2.circlepath` |
+| Completed | Green | `#1F8A4C` | `checkmark.circle.fill` |
+| Closed | Dark Gray | `#6B6B6B` | `lock.circle.fill` |
+| Overdue | Hitachi Red | `#E60012` | `exclamationmark.circle.fill` |
+| Draft | Graphite | `#4A4A4A` | `doc.text` |
+| Finalized | Green | `#1F8A4C` | `checkmark.seal.fill` |
+| Rejected | Dark Red | `#B00020` | `xmark.seal.fill` |
 | Removed | Dark Gray | `#636366` | `trash.circle.fill` |
-| Warehouse | Purple | `#AF52DE` | `shippingbox.fill` |
-| Critical Severity | Red | `#FF3B30` | `exclamationmark.triangle.fill` |
-| High Severity | Orange | `#FF9500` | `exclamationmark.circle.fill` |
-| Medium Severity | Yellow | `#FFCC00` | `exclamationmark.circle` |
-| Low Severity | Gray | `#8E8E93` | `info.circle.fill` |
+| Warehouse | Steel Blue | `#2F6F9F` | `shippingbox.fill` |
+| Critical Severity | Hitachi Red | `#E60012` | `exclamationmark.triangle.fill` |
+| High Severity | Orange | `#D56A00` | `exclamationmark.circle.fill` |
+| Medium Severity | Yellow | `#B88700` | `exclamationmark.circle` |
+| Low Severity | Gray | `#8A8A8A` | `info.circle.fill` |
 
 ### 7.3 Typography Hierarchy
 

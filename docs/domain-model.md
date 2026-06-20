@@ -19,6 +19,9 @@ The following decisions supersede older draft sections in this document where th
 - Corrective reports use dynamic blocks following the real corrective format, not a fixed six-section structure.
 - Asset and Component are unified under one Asset model for v1. Component is an Asset category, not a separate primary entity.
 - Part number identifies AssetType. Serial number or internal code identifies an Asset instance.
+- Business anchor assets are the main assets used for operational questions and metrics, such as trains, Zone Controllers, Frontam cabinets, CRK cabinets, servers, and functional software groups.
+- Maintenance reports link to assets through report scope records. A report may involve one or many business anchor assets, and corrective work may additionally reference smaller component assets for replacements.
+- Stage represents rollout/planning scope, not a hard visibility boundary. Assets and locations may be assigned to one or more stages over time.
 - The role formerly named Supervisor is now Boss. Boss is read-only.
 - Coordinator closes/reopens maintenance activities.
 
@@ -63,9 +66,9 @@ This platform manages the lifecycle of railway maintenance operations, including
 | Subdomain | Type | Description |
 |-----------|------|-------------|
 | Asset Management | **Core** | Recursive equipment hierarchy, types, composition rules, geographic locations, replacements, historical traceability |
-| Component Inventory | **Core** | Serialized component parts catalog, slot hierarchy, movement tracking, warehouse integration, lifecycle management |
+| Component Inventory | Supporting / Future | Warehouse and component stock views built from unified Assets in v1; may become its own bounded context later |
 | Preventive Maintenance | **Core** | Procedure definitions, annual planning, weekly scheduling, report execution with multi-test steps |
-| Corrective Maintenance | **Core** | Incident events, multi-shift reporting, section-based progressive reports, asset replacements, component movements |
+| Corrective Maintenance | **Core** | Incident events, multi-shift reporting, dynamic report blocks, asset replacements, component movements |
 | Personnel | Supporting | User identities, roles, participation, drawn signatures |
 | Inventory & Tools | Supporting | Tool catalog with certification tracking, consumable types, warehouse stock (best-effort view of external system) |
 | Organizational Context | Generic | Site/Project/Stage/System/Subsystem scoping |
@@ -75,14 +78,14 @@ This platform manages the lifecycle of railway maintenance operations, including
 - AssetType is a pure type descriptor, free of operational or contextual rules.
 - Composition rules are scoped by Subsystem, not embedded in AssetType.
 - The asset hierarchy is recursive and unbounded in depth.
-- Assets and Components are separate hierarchies. Assets are maintainable equipment. Components are inventory-controlled serialized items installed at slots within Assets.
-- Component inventory has its own bounded context with independent lifecycle, movement tracking, and slot navigation.
+- Assets and Components are represented by one unified Asset hierarchy for v1. Component-like items are Assets with category COMPONENT.
+- Component inventory concepts are handled through Asset lifecycle status, warehouse location, stock views, and AssetAssignment history until warehouse operations justify a separate bounded context.
 - GeographicLocation absorbs the Area hierarchy as a recursive structure supporting up to 4 levels of operational location attribution.
 - SlotLocation is a separate hierarchy used exclusively for component installation positions within equipment.
 - Organizational hierarchy (Site/Project/Stage/System/Subsystem) is independent from GeographicLocation.
 - Identity is system-generated UUID; serial/part numbers are business identifiers (optional when unavailable).
-- Draft is a document-level status, orthogonal to operational lifecycle status. Corrective reports add intermediate SECTIONAL_DRAFT for partial shift completion.
-- Reports become immutable upon submission.
+- Draft is a document-level status, orthogonal to operational lifecycle status. Corrective reports use dynamic blocks and a Stop Here marker for partial PDF/report visibility, not a separate SECTIONAL_DRAFT lifecycle.
+- Report versions become immutable when finalized. The parent maintenance activity remains editable until it is CLOSED.
 - Replacements are first-class domain entities affecting hierarchy, traceability, and history.
 - A single corrective replacement task may trigger multiple AssetReplacement records.
 - PDF generation is an infrastructure concern composed after report submission, not a domain entity.
@@ -970,7 +973,7 @@ A CorrectiveEvent represents an unplanned incident or failure that requires corr
 
 #### 6.3.1 Description
 
-A CorrectiveReport captures the maintenance work performed during a single shift within a corrective event. It is structured into 6 progressive sections. Each section can be independently completed. The technician may activate **Stop Here** at any section to pause work for the current shift; subsequent sections become hidden (except Attachments). The same draft report is resumed in the next shift.
+A CorrectiveReport captures the maintenance work performed during a single shift within a corrective event. It follows the real corrective report format through dynamic blocks, not a fixed six-section workflow. The technician may activate **Stop Here** at a block boundary to generate or display the report only up to that point; later empty fields are hidden in the PDF. A later shift may continue the event and may edit earlier report content while the parent maintenance activity is not CLOSED.
 
 #### 6.3.2 Attributes
 
@@ -983,10 +986,10 @@ A CorrectiveReport captures the maintenance work performed during a single shift
 | endTimestamp | Timestamp (optional) | When this shift's work ended |
 | sapCode | String (optional) | SAP code (may be repeated from the event or refined) |
 | subsystem | Reference to Subsystem | Scoping context |
-| documentStatus | Enum: DRAFT, SECTIONAL_DRAFT, SUBMITTED | Document lifecycle status |
+| documentStatus | Enum: DRAFT, FINALIZED | Current editable/finalized state of this report version |
 | submittedAt | Timestamp (optional) | When the report was finalized |
-| stopHereAtSection | Integer (nullable) | The section index where Stop Here was activated. Sections > this index are hidden (except Attachments). Null when all sections are active. |
-| sections | Collection of CorrectiveReportSection | The 6 report sections |
+| stopHereMarker | String / block reference (nullable) | The dynamic block boundary where Stop Here was activated. Later empty fields are hidden from the PDF. |
+| dynamicBlocks | Collection of CorrectiveReportBlock | Real-format corrective report blocks, including conditional blocks such as component replacement |
 | tasks | Collection of CorrectiveTask | Actions performed during this shift |
 | toolsUsed | Collection of ToolUsage | Tools logged during this shift |
 | comments | Text | Free-text shift notes and observations |
@@ -996,9 +999,9 @@ A CorrectiveReport captures the maintenance work performed during a single shift
 | additionalComments | Text | Free-text final notes |
 | validationResponsible | Reference to User (optional) | Who validated the operational state |
 
-#### 6.3.3 CorrectiveReportSection (Value Object)
+#### 6.3.3 CorrectiveReportBlock (Value Object)
 
-Each report contains exactly 6 sections, represented as value objects:
+Each report contains dynamic blocks that follow the real corrective report format:
 
 **Section 1 — General Information:**
 
@@ -1073,7 +1076,7 @@ Each report contains exactly 6 sections, represented as value objects:
 | sectionIndex | Integer | 1-6 |
 | isCompleted | Boolean | Whether the section data has been filled |
 | completedAt | Timestamp (optional) | When the section was completed |
-| isStoppedHere | Boolean | Whether Stop Here was activated at this section |
+| isStoppedHere | Boolean | Whether Stop Here was activated at this block |
 
 #### 6.3.4 Domain Rules
 
@@ -1082,15 +1085,15 @@ Each report contains exactly 6 sections, represented as value objects:
 | COR-RPT-001 | A CorrectiveReport belongs to exactly one CorrectiveEvent. |
 | COR-RPT-002 | A CorrectiveEvent may have multiple CorrectiveReports (one per shift). |
 | COR-RPT-003 | Reports are ordered within the event by startTimestamp. |
-| COR-RPT-004 | When documentStatus = DRAFT or SECTIONAL_DRAFT, the report may be modified. When SUBMITTED, the report is immutable. |
+| COR-RPT-004 | When documentStatus = DRAFT and the parent maintenance activity is not CLOSED, the report may be modified. FINALIZED report versions are immutable snapshots. |
 | COR-RPT-005 | A report must have at least one Participant with a signature before submission. |
 | COR-RPT-006 | The locationSnapshot is captured at execution time and does not change. |
 | COR-RPT-007 | If the event is IN_PROGRESS, multiple reports may be in DRAFT simultaneously. However, only one report per shift should be submitted for each shift period. |
-| COR-RPT-008 | When documentStatus = SECTIONAL_DRAFT, sections > stopHereAtSection must have null data (except attachments). |
-| COR-RPT-009 | Resuming a SECTIONAL_DRAFT report sets documentStatus back to DRAFT and clears stopHereAtSection. |
-| COR-RPT-010 | Sections completed before Stop Here must not be editable after resume (read-only display). |
-| COR-RPT-011 | Section 5 (Corrective Activities) must have at least one activity before submission. |
-| COR-RPT-012 | Sections 1, 2, and 5 are required before submission. Sections 3, 4, and 6 may be omitted if Stop Here was activated earlier. |
+| COR-RPT-008 | When Stop Here is set, generated PDFs and report previews must hide later blank blocks. Stored draft data is not deleted. |
+| COR-RPT-009 | Resuming after Stop Here clears or moves the marker as the next shift continues work. |
+| COR-RPT-010 | Content before Stop Here may be edited while the parent maintenance activity is not CLOSED. |
+| COR-RPT-011 | The activities performed block must have at least one activity before finalizing a report version. |
+| COR-RPT-012 | Conditional blocks, such as component replacement, appear only when the selected activity type requires them. |
 
 ### 6.4 CorrectiveTask — Type Hierarchy
 
@@ -1788,12 +1791,12 @@ GeneratedReport ─── * ──── (polymorphic ref to PreventiveReport / 
 | **EquipmentCategory** | EquipmentCategory | — | N1-N2 classification, scoped per Subsystem. |
 | **EquipmentKind** | EquipmentKind | — | Equipment variant sub-classification. |
 | **GeographicLocation** | GeographicLocation (recursive) | — | Absorbs AreaN1-N4 as a recursive hierarchy. Max 4 levels. |
-| **ComponentType** | ComponentType | — | Part-number catalog entry. |
-| **Component** | Component, ComponentMovement (collection) | — | Owns movement history. References SlotLocation and Asset externally. |
-| **SlotLocation** | SlotLocation (recursive), SlotType, SlotImage | — | Independent hierarchy per EquipmentKind. |
+| **ComponentType** | ComponentType | - | Legacy term for part-number catalog entry; superseded by AssetType for v1. |
+| **Component** | Component, ComponentMovement (collection) | - | Legacy aggregate; superseded by unified Asset plus AssetAssignment and AssetReplacement for v1. |
+| **SlotLocation** | SlotLocation (recursive), SlotType, SlotImage | - | Legacy physical-position model; for v1, position is stored on AssetAssignment unless richer slot navigation is needed. |
 | **Location** | Location, LocationType | — | Physical storage locations catalog. |
 | **CorrectiveEvent** | CorrectiveEvent, ReopenRecord (VO) | — | Owns lifecycle state. References reports by ID. |
-| **CorrectiveReport** | CorrectiveReport, CorrectiveTask (StandardActivity, ReplacementTask) | CorrectiveReportSection (6 sections), Participant, ToolUsage, Attachment, SectionCompletionState | Owns its tasks (polymorphic), sections, participants, tool usages, and attachments. |
+| **CorrectiveReport** | CorrectiveReport, CorrectiveTask (StandardActivity, ReplacementTask) | CorrectiveReportBlock, Participant, ToolUsage, Attachment, StopHereMarker | Owns its dynamic blocks, tasks, participants, tool usages, and attachments. |
 | **PreventiveReport** | PreventiveReport | StepResult, TestExecutionResult, PersonnelEntry, Participant, ToolUsage, Attachment | Owns its results, test results, personnel entries, participants, tool usages, and attachments. |
 | **MaintenanceTemplate** | MaintenanceTemplate | MaintenanceStep, TestDefinition, TestResultOption, ToolRequirement, PersonnelRequirement | Owns its step definitions, test definitions, and requirements. |
 | **MaintenancePlanEntry** | MaintenancePlanEntry | — | Standalone planning record. |
@@ -2043,17 +2046,17 @@ SUBMITTED → the report is finalized, signed, and locked. No further modificati
               └──────────┘
 
 States:
-  DRAFT            → report is being filled, all sections editable
-  SECTIONAL_DRAFT  → Stop Here activated at section N; sections > N hidden (except attachments)
-  SUBMITTED        → report is finalized and immutable
-  SUBMITTED_PARTIAL → submitted with incomplete sections (Stop Here was active)
+  DRAFT     -> current editable report version
+  FINALIZED -> immutable report version and generated PDF snapshot
+
+Stop Here:
+  Stop Here is a marker inside DRAFT/FINALIZED content, not a lifecycle state.
+  It controls PDF/report visibility after a selected dynamic block.
 
 Transitions:
-  DRAFT              → SECTIONAL_DRAFT : stopHere(sectionIndex)
-  DRAFT              → SUBMITTED       : submit() (all sections completed)
-  SECTIONAL_DRAFT    → SUBMITTED       : submit() (submit partial)
-  SECTIONAL_DRAFT    → DRAFT           : resume() (continue editing next shift)
-  DRAFT              → DRAFT           : save() (auto-save every 30s)
+  DRAFT     -> DRAFT     : save() (auto-save every 30s)
+  DRAFT     -> FINALIZED : finalizeVersion() (creates immutable version and PDF snapshot)
+  FINALIZED -> DRAFT     : createNextVersion() while parent maintenance activity is not CLOSED
 `
 
 ---

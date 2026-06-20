@@ -11,6 +11,9 @@
 
 - v1 is local-first for demonstration and validation. Cloud deployment is intentionally provider-neutral until on-premise, Azure, or AWS is approved.
 - The domain uses a unified Asset model. Component is an Asset category, not a separate primary aggregate for v1.
+- Business anchor assets are modeled explicitly with asset category/flags and query support through hierarchy closure.
+- Maintenance activities and report versions link to assets through role-based scope records, not through a single ambiguous asset field.
+- Stage is a rollout/planning scope. Asset and location assignment to stages is many-to-many over time.
 - The role model is Technician, Coordinator, Boss, Administrator. Boss is read-only.
 - Maintenance activities use the lifecycle SCHEDULED, IN_PROGRESS, COMPLETED, CLOSED.
 - Reports are versioned while their parent maintenance activity is editable. Closing the activity freezes report editing until a Coordinator reopens it.
@@ -1622,5 +1625,4 @@ The following architectural decisions were made during the creation of this docu
 | ADR-015 | **Jinja2 + WeasyPrint for PDF Generation** | PDF is a pure infrastructure concern. Jinja2 HTML templates + WeasyPrint rendering is the simplest Python PDF pipeline. No expensive report designer tooling. | Two templates (preventive/corrective). GeneratedReport entity for traceability only. Generation triggered at report submission. |
 | ADR-016 | **Dynamic Corrective Report Blocks** | Corrective reports must follow the real report format and show specialized blocks only when needed, such as component replacement inside activities performed. | Avoids forcing a rigid six-section workflow. Requires block schemas and validation per task type. |
 | ADR-017 | **Client-Side Share Sheet for v1 Email** | iOS native UIActivityViewController (Share Sheet) for PDF sharing — zero backend complexity. Backend async notification (email/SMS) is v2. Email is a presentation concern, not a domain concern. | PDF must be downloaded to device first. No delivery tracking, no scheduled notifications in v1. |
-
 

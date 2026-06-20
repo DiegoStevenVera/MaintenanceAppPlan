@@ -178,7 +178,27 @@ Future:
 
 ---
 
-## 9. PDF Sharing UI
+## 9. Visual Direction
+
+The iPad mock-first UI should follow the Hitachi logo palette:
+
+| Token | Hex | UI Usage |
+|-------|-----|----------|
+| Hitachi Red | `#E60012` | Primary actions, active tab, selected filters, key brand moments |
+| Hitachi Black | `#000000` | High contrast text and dark mode foundation |
+| Hitachi White | `#FFFFFF` | Primary app background |
+| Hitachi Graphite | `#4A4A4A` | Secondary text, icons, quiet interface chrome |
+
+Guidelines:
+
+- Use red as a precise accent, not as a dominant background.
+- Keep operational screens mostly neutral so forms, reports, and asset data are easy to scan.
+- Do not use red for normal statuses if it could be confused with error or urgency.
+- Use amber for in-progress, green for completed/finalized, graphite/dark gray for scheduled/closed, and red for overdue/critical/destructive states.
+
+---
+
+## 10. PDF Sharing UI
 
 Use iOS Share Sheet in v1:
 

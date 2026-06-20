@@ -30,13 +30,14 @@ App-visible data, business values, dropdown options, report content, role labels
 
 | ID | Site | Name |
 |----|------|------|
-| project-ml2 | Lima | Metro Lima Line 2 |
+| project-ml2 | Lima | Linea 2 del Metro de Lima |
 
 ### Stage
 
 | ID | Project | Name |
 |----|---------|------|
-| stage-1a | Metro Lima Line 2 | Stage 1A |
+| stage-1a | Linea 2 del Metro de Lima | Etapa 1A |
+| stage-1b | Linea 2 del Metro de Lima | Etapa 1B |
 
 ### System
 
@@ -75,6 +76,10 @@ App-visible data, business values, dropdown options, report content, role labels
 | loc-patio-sa | Area N2 | Patio Santa Anita | loc-patio |
 | loc-station | Area N1 | Estacion | - |
 | loc-colectora | Area N2 | Colectora Industrial (PL22) | loc-station |
+| loc-hermilio | Area N2 | Hermilio Valdizan | loc-station |
+| loc-evitamiento | Area N2 | Evitamiento | loc-station |
+| loc-ovalo | Area N2 | Ovalo Santa Anita | loc-station |
+| loc-mercado | Area N2 | Mercado Santa Anita | loc-station |
 | loc-colectora-tech | Area N3 | Area tecnica | loc-colectora |
 | loc-room-221 | Area N4 | Sala 2.21 | loc-colectora-tech |
 | loc-tunnel | Area N1 | Tunel | - |
@@ -92,13 +97,15 @@ Part number belongs to AssetType.
 |----|------|----------|-------------|-----------|
 | type-train | Tren | Equipo mayor | - | CBTC |
 | type-cabinet-frontam | Gabinete Frontam | Equipo mayor | FRNT-CAB-001 | CBTC |
+| type-zone-controller | Zone Controller | Equipo mayor | ZC-CAB-001 | CBTC |
 | type-server-frontam | Servidor Frontam | Equipo | SRV-FRONTAM-001 | CBTC |
 | type-pcsg | Servidor PCSG | Equipo | PCSG-001 | CBTC |
 | type-cier | Tarjeta CIER | Componente | CIER-001 | CBTC |
 | type-crk-cabinet | Gabinete CRK | Equipo mayor | CRK-CAB-001 | ATS |
 | type-ats-server | Servidor ATS | Equipo | ATS-SRV-001 | ATS |
 | type-ats-software | Software ATS | Software | - | ATS |
-| type-tod | TOD | Equipment | TOD-001 | CBTC |
+| type-functional-group | Grupo funcional | Logico | - | ATS |
+| type-tod | TOD | Equipo | TOD-001 | CBTC |
 | type-cdv | Circuito de via | Equipo mayor | CDV-001 | IXL |
 
 ---
@@ -111,10 +118,16 @@ Part number belongs to AssetType.
 |----|------|------|----------|----------------------|--------|----------|
 | asset-train-14 | Tren 14 | Tren | Equipo mayor | INT-TRAIN-014 | Activo | Movil |
 | asset-train-26 | Tren 26 | Tren | Equipo mayor | INT-TRAIN-026 | Activo | Movil |
+| asset-train-27 | Tren 27 | Tren | Equipo mayor | INT-TRAIN-027 | Activo | Movil |
+| asset-train-28 | Tren 28 | Tren | Equipo mayor | INT-TRAIN-028 | Activo | Movil |
+| asset-train-29 | Tren 29 | Tren | Equipo mayor | INT-TRAIN-029 | Activo | Movil |
 | asset-frontam-colectora | Frontam Colectora | Gabinete Frontam | Equipo mayor | FRNT-CO-001 | Activo | Sala 2.21 |
 | asset-frontam-patio | Frontam Patio | Gabinete Frontam | Equipo mayor | FRNT-PT-001 | Activo | Patio Santa Anita |
+| asset-zc-patio-1 | Zone Controller Patio 1 | Zone Controller | Equipo mayor | ZC-PT-001 | Activo | Patio Santa Anita |
+| asset-zc-patio-2 | Zone Controller Patio 2 | Zone Controller | Equipo mayor | ZC-PT-002 | Activo | Patio Santa Anita |
 | asset-crk-1 | CRK 1 | Gabinete CRK | Equipo mayor | CRK-SN-001 | Activo | Colectora Industrial |
 | asset-crk-2 | CRK 2 | Gabinete CRK | Equipo mayor | CRK-SN-002 | Activo | Colectora Industrial |
+| asset-ats-patio | Software ATS Patio | Grupo funcional | Logico | INT-ATS-PATIO | Activo | Patio Santa Anita |
 | asset-cdv-1018 | CBDAC 1018 | Circuito de via | Equipo mayor | CDV-1018 | Activo | Patio Santa Anita |
 
 ### Child Assets
@@ -129,6 +142,36 @@ Part number belongs to AssetType.
 | asset-limsys002 | LIMSYS002 | Servidor ATS | CRK 1 | B | LIMSYS002-SN | Activo |
 | asset-ats-sw-1 | Software ATS | Software ATS | LIMSYS001 | Software | ATS-v3.2.1 | Activo |
 | asset-tod-train-26 | TOD Tren 26 M1 | TOD | Tren 26 | Coche M1 | TOD-26-M1 | Activo |
+
+### Business Anchor Assets
+
+Business anchor assets are the main assets used for operational questions, filters, and metrics.
+
+| Asset | Anchor Type | Notes |
+|-------|-------------|-------|
+| Tren 14 | Activo principal movil | Shared across current and future stages |
+| Tren 26 | Activo principal movil | Shared across current and future stages |
+| Frontam Colectora | Activo principal fijo | Used for preventive and corrective history |
+| Frontam Patio | Activo principal fijo | Used for preventive and corrective history |
+| Zone Controller Patio 1 | Activo principal fijo | Preventive activities may include Zone Controller Patio 1 and 2 together |
+| Zone Controller Patio 2 | Activo principal fijo | Preventive activities may include Zone Controller Patio 1 and 2 together |
+| Software ATS Patio | Activo logico | Represents ATS software maintenance across multiple servers |
+
+### Stage Asset Scope
+
+| Asset / Location | Stage | Role |
+|------------------|-------|------|
+| Colectora Industrial | Etapa 1A | Alcance inicial |
+| Hermilio Valdizan | Etapa 1A | Alcance inicial |
+| Evitamiento | Etapa 1A | Alcance inicial |
+| Ovalo Santa Anita | Etapa 1A | Alcance inicial |
+| Mercado Santa Anita | Etapa 1A | Alcance inicial |
+| Tren 14 | Etapa 1A | Compartido |
+| Tren 26 | Etapa 1A | Compartido |
+| Tren 27 | Etapa 1A | Compartido |
+| Tren 28 | Etapa 1A | Compartido |
+| Tren 29 | Etapa 1A | Compartido |
+| Tren 14 | Etapa 1B | Compartido futuro |
 
 ---
 

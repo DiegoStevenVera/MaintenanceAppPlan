@@ -79,6 +79,8 @@ The following decisions supersede earlier draft assumptions:
 | Maintenance Report | The operational document generated from a maintenance activity. It may have versions while the activity is still editable |
 | Asset | Any trackable technical item, including trains, cabinets, servers, cards, fans, software, tools, and replaceable parts |
 | Component | A smaller or replaceable Asset category. It is not a separate top-level entity in v1 |
+| Business Anchor Asset | A major or operationally meaningful Asset used for business questions, maintenance history, and metrics, such as a train, Zone Controller, Frontam cabinet, CRK cabinet, server, or functional software group |
+| Report Scope Asset | An Asset linked to a maintenance activity or report because it is the primary target, an involved asset, an affected asset, or a replaced/installed component |
 | Boss | Read-only leadership role formerly referred to as Supervisor in older draft documents |
 
 ---
@@ -145,8 +147,11 @@ Site
 
 - **OR-RQ-001:** Module visibility must be configurable per project and per stage. A project may enable modules only for specific subsystems.
 - **OR-RQ-002:** The same subsystem (e.g., ATS) may exist in multiple projects with independent module configurations.
-- **OR-RQ-003:** All asset, activity, and report data must be scoped to and isolated by project and stage.
+- **OR-RQ-003:** All activity and report data must be scoped to a project and may reference one or more stages for planning/reporting context.
 - **OR-RQ-004:** Cross-project data visibility must be prohibited unless explicitly configured.
+- **OR-RQ-005:** Stage must be treated as rollout/planning scope, not as a strict visibility boundary for technicians. Users may see assets and stations from all active stages in their project when their role allows it.
+- **OR-RQ-006:** Assets and geographic locations may be assigned to one or more stages over time, supporting assets that operate across stages such as trains.
+- **OR-RQ-007:** Future stage imports, such as Stage 1B assets and stations, must be addable without redesigning the asset hierarchy or report model.
 
 ---
 
@@ -259,7 +264,19 @@ Assets must support categorization by type and category. The v1 model uses one u
 | FR-ASM-005 | The combination of (parent asset, slot/position, type) must be unique within the parent. | High |
 | FR-ASM-022 | Every asset without a serial number must have a unique internal code generated or assigned by the system. | High |
 
-#### 6.1.4 Hierarchy Rules
+#### 6.1.4 Business Anchor Assets and Report Scope
+
+Business users commonly ask questions about major operational assets, not only about small replaceable components. The model must support this explicitly.
+
+| ID | Requirement | Priority |
+|----|-------------|----------|
+| FR-ASM-023 | The system must mark whether an Asset is a business anchor asset for reporting and operational navigation. | High |
+| FR-ASM-024 | Maintenance activities must link to one or many report scope assets with an explicit role, such as primary target, involved asset, affected asset, replaced asset, installed asset, or context asset. | High |
+| FR-ASM-025 | Preventive maintenance should normally use business anchor assets as the report scope, while corrective maintenance may additionally reference smaller component assets for replacement traceability. | High |
+| FR-ASM-026 | Asset history queries for a business anchor asset must include maintenance performed directly on that asset and maintenance involving its descendant assets. | High |
+| FR-ASM-027 | The system must allow logical or functional assets, such as "Software ATS Patio", when a maintenance activity targets a functional scope distributed across several physical servers. | Medium |
+
+#### 6.1.5 Hierarchy Rules
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
