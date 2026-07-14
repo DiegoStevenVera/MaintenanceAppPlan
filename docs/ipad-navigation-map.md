@@ -85,8 +85,16 @@ flowchart TD
 |--------|------------|
 | Programado | Detalle preventivo -> Iniciar -> Detalle preventivo En progreso |
 | En progreso | Detalle preventivo -> Formulario reporte preventivo |
-| Completado | Detalle preventivo -> Editar reporte / PDF / Cerrar if Coordinator |
-| Cerrado | Detalle preventivo -> View only / Reabrir if Coordinator |
+| Completado | Detalle preventivo -> Reabrir a En progreso / PDF / Cerrar if Coordinator |
+| Cerrado | Detalle preventivo -> View only / Reabrir a En progreso if Coordinator |
+
+Additional detail behavior:
+
+- Detalle preventivo muestra `Acciones` despues de la imagen del equipo grande y antes de datos generales.
+- Los preventivos completados pueden reabrirse a `En progreso` por Ingeniero de Mantenimiento, Coordinador o Administrador; Jefe queda en solo lectura.
+- Los preventivos cerrados solo pueden reabrirse a `En progreso` por Coordinador o Administrador.
+- `Reportes anteriores` navega desde cada historico a una vista previa PDF del reporte realizado en ese momento.
+- Los comentarios preventivos son reutilizables por tipo de mantenimiento y/o equipo grande para futuras ejecuciones.
 
 ---
 
@@ -126,8 +134,26 @@ flowchart TD
 |--------|------------|
 | Programado / Abierto | Detalle correctivo -> Iniciar |
 | En progreso | Detalle correctivo -> Crear/Editar reporte |
-| Completado | Detalle correctivo -> Editar reporte / PDF / Cerrar if Coordinator |
-| Cerrado | Detalle correctivo -> View only / Reabrir if Coordinator |
+| Completado | Detalle correctivo -> Reabrir a En progreso / PDF / Cerrar if Coordinator |
+| Cerrado | Detalle correctivo -> View only / Reabrir a En progreso if Coordinator |
+
+Additional detail behavior:
+
+- Detalle correctivo incluye `Comentarios del correctivo`.
+- Estos comentarios se asocian solo al evento correctivo actual; no se reutilizan en futuros correctivos del mismo equipo.
+- Las acciones correctivas usan la misma grilla adaptable con iconos que preventivos.
+- Los correctivos completados pueden reabrirse a `En progreso` por Ingeniero de Mantenimiento, Coordinador o Administrador; Jefe queda en solo lectura.
+- Los correctivos cerrados solo pueden reabrirse a `En progreso` por Coordinador o Administrador.
+- Las acciones aparecen arriba del detalle, antes de `Datos del evento`, para que iniciar, crear reporte, completar o cerrar no quede al final del scroll.
+- `Etapa` es metadata del proyecto; `Ubicacion fisica` debe venir del equipo grande/asset seleccionado y no debe mostrarse como rama seleccionable del arbol.
+- En cambio de componente, el asset retirado muestra la ruta completa seleccionada en el arbol. El componente a reponer se selecciona desde un sheet `Seleccionar el componente a reemplazar` con buscador y lista filtrada por almacen.
+
+### 5.1.1 Corrective List Filters
+
+- `Correctivos` incluye filtros opcionales `Hoy`, `Esta semana`, `Este Mes` y `Mes especifico`.
+- Si no hay filtro activo, la lista muestra correctivos abiertos, en progreso, completados y cerrados.
+- Si hay filtro activo, se filtra por `Fecha y hora de creacion de aviso`.
+- La busqueda textual filtra por nombre del evento, codigo, SAP o equipo afectado.
 
 ### 5.2 Stop Here Navigation
 

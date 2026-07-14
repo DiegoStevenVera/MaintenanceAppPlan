@@ -18,12 +18,14 @@ Package.resolved
 
 # Python
 __pycache__/
+.pycache/
 *.py[cod]
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .venv/
 venv/
+app_mant/
 .env
 .env.*
 !.env.example
@@ -51,4 +53,3 @@ temp/
 
 # Logs
 *.log
-

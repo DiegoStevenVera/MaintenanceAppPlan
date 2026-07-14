@@ -1,6 +1,6 @@
 # iOS Frontend
 
-SwiftUI iPad mock-first frontend.
+SwiftUI iPad mock-first frontend targeting iPadOS/iOS 26.5.
 
 This folder contains the first source scaffold for the iPad preventive maintenance mock. It is intentionally backend-free and uses local in-memory mock data.
 
@@ -19,11 +19,16 @@ MaintenanceAppMock/
   Views/
 ```
 
-## Important
+## Xcode Project
 
-This repository is currently being prepared from Windows, so no Xcode project has been generated or compiled yet.
+The iPad mock now includes an Xcode project:
 
-On the company Mac, create a new iPad-focused SwiftUI app in Xcode and add the files from `MaintenanceAppMock/`.
+```text
+MaintenanceAppMock.xcodeproj
+```
+
+Open it in Xcode and run the `MaintenanceAppMock` scheme on an iPad running iPadOS 26.5. The target is universal (`iPhone` + `iPad`) so it can also be installed on an iPhone running iOS 26.5 for validation, although the primary layout is still optimized for iPad.
+
+Current local note: Xcode 26.2 provides the iOS 26.2 SDK and accepts deployment target 26.5 with a warning. Install the matching iOS 26.5 SDK/Xcode release when available to remove that warning.
 
 See `XCODE_SETUP.md`.
-

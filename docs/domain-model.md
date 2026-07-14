@@ -20,6 +20,7 @@ The following decisions supersede older draft sections in this document where th
 - Asset and Component are unified under one Asset model for v1. Component is an Asset category, not a separate primary entity.
 - Part number identifies AssetType. Serial number or internal code identifies an Asset instance.
 - Business anchor assets are the main assets used for operational questions and metrics, such as trains, Zone Controllers, Frontam cabinets, CRK cabinets, servers, and functional software groups.
+- In the Spanish app UI, business anchor assets are shown as `Equipos`. This is a business label for large or operationally meaningful assets, not a separate aggregate from Asset.
 - Maintenance reports link to assets through report scope records. A report may involve one or many business anchor assets, and corrective work may additionally reference smaller component assets for replacements.
 - Stage represents rollout/planning scope, not a hard visibility boundary. Assets and locations may be assigned to one or more stages over time.
 - The role formerly named Supervisor is now Boss. Boss is read-only.
@@ -97,6 +98,7 @@ This platform manages the lifecycle of railway maintenance operations, including
 | Term | Domain Definition |
 |------|------------------|
 | Asset | Any equipment, component, or software entity in the maintenance hierarchy. Identified by system-generated UUID. May have serial number (optional). |
+| Equipment / Equipo | Business-facing term for a large or operationally meaningful Asset shown in the UI as `Equipos`. It is typically a top-level or reporting-relevant asset such as a train, ATS server, cabinet, Zone Controller, Frontam, workstation, switch machine, or track circuit. It is represented by Asset with `isBusinessAnchor = true`, not by a separate aggregate. |
 | AssetType | A pure classification of assets defining identity policies (serial number rules, part number rules, support for versioning). Does not define composition rules. |
 | AssetCompositionRule | A contextual policy defining which child AssetTypes a parent AssetType may contain, in what quantity, and in which position. Scoped per Subsystem. |
 | GeographicLocation | A physical facility or geographic position (station, tunnel section, technical room). Applies to fixed and mobile assets. |
@@ -223,6 +225,8 @@ An Asset is a node in the recursive equipment hierarchy. It represents any physi
 | position | String (optional) | Slot or position within the parent asset | Required when parentAsset is set. Describes where the asset lives within its parent (e.g., "Coche M1", "Rack A", "Slot 3"). Free-text or constrained by composition rules. |
 | geographicLocation | Reference to GeographicLocation (optional) | Current operational geographic location | Required for fixed-location assets. Optional for mobile assets. Represents the latest known location at the Area hierarchy level. |
 | subsystem | Reference to Subsystem | The subsystem this asset belongs to | Required. Determines which composition rules apply. |
+| isBusinessAnchor | Boolean | Whether this Asset is exposed as an `Equipo` / business anchor for operational navigation, report scope selection, metrics, and history. | Required. True for large or operationally meaningful assets; false for ordinary child components unless explicitly promoted by business need. |
+| businessLabel | String / enum (optional) | User-facing business grouping such as `Equipo`, while the technical entity remains Asset. | Optional in the domain; useful for UI labels and reporting filters. |
 | isMobile | Boolean | Whether this asset changes geographic location | Derived from AssetType policy or explicit. True for trains. |
 | registrationMethod | Enum: PRE_REGISTERED, MANUAL | How the asset was entered into the system | MANUAL means the asset was entered ad-hoc during corrective maintenance. |
 | lifecycleStatus | Enum: ACTIVE, REMOVED, SCRAPPED, IN_WAREHOUSE | Current operational status | ACTIVE = installed in hierarchy and operational. REMOVED = was in hierarchy but removed. SCRAPPED = discarded. IN_WAREHOUSE = stored as spare. |
@@ -731,7 +735,7 @@ The authoritative definition of a preventive maintenance procedure. Created by t
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| role | String | Personnel role/type (e.g., "Administrador del sistema", "Técnico básico") |
+| role | String | Personnel role/type (e.g., "Administrador del sistema", "Ingeniero de Mantenimiento") |
 | count | Integer | Number of persons needed |
 | hours | Decimal | Estimated hours per person |
 
@@ -817,6 +821,8 @@ The execution record of a preventive maintenance activity. Captures what was don
 | locationSnapshot | Reference to GeographicLocation | The geographic location at time of maintenance (immutable snapshot) |
 | involvedAssets | List of Reference to Asset | The assets that received maintenance |
 | actualDate | Date | When the activity was performed |
+| activityStartedAt | Timestamp | Time when the maintenance activity moved to IN_PROGRESS |
+| activityEndedAt | Timestamp | End time entered by the technician/coordinator in the report form |
 | shift | Enum: DAY, NIGHT | Which shift performed it |
 | documentStatus | Enum: DRAFT, SUBMITTED | Document lifecycle status |
 | submittedAt | Timestamp (optional) | When the report was finalized |
@@ -824,7 +830,7 @@ The execution record of a preventive maintenance activity. Captures what was don
 | toolsUsed | Collection of ToolUsage | Tools logged during the activity |
 | materialsConsumed | Text | Free-text description of spare parts or consumables used |
 | observations | Text | Free-text observations from the technicians |
-| conclusions | Text | Final conclusions |
+| conclusions | Enum: OPERATIONAL, PARTIALLY_OPERATIONAL, NON_OPERATIONAL | Final equipment condition selected from a controlled list |
 | participants | Collection of Participant | Technicians who participated and signed |
 | attachments | Collection of Attachment | Images or documents captured during maintenance |
 | workOrder | String (optional) | Weekly maintenance work code |
@@ -866,7 +872,7 @@ The execution record of a preventive maintenance activity. Captures what was don
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| role | String | Personnel role/type (e.g., "Administrador del sistema", "Técnico básico") |
+| role | String | Personnel role/type (e.g., "Administrador del sistema", "Ingeniero de Mantenimiento") |
 | count | Integer | Number of persons with this role |
 | totalHours | Decimal | Total hours worked by all persons of this role |
 
@@ -886,8 +892,39 @@ The execution record of a preventive maintenance activity. Captures what was don
 | PRV-RPT-010 | A PreventiveReport must have at least one PersonnelEntry before submission. |
 | PRV-RPT-011 | If any step has TestDefinitions in the template, corresponding TestExecutionResults must be recorded for completed steps. |
 | PRV-RPT-012 | The area field records the GeographicLocation at execution time (immutable snapshot). |
+| PRV-RPT-013 | General metadata displayed in the preventive form (site, project, stage, system, subsystem, date, start time, location path, equipment, manual) is system-populated and read-only except for activityEndedAt. |
+| PRV-RPT-014 | Preventive steps and tests are hierarchical: each StepResult owns zero or more TestExecutionResults, and each test result is selected from its TestDefinition options when applicable. |
+| PRV-RPT-015 | All active maintainers assigned to the current day should be preselected as report participants; users may uncheck non-participants before finalizing. |
+| PRV-RPT-016 | UI must distinguish report versions of the current PreventiveReport from previous PreventiveReports executed on the same business anchor equipment. |
+| PRV-RPT-017 | Previous report history is a query over immutable historical PreventiveReports by business anchor asset/template, not a child collection owned by the active report. |
 
-### 5.6 Preventive Maintenance Entity Lifecycle
+### 5.7 MaintenanceKnowledgeComment
+
+#### 5.7.1 Description
+
+MaintenanceKnowledgeComment captures reusable maintainer comments shown as a chat-like thread in maintenance detail screens. These comments are not tied to a single report version. They are scoped to a maintenance template, an equipment/business anchor asset, or both, so future executions of the same maintenance or work on the same `Equipo` can reuse the context.
+
+#### 5.7.2 Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| id | UUID | Internal identifier |
+| scopeType | Enum: TEMPLATE, EQUIPMENT, TEMPLATE_EQUIPMENT | Reuse scope for the comment |
+| maintenanceTemplate | Reference to MaintenanceTemplate (optional) | Template scope when the comment applies to a type of maintenance |
+| equipmentAsset | Reference to Asset (optional) | Business anchor asset scope when the comment applies to a specific `Equipo` |
+| author | Reference to User | User who wrote the comment |
+| message | Text | Comment body |
+| createdAt | Timestamp | Creation time |
+
+#### 5.7.3 Domain Rules
+
+| Rule | Description |
+|------|-------------|
+| PRV-CMT-001 | MaintenanceKnowledgeComment is reusable operational knowledge, not a report observation. It must remain visible to future executions matching its scope. |
+| PRV-CMT-002 | The UI must show the author's display name, role, profile image/avatar, message, and scope context. |
+| PRV-CMT-003 | A user profile must support either an uploaded profile image or a default avatar selected in the application. |
+
+### 5.8 Preventive Maintenance Entity Lifecycle
 
 `
 MaintenanceTemplate (definition)
@@ -965,6 +1002,7 @@ A CorrectiveEvent represents an unplanned incident or failure that requires corr
 | COR-EVT-001 | A CorrectiveEvent must have a unique internal eventCode. The sapCode is an external reference and may be duplicated across events (if SAP sends multiple notifications for the same incident). |
 | COR-EVT-002 | A CorrectiveEvent belongs to exactly one Subsystem. |
 | COR-EVT-003 | A CorrectiveEvent must reference at least the affectedAsset at the time of creation. If the exact component is unknown, the nearest known parent asset is used. |
+| COR-EVT-003A | Corrective event creation should first filter by Subsystem, then guide asset selection from the searchable business anchor Equipo down to the exact failed asset/component when known. Geographic location is metadata and must not be represented as a selectable asset node. |
 | COR-EVT-004 | The lifecycleStatus follows the state machine defined in Section 16. |
 | COR-EVT-005 | When lifecycleStatus = CLOSED, no new CorrectiveReports may be added without reopening the event. |
 | COR-EVT-006 | The event maintains a chronological timeline of all linked reports, replacements, and status transitions. |
@@ -1048,7 +1086,7 @@ Each report contains dynamic blocks that follow the real corrective report forma
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | sectionIndex | Integer | 4 |
-| failureType | Enum or String | Classification: FUNCTIONAL, SOFTWARE, HARDWARE, MECHANICAL, ELECTRICAL, ENVIRONMENTAL, OTHER |
+| failureType | Enum or String | Classification: FUNCTIONAL, HARDWARE, SOFTWARE, COMMUNICATIONS, ENERGY |
 
 **Section 5 — Corrective Activities:**
 
@@ -1194,6 +1232,8 @@ The Personnel domain manages user identities, roles, and participation tracking.
 | passwordHash | String | Securely stored credential |
 | fullName | String | Display name |
 | role | Enum: TECHNICIAN, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER | System role |
+| profileImage | Binary or Reference (optional) | Uploaded profile image selected from the user's device gallery |
+| defaultAvatarKey | String (optional) | Application-provided avatar identifier when no uploaded image exists |
 | project | Reference to Project (optional) | Default project scope. Initially tied to one project. |
 | isActive | Boolean | Whether the account is active |
 | createdAt | Timestamp | Account creation timestamp |

@@ -46,7 +46,7 @@ Visible items:
 - App name or logo placeholder.
 - Context: `Metro Lima Linea 2 · Etapa 1A · Senalizacion`.
 - User name.
-- Role label: `Tecnico mantenedor`, `Coordinador`, `Jefe`, `Administrador`.
+- Role label: `Ingeniero de Mantenimiento`, `Coordinador`, `Jefe`, `Administrador`.
 
 ### 2.3 Tab Bar Labels
 
@@ -69,7 +69,7 @@ Visible items:
 ┌────────────────────────────────────────────────────────────┐
 │ Inicio                                                     │
 │ Hola, Diego Vera                                           │
-│ Rol: Tecnico mantenedor                                    │
+│ Rol: Ingeniero de Mantenimiento                                    │
 ├────────────────────────────────────────────────────────────┤
 │ [Preventivos de hoy] [Correctivos activos]                 │
 │ [Pendientes de cierre] [Buscar activo]                     │
@@ -111,7 +111,7 @@ Visible items:
 ┌────────────────────────────────────────────────────────────┐
 │ Preventivos                                  [Filtro]      │
 ├────────────────────────────────────────────────────────────┤
-│ Segments: Vencidos | Hoy | Semana | Mes | Cerrados         │
+│ Filtros: Hoy | Esta semana | Este Mes | Mes/año + buscar   │
 ├────────────────────────────────────────────────────────────┤
 │ Hoy                                                        │
 │ ┌────────────────────────────────────────────────────────┐ │
@@ -158,17 +158,23 @@ App-visible labels:
 │ Inspeccion de gabinete Frontam - Colectora                 │
 │ Estado: En progreso                                        │
 ├────────────────────────────────────────────────────────────┤
+│ Imagen referencial del equipo grande                       │
+├────────────────────────────────────────────────────────────┤
+│ Acciones                                                   │
+│ [icon Generar/Editar reporte] [icon Completar] [icon PDF]  │
+│ Botonera en grilla, botones anchos, centrados y full width │
+├────────────────────────────────────────────────────────────┤
 │ Activo: Frontam Colectora                                  │
 │ Subsistema: CBTC                                           │
 │ Ubicacion: Sala 2.21                                       │
 │ Manual: ML2-CBTC-FRONTAM-MN-001             [Abrir PDF]    │
 ├────────────────────────────────────────────────────────────┤
-│ Acciones                                                   │
-│ [Generar/Editar reporte] [Completar] [Compartir PDF]       │
-├────────────────────────────────────────────────────────────┤
 │ Versiones de reporte                                       │
 │ - Version 2 · 17/06/2026 10:42 · PDF disponible            │
 │ - Version 1 · 17/06/2026 10:15 · PDF disponible            │
+├────────────────────────────────────────────────────────────┤
+│ Reportes anteriores                                        │
+│ - Historico del equipo grande -> abre vista previa PDF     │
 ├────────────────────────────────────────────────────────────┤
 │ Notas de mantenedores                                      │
 │ - Revisar ventiladores antes de iniciar limpieza.          │
@@ -181,8 +187,8 @@ App-visible labels:
 |--------|------------|-------------|------|
 | Programado | Iniciar | Iniciar | Ver |
 | En progreso | Generar/Editar reporte, Completar | Generar/Editar reporte, Completar | Ver |
-| Completado | Editar reporte, Compartir PDF | Editar reporte, Compartir PDF, Cerrar | Ver |
-| Cerrado | Ver | Ver, Reabrir | Ver |
+| Completado | Reabrir, Compartir PDF | Reabrir, Compartir PDF, Cerrar | Ver |
+| Cerrado | Ver | Reabrir | Ver |
 
 ---
 
@@ -198,9 +204,6 @@ App-visible labels:
 │ Datos generales                                            │
 │ Fecha, hora inicio, hora fin, orden SAP, orden trabajo      │
 ├────────────────────────────────────────────────────────────┤
-│ Personal                                                   │
-│ [Agregar participante]                                     │
-├────────────────────────────────────────────────────────────┤
 │ Herramientas                                               │
 │ [Agregar herramienta]                                      │
 ├────────────────────────────────────────────────────────────┤
@@ -212,10 +215,12 @@ App-visible labels:
 │ Fotos / Anexos                                             │
 │ [+ Agregar foto]                                           │
 ├────────────────────────────────────────────────────────────┤
-│ Conclusiones / Comentarios                                 │
+│ Participantes y firmas                                     │
+│ Participante activo [Dibujar firma] [Preview firma]        │
 ├────────────────────────────────────────────────────────────┤
-│ Firmas                                                     │
-│ [Agregar firma]                                            │
+│ Conclusiones / Comentarios                                 │
+│ Estado final del equipo: [dropdown ancho]                  │
+│ Comentarios adicionales del mantenimiento: [texto]         │
 ├────────────────────────────────────────────────────────────┤
 │ [Guardar borrador] [Finalizar reporte]                     │
 └────────────────────────────────────────────────────────────┘
@@ -250,6 +255,9 @@ When user taps `Finalizar reporte`:
 ┌────────────────────────────────────────────────────────────┐
 │ Correctivos                                      [+]        │
 ├────────────────────────────────────────────────────────────┤
+│ Filtros opcionales: Hoy | Esta semana | Este Mes | Mes/año  │
+│ Buscar por evento, SAP o equipo                            │
+├────────────────────────────────────────────────────────────┤
 │ Segments: Abiertos | En progreso | Completados | Cerrados  │
 ├────────────────────────────────────────────────────────────┤
 │ En progreso                                               │
@@ -273,6 +281,38 @@ Hidden/read-only for:
 
 - Boss.
 
+### 7.3 Create Corrective Event
+
+The `+` opens a large iPad sheet with a focused creation flow.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│ Nuevo correctivo                                           │
+├────────────────────────────────────────────────────────────┤
+│ Datos del contexto                                         │
+│ Sede, Proyecto, Etapa, Sistema (read-only)                 │
+│ Subsistema [ATS | CBTC | IXL]                              │
+│ Severidad [Baja | Media | Alta]                            │
+│ Ubicacion fisica del asset (from selected equipment)       │
+├────────────────────────────────────────────────────────────┤
+│ Equipo afectado                                            │
+│ [Buscar equipo grande]                                     │
+│ Lista filtrada por subsistema                              │
+│ ▾ Equipo grande                                            │
+│   ▾ Gabinete / conjunto principal                          │
+│     ▾ Modulo interno                                       │
+│       ( ) Fuente de poder                                  │
+│       (✓) Tarjeta de comunicacion                          │
+├────────────────────────────────────────────────────────────┤
+│ Nombre del evento SAP [editable]                           │
+│ Notificacion SAP [editable]                                │
+│ Fecha y hora de creacion de aviso [editable]               │
+│ Fecha y hora de respuesta [read-only default now]          │
+├────────────────────────────────────────────────────────────┤
+│ [Crear Correctivo]                                         │
+└────────────────────────────────────────────────────────────┘
+```
+
 ---
 
 ## 8. Corrective Event Detail
@@ -284,13 +324,13 @@ Hidden/read-only for:
 │ E22 Falla de servidor Frontam                              │
 │ Estado: En progreso · Severidad: Alta                      │
 ├────────────────────────────────────────────────────────────┤
-│ SAP: 110010514                                             │
-│ Activo: Frontam Colectora                                  │
-│ Ubicacion: Sala 2.21                                       │
-│ Subsistema: CBTC                                           │
-├────────────────────────────────────────────────────────────┤
 │ Acciones                                                   │
 │ [Crear/Editar reporte] [Completar] [Compartir PDF]         │
+├────────────────────────────────────────────────────────────┤
+│ SAP: 110010514                                             │
+│ Activo: Frontam Colectora                                  │
+│ Ubicacion: Estacion Colectora > Sala tecnica > Sala 2.21   │
+│ Subsistema: CBTC                                           │
 ├────────────────────────────────────────────────────────────┤
 │ Timeline                                                   │
 │ 07:42 Evento creado por Diego Vera                         │
@@ -307,10 +347,10 @@ Hidden/read-only for:
 
 | Status | Technician | Coordinator | Boss |
 |--------|------------|-------------|------|
-| Programado/Abierto | Iniciar, Crear/Editar reporte | Iniciar, Crear/Editar reporte | Ver |
+| Programado/Abierto | Iniciar | Iniciar | Ver |
 | En progreso | Crear/Editar reporte, Completar | Crear/Editar reporte, Completar | Ver |
-| Completado | Editar reporte, Compartir PDF | Editar reporte, Compartir PDF, Cerrar | Ver |
-| Cerrado | Ver | Ver, Reabrir | Ver |
+| Completado | Reabrir, Compartir PDF | Reabrir, Compartir PDF, Cerrar | Ver |
+| Cerrado | Ver | Reabrir | Ver |
 
 ---
 
@@ -327,7 +367,7 @@ Hidden/read-only for:
 │ SAP, fecha ocurrencia, hora ocurrencia, subsistema          │
 ├────────────────────────────────────────────────────────────┤
 │ Activo y ubicacion                                         │
-│ Frontam Colectora · Sala 2.21                              │
+│ Frontam Colectora · Estacion Colectora > Sala tecnica      │
 ├────────────────────────────────────────────────────────────┤
 │ Descripcion de falla e impacto                             │
 │ Sintoma, descripcion tecnica, impacto operacional           │
@@ -354,10 +394,9 @@ When adding an activity:
 
 ```
 Tipo de actividad: [Cambio de componente v]
-Descripcion:
 Hora inicio:
+Descripcion:
 Hora fin:
-Notas:
 ```
 
 ### 9.3 Replacement Sub-Block
@@ -366,12 +405,12 @@ Appears only for `Cambio de componente`.
 
 ```
 Activo padre: Frontam Colectora
-Activo retirado: Servidor Frontam Aplicacion 1 / CZJ5470N75
-Activo instalado: Servidor Frontam repuesto 01 / CZ3909PF9W-SPARE
-Origen: Almacen SPV
-Destino: Almacenamiento Mantto Hitachi
-Motivo: Falla de hardware
-[Seleccionar desde stock]
+Activo retirado: ruta completa desde equipo grande hasta hoja
+Part number, serial, modelo, fabricante autocompletables
+Estado del componente y destino de envio
+Origen: Almacen SPV / Almacenamiento Mantto Hitachi
+[Seleccionar de stock] -> sheet con buscador y lista filtrada
+Activo instalado: datos autocompletados del stock seleccionado
 ```
 
 ---
@@ -407,7 +446,7 @@ Shows:
 - current location,
 - parent,
 - children,
-- maintenance history,
+- maintenance history split into Preventivos and Correctivos,
 - replacement history.
 
 ---
@@ -484,4 +523,4 @@ For design-only mock:
 └──────────────────────────────────────┘
 ```
 
-In SwiftUI prototype, this should use the native iOS Share Sheet.
+In SwiftUI prototype, this uses the native iOS Share Sheet with temporary share content. In v1, the shared item should be the generated PDF artifact.

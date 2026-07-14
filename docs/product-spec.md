@@ -31,7 +31,7 @@
 | **Role** | Field operator, frontline maintenance staff |
 | **Count** | ~6â€“8 per site |
 | **Technical proficiency** | Lowâ€“medium. Comfortable with smartphones, NOT comfortable with complex UIs, databases, or abstract concepts. Uses phone primarily for calls, WhatsApp, camera. |
-| **Device** | Company-issued iPhone (typically not the latest model). iOS 17+ target mandated by MDM policy. Shared iPad from the team. |
+| **Device** | Shared team iPad running iPadOS 26.5 as the primary validation device. Company-issued iPhone support targets iOS 26.5, pending physical phone testing. |
 | **Primary goal** | Record what was done, find the right asset, attach photos, get signatures, finish shift. Minimize paperwork. |
 | **Frustrations** | Slow forms, too many taps, unclear hierarchy, losing unsaved work, poor network in tunnels/workshops, being asked for data they don't have. |
 | **Daily workflow** | 1. Receive event/task assignment (verbally or via app notification). 2. Navigate to asset in hierarchy. 3. Review existing state/history. 4. Perform maintenance. 5. Open report â†’ add tasks â†’ add photos â†’ add signatures â†’ submit. Repeat for next event. Shift end: verify all reports submitted. |
@@ -950,7 +950,7 @@ The smallest production-valuable system that replaces the current paper-based pr
 
 ### 6.5 Bottom Sheet Usage
 
-Use ``.sheet()`` (iOS 15+ compatible, but iOS 17 has better `presentationDetents`).
+Use `.sheet()` with modern iOS/iPadOS 26.5 presentation behavior and detents.
 
 | Bottom Sheet | Usage | Detent |
 |-------------|-------|--------|
@@ -1271,7 +1271,7 @@ The palette is derived from the three provided Hitachi logo references:
 
 | Deliverable | Details |
 |-------------|---------|
-| Xcode project setup | iOS 17+ target, SwiftUI, `NavigationStack`, tab bar |
+| Xcode project setup | iPadOS/iOS 26.5 deployment target, SwiftUI, `NavigationStack`, native adaptive `TabView`, Liquid Glass-capable design system |
 | App structure | `MaintenanceAppApp.swift`, `ContentView.swift`, tab bar with 4 tabs |
 | `APIClient` skeleton | Protocol-based, mock implementation returning fake JSON |
 | `Route.swift` | Typed navigation destinations (enum with associated values) |
@@ -1377,5 +1377,4 @@ The palette is derived from the three provided Hitachi logo references:
 | Version | Date | Changes |
 |---------|------|---------|
 | 0.1 | 2026-06-06 | Initial product specification and UX blueprint |
-
 

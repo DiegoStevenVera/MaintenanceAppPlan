@@ -44,7 +44,7 @@ This is not a database schema, API contract, or final UI design.
 
 | Role | Mock Behavior |
 |------|---------------|
-| Technician | Display label: Tecnico mantenedor. Can start maintenance, create/edit reports, complete activities, sign as participant |
+| Technician | Display label: Ingeniero de Mantenimiento. Can start maintenance, create/edit reports, complete activities, sign as participant |
 | Coordinator | Display label: Coordinador. Can do Technician actions, close and reopen activities |
 | Boss | Display label: Jefe. Read-only access to metrics, activity details, reports, PDFs, timelines |
 | Administrator | Display label: Administrador. Full access; admin screens can be mocked as placeholders |
@@ -58,7 +58,7 @@ Recommended tab structure for the iPad mock:
 1. Inicio
 2. Preventivos
 3. Correctivos
-4. Activos
+4. Equipos
 5. Stock
 6. Perfil
 
@@ -78,8 +78,8 @@ Preventive and corrective activities share the same lifecycle.
 |--------|---------|--------------|
 | Programado | Activity exists but has not started | Iniciar |
 | En progreso | Work is underway | Generar/Editar reporte, Completar |
-| Completado | Work is done but report can still be refined | Editar reporte, Compartir PDF, Cerrar |
-| Cerrado | Coordinator closed the activity | Solo ver, Reabrir |
+| Completado | Work is done and can be reopened for correction | Reabrir, Compartir PDF, Cerrar |
+| Cerrado | Coordinator closed the activity | Solo ver; Reabrir by Coordinator/Admin |
 
 Rules:
 
@@ -87,7 +87,7 @@ Rules:
 - Coordinator can close and reopen activities.
 - Boss can only view.
 - Administrator can do all actions.
-- Reports are editable until the activity is Cerrado.
+- Reports are editable only while the activity is En progreso; completed or closed work must be reopened to En progreso before editing.
 - Editing/finalizing creates a new report version.
 
 ---
@@ -96,7 +96,17 @@ Rules:
 
 ### 6.1 Entry
 
-User opens the app after login.
+User opens the app and sees a local login screen before the main tabs.
+
+Temporary mock login:
+
+- `diego@maintenance.local`
+- `joab@maintenance.local`
+- `fredy@maintenance.local`
+- `jefe@maintenance.local`
+- `admin@maintenance.local`
+
+All temporary mock passwords are `123456`.
 
 ### 6.2 Screen Content
 
@@ -169,9 +179,15 @@ Shows:
 - expected duration,
 - required tools,
 - required personnel count,
-- maintainer notes/comments,
-- related images,
-- report versions.
+- reference image/visual for the business anchor equipment,
+- current report versions for the active maintenance execution,
+- previous reports performed on the same business anchor equipment,
+- reusable maintainer comments shown as chat bubbles,
+- related images.
+
+Reusable comments are scoped to the maintenance template, the business anchor equipment (`Equipo`), or both. They are intended to appear again in future executions and are not stored as one-off report observations.
+
+Previous reports are historical report records for the same `Equipo` or maintenance template. They are separate from current report versions: versions represent edits of the current report, while previous reports represent earlier maintenance executions.
 
 ### 7.3 Preventive Detail Actions
 
@@ -179,7 +195,7 @@ Shows:
 |--------|------------|-------------|------|
 | Programado | Iniciar | Iniciar | Ver |
 | En progreso | Generar/Editar reporte, Completar when report exists | Generar/Editar reporte, Completar | Ver |
-| Completado | Editar reporte, Compartir PDF | Editar reporte, Compartir PDF, Cerrar | Ver |
+| Completado | Compartir PDF | Compartir PDF, Cerrar | Ver |
 | Cerrado | Ver historial de PDF/versiones | Ver, Reabrir | Ver |
 
 ### 7.4 Start Preventive
@@ -196,20 +212,22 @@ Flow:
 Sections:
 
 1. General metadata
-2. Personnel
+2. Participants and signatures
 3. Tools
-4. Template steps
-5. Tests/results
-6. Attachments
-7. Conclusions/comments
-8. Participant signatures
+4. Template steps with tests/results
+5. Attachments
+6. Conclusions
+
+General metadata shows activity, equipment, site, project, stage, system, subsystem, current date, start time, end time, full location path, and manual reference. All fields are read-only except end time.
+
+Participants are the maintainers active on the current day and are checked by default. Each selected participant has an inline signature action and signature preview.
 
 Each step row shows:
 
 - task/step title,
-- completion checkbox,
+- completion checkbox checked by default,
 - manual page button,
-- tests/results button,
+- inline tests/results section,
 - optional comment.
 
 ### 7.6 Manual Page Popup
@@ -220,15 +238,21 @@ When user taps manual reference:
 2. Open at the task-specific page.
 3. Allow close/back.
 
-### 7.7 Tests Popup
+### 7.7 Step Tests and Results
 
-Shows one or more tests for a step.
+Shows one or more tests inside each step.
 
 Each test has:
 
 - test name,
-- result input/dropdown,
+- result dropdown when options are configured,
 - optional notes.
+
+Conclusions are selected from:
+
+- Equipo operativo
+- Equipo no operativo
+- Equipo medio operativo
 
 ### 7.8 Finalize Preventive Report Version
 
@@ -319,9 +343,9 @@ Shows:
 
 | Status | Technician | Coordinator | Boss |
 |--------|------------|-------------|------|
-| Programado/Abierto | Iniciar, Crear/Editar reporte | Iniciar, Crear/Editar reporte | Ver |
+| Programado/Abierto | Iniciar | Iniciar | Ver |
 | En progreso | Crear/Editar reporte, Completar | Crear/Editar reporte, Completar | Ver |
-| Completado | Editar reporte, Compartir PDF | Editar reporte, Compartir PDF, Cerrar | Ver |
+| Completado | Compartir PDF | Compartir PDF, Cerrar | Ver |
 | Cerrado | Ver | Ver, Reabrir | Ver |
 
 ### 8.5 Corrective Dynamic Report Form
@@ -418,25 +442,33 @@ Flow:
 
 ---
 
-## 9. Asset Flow
+## 9. Equipment / Asset Flow
 
-### 9.1 Asset Search
+The app-visible tab label is `Equipos`. In business language, `Equipos` means the large or operationally meaningful assets ("equipos grandes") used for maintenance navigation, reporting, metrics, and history.
+
+Technically, these records are still Assets marked as business anchors. Smaller assets such as cards, racks, cableado, and replaceable components remain Assets too, but they should not appear in the main `Equipos` list unless explicitly marked as business anchors.
+
+Equipment detail shows `Mantenimientos realizados` only. This segment contains generated report/PDF versions for that equipment and does not include a separate associated-maintenance detail block.
+
+### 9.1 Equipment Search
 
 Search by:
 
 - name,
+- category,
+- type,
 - serial number,
 - internal code,
 - part number,
 - subsystem,
-- category.
+- business anchor flag.
 
 Each result shows:
 
-- asset name,
+- equipment name,
 - category,
+- type,
 - serial/internal code,
-- part number,
 - status,
 - breadcrumb path.
 

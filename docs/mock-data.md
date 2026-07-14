@@ -59,9 +59,9 @@ App-visible data, business values, dropdown options, report content, role labels
 
 | ID | Name | Role | Email |
 |----|------|------|-------|
-| user-diego | Diego Vera | Tecnico mantenedor | diego.vera@example.com |
-| user-joab | Joab Apaza | Tecnico mantenedor | joab.apaza@example.com |
-| user-fredy | Fredy Navarrete | Tecnico mantenedor | fredy.navarrete@example.com |
+| user-diego | Diego Vera | Ingeniero de Mantenimiento | diego.vera@example.com |
+| user-joab | Joab Apaza | Ingeniero de Mantenimiento | joab.apaza@example.com |
+| user-fredy | Fredy Navarrete | Ingeniero de Mantenimiento | fredy.navarrete@example.com |
 | user-coordinator | Coordinador de mantenimiento | Coordinador | coordinator@example.com |
 | user-boss | Jefe de mantenimiento | Jefe | boss@example.com |
 | user-admin | Administrador del sistema | Administrador | admin@example.com |
@@ -173,6 +173,8 @@ Business anchor assets are the main assets used for operational questions, filte
 | Tren 29 | Etapa 1A | Compartido |
 | Tren 14 | Etapa 1B | Compartido futuro |
 
+Stage is not physical location. Equipment records must keep `Etapa` as project scope metadata and store physical location separately as station, patio, room, track sector, or train/car context.
+
 ---
 
 ## 7. Stock Assets
@@ -181,6 +183,8 @@ Business anchor assets are the main assets used for operational questions, filte
 |----|------|------|----------------------|--------|----------|
 | stock-frontam-server-01 | Servidor Frontam repuesto 01 | Servidor Frontam | CZ3909PF9W-SPARE | En stock | Almacen SPV |
 | stock-frontam-server-02 | Servidor Frontam repuesto 02 | Servidor Frontam | CZ3909PF9W-SPARE-02 | En stock | Almacenamiento Mantto Hitachi |
+| stock-frontam-comm-01 | Tarjeta de comunicacion Frontam repuesto 01 | Modulo de comunicacion Frontam | FTM-COMM-SPV-01 | En stock | Almacen SPV |
+| stock-frontam-comm-02 | Tarjeta de comunicacion Frontam repuesto 02 | Modulo de comunicacion Frontam | FTM-COMM-HIT-02 | En stock | Almacenamiento Mantto Hitachi |
 | stock-cier-01 | Tarjeta CIER repuesto 01 | Tarjeta CIER | CIER-SPARE-001 | En stock | Almacen SPV |
 | stock-pcsg-01 | PCSG repuesto 01 | Servidor PCSG | PCSG-SPARE-001 | En stock | Almacenamiento Mantto Hitachi |
 

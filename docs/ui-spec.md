@@ -27,6 +27,7 @@ The first UI work may be design-only before production code.
 Primary v1 target:
 
 - shared iPad,
+- iPadOS 26.5,
 - touch-first,
 - field-friendly,
 - minimal typing,
@@ -35,7 +36,7 @@ Primary v1 target:
 
 Future:
 
-- iPhone support after corporate approval.
+- iPhone support is enabled in the Xcode target for iOS 26.5 validation, but the primary UX/design validation remains iPad until physical iPhone testing is completed.
 
 ---
 
@@ -69,11 +70,12 @@ Shows:
 Shows:
 
 - scheduled activities,
-- overdue/today/week filters,
+- time filters for `Hoy`, `Esta semana`, `Este Mes`, and specific month/year,
 - activity detail,
 - manual PDF,
-- comments/notes from maintainers,
+- reusable chat-like maintainer comments for the same maintenance template or `Equipo`,
 - report versions,
+- historical preventive reports with the same PDF preview structure as current versions,
 - actions based on status.
 
 ### 4.3 Corrective
@@ -82,22 +84,27 @@ Shows:
 
 - corrective events,
 - status filters,
+- create corrective event flow from the `+` action,
 - event detail,
 - timeline,
 - report versions,
 - dynamic corrective report form,
 - replacement blocks inside activities.
 
-### 4.4 Assets
+Corrective event creation should use a large iPad sheet. It captures read-only project context (`Sede`, `Proyecto`, `Etapa`, `Sistema`), a selectable subsystem (`ATS`, `CBTC`, `IXL`), a searchable business-anchor `Equipo` list filtered by subsystem, a hierarchical affected asset selector starting from the selected `Equipo`, default location from the selected equipment, editable SAP event name, editable SAP notification, editable notice creation date/time, and an automatic response date/time set at creation. Physical/geographic location is metadata, not a selectable asset tree node.
+
+### 4.4 Equipos
 
 Shows:
 
-- hierarchy drill-down,
-- quick search by name, serial number, internal code, part number,
-- asset detail,
+- business-facing list of large or operationally meaningful assets labeled `Equipos`,
+- quick search by equipment name, category, type, serial number, internal code, or part number,
+- equipment detail,
 - current location/parent,
-- maintenance history,
+- completed maintenance history, showing only report/PDF versions already generated,
 - replacement history.
+
+Technical note: `Equipos` are Assets marked as business anchors. Smaller Assets such as cards, racks, cableado, and replaceable components remain in the asset hierarchy but are not shown in the main `Equipos` tab by default.
 
 ### 4.5 Stock / Inventory
 
@@ -117,6 +124,12 @@ Shows:
 - logout,
 - future account/signature settings.
 
+The mock app starts behind a local login gate. Temporary test users use password `123456`; v1 replaces this with `/api/v1/auth/login`, token storage, refresh, and session timeout.
+
+### 4.7 Buttons
+
+Action buttons should use centered icon + label content, full available width inside their grid cell, and adaptive two/three-column layouts on iPad where space allows. Inline toolbar controls may remain native compact controls.
+
 ---
 
 ## 5. Activity Status UI
@@ -125,8 +138,8 @@ Shows:
 |--------|---------|-----------------|
 | Scheduled | Not started | Start |
 | In Progress | Work underway | Generate/Edit Report, Complete |
-| Completed | Work done, report can still be refined | Edit Report, Share PDF, Close (Coordinator only) |
-| Closed | Fully closed | View only; Reopen (Coordinator/Admin only) |
+| Completed | Work done, can be reopened for correction | Reopen to In Progress, Share PDF, Close (Coordinator only) |
+| Closed | Fully closed by Coordinator/Admin | View only; Reopen to In Progress (Coordinator/Admin only) |
 
 ---
 
@@ -152,13 +165,29 @@ The corrective form should not use a fixed six-section layout.
 It should include blocks for:
 
 - event/SAP/location/equipment,
-- failure and impact,
+- physical location of the business-anchor equipment,
+- failure and impact: recorded symptom, detailed technical description, operational impact,
+- failure analysis: functional, hardware, software, communications, or energy,
 - activities performed,
-- replacement details when task type is Component Replacement,
-- tests and validation,
+- replacement details when task type is Component Replacement, including removed asset selection from the equipment tree and installed asset selection from stock filtered by warehouse,
+- tests and validation: functional tests, result, service release, release date/time, responsible validator,
 - attachments,
 - participants/signatures,
-- comments/conclusion.
+- comments/conclusion with technical equipment status.
+
+Report creation/editing is available only while the preventive or corrective maintenance is `En progreso`. Scheduled items can only be started; completed items can be shared/closed but not edited unless reopened into an editable state.
+
+Corrective location rules:
+
+- `Etapa` is project metadata and must not be displayed as physical location.
+- Physical location is read from the selected business-anchor equipment, for example station, patio, technical room, track sector, or train car.
+- The asset tree is structural only. Location metadata must never appear as a selectable asset branch.
+
+List filtering:
+
+- Preventive filters are mandatory and use scheduled maintenance date: `Hoy`, `Esta semana`, `Este Mes`, or a specific month/year, plus text search by maintenance name.
+- Corrective filters are optional and use event notice creation date. With no date filter active, all corrective states remain visible.
+- Equipment detail must expose preventive and corrective maintenance history for the selected business-anchor equipment as generated report/PDF versions only.
 
 ---
 
@@ -175,6 +204,14 @@ Flow:
 Future:
 
 - per-user approval/signature from personal device.
+
+Preventive report participant rows should show each active maintainer checked by default, display their role and avatar/profile image, and expose the signature action directly in the participant segment.
+
+## 8.1 Preventive Form UI
+
+General metadata is read-only except for activity end time. The form shows site, project, stage, system, subsystem, current date, start time, end time, full location path, equipment, and manual reference.
+
+Maintenance steps include their own tests/results area. Each test uses a dropdown when it has configured result options. Conclusions use a dropdown with: Equipo operativo, Equipo no operativo, Equipo medio operativo.
 
 ---
 
@@ -195,6 +232,14 @@ Guidelines:
 - Keep operational screens mostly neutral so forms, reports, and asset data are easy to scan.
 - Do not use red for normal statuses if it could be confused with error or urgency.
 - Use amber for in-progress, green for completed/finalized, graphite/dark gray for scheduled/closed, and red for overdue/critical/destructive states.
+- Use a restrained Liquid Glass-inspired layer for iPad screens: translucent material cards, soft highlights, and interactive depth for dashboards, lists, search panels, and PDF previews.
+- Preserve native iPadOS navigation and TabView behavior. Do not replace the system tab/navigation chrome with a custom bar unless there is a strong product reason.
+- The pure screen background must remain Hitachi White in day mode and Hitachi Black in night mode. The signaling/rail-map line motif may sit above it as a subtle low-contrast layer, but no background color gradient should replace the pure base.
+- Indicator cards should use a large numeric value, uppercase label, small status dot/text, and a faint oversized icon in the background.
+- Preventive and corrective activity cards should use a high-contrast task-card structure: rounded card, optional red leading rail for active/urgent items, title/location/status hierarchy, and compact timing metadata.
+- Preventive detail, preventive form, corrective detail, corrective form, equipment detail, stock, and PDF previews should use the same task-detail block system: strong title header where applicable, full-width Liquid Glass panels, nested detail tiles, and consistent section spacing.
+- The signature visual motif is a subtle signaling/rail-map background behind operational content. It should be low contrast and must never reduce form legibility.
+- Large content blocks should expand to the same readable width inside their screen container. Avoid narrow left-aligned panels unless the block is intentionally a compact indicator card.
 
 ---
 
@@ -205,6 +250,8 @@ Use iOS Share Sheet in v1:
 1. User taps Share PDF.
 2. App generates/downloads latest PDF.
 3. iOS Share Sheet opens.
+
+The current SwiftUI mock uses native Share Sheet behavior with temporary share content so the team can validate the interaction. In v1, the preferred architecture is backend/infrastructure PDF generation for canonical, immutable report artifacts; the frontend receives or downloads that artifact and invokes the iOS Share Sheet.
 4. User shares through available corporate apps.
 
 No delivery tracking in v1.

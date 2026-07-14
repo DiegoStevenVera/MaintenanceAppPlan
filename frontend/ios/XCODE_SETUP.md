@@ -1,26 +1,20 @@
 # Xcode Setup
 
-## 1. Create Project
+## 1. Open Project
 
-On the company Mac:
+The Xcode project already exists in this repository:
 
-1. Open Xcode.
-2. Select `File > New > Project`.
-3. Choose `iOS > App`.
-4. Product Name: `MaintenanceAppMock`.
-5. Interface: `SwiftUI`.
-6. Language: `Swift`.
-7. Minimum iOS version: iOS 17 if possible.
-8. Save the project inside `frontend/ios/`.
+```text
+frontend/ios/MaintenanceAppMock.xcodeproj
+```
 
-## 2. Add Existing Source Files
+Open it in Xcode and select the `MaintenanceAppMock` scheme.
 
-After Xcode creates the project:
+The project deployment target is iPadOS/iOS 26.5 and the target supports both iPad and iPhone. The current Mac has Xcode 26.2 with the iOS 26.2 SDK, which can build the app but emits a deployment-target range warning for 26.5. Update Xcode/SDK to the matching 26.5 release when available.
 
-1. In Finder, keep the generated Xcode project.
-2. Add the files from `frontend/ios/MaintenanceAppMock/` to the Xcode target.
-3. If Xcode generated its own `MaintenanceAppMockApp.swift`, replace it with the one in this scaffold.
-4. Build for an iPad simulator.
+## 2. Source Files
+
+The source files under `frontend/ios/MaintenanceAppMock/` are already attached to the app target.
 
 ## 3. First Verification
 
@@ -29,10 +23,13 @@ The first run should show:
 - tab navigation,
 - `Inicio`,
 - `Preventivos`,
-- placeholder tabs for `Correctivos`, `Activos`, `Stock`, and `Perfil`,
+- functional mock tabs for `Correctivos`, `Activos`, `Stock`, and `Perfil`,
 - Hitachi red accent,
 - local preventive activity data,
+- local corrective event, asset, and stock data,
 - status transitions in memory.
+- iPadOS/iOS 26.5 deployment target with Liquid Glass-capable SwiftUI surfaces.
+- universal iPhone/iPad target for later iPhone validation.
 
 ## 4. Known Limitations
 
@@ -41,4 +38,3 @@ The first run should show:
 - No real PDF generation.
 - No real Share Sheet yet.
 - No persistence after app restart.
-

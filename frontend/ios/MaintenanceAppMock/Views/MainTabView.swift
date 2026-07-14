@@ -17,20 +17,26 @@ struct MainTabView: View {
                 Label("Preventivos", systemImage: "checklist")
             }
 
-            PlaceholderTabView(title: "Correctivos", systemImage: "wrench.and.screwdriver")
-                .tabItem {
-                    Label("Correctivos", systemImage: "wrench.and.screwdriver")
-                }
+            NavigationStack {
+                CorrectiveListView()
+            }
+            .tabItem {
+                Label("Correctivos", systemImage: "wrench.and.screwdriver")
+            }
 
-            PlaceholderTabView(title: "Activos", systemImage: "square.stack.3d.up")
-                .tabItem {
-                    Label("Activos", systemImage: "square.stack.3d.up")
-                }
+            NavigationStack {
+                AssetSearchView()
+            }
+            .tabItem {
+                Label("Equipos", systemImage: "square.stack.3d.up")
+            }
 
-            PlaceholderTabView(title: "Stock", systemImage: "shippingbox.fill")
-                .tabItem {
-                    Label("Stock", systemImage: "shippingbox.fill")
-                }
+            NavigationStack {
+                StockListView()
+            }
+            .tabItem {
+                Label("Stock", systemImage: "shippingbox.fill")
+            }
 
             NavigationStack {
                 ProfileView()
@@ -54,8 +60,9 @@ struct PlaceholderTabView: View {
     }
 }
 
-#Preview {
-    MainTabView()
-        .environmentObject(MockMaintenanceStore())
+struct MainTabView_Previews: PreviewProvider {
+    static var previews: some View {
+        MainTabView()
+            .environmentObject(MockMaintenanceStore())
+    }
 }
-

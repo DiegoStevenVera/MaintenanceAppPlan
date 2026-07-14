@@ -45,6 +45,7 @@ The platform is designed for modular growth. Future modules, systems, and mainte
 The following decisions supersede earlier draft assumptions:
 
 - The initial device target is shared iPad devices used by the maintenance team. iPhone support is future and depends on corporate security approval.
+- Current mock validation targets iPadOS 26.5 on the shared iPad. iPhone support targets iOS 26.5 but still requires physical-device validation.
 - v1 is local-first: the app and backend will initially run in a local demonstration/development environment, such as an iPad connected to a Mac-hosted backend.
 - The long-term deployment target is not approved yet. The architecture must allow on-premise, Azure, or AWS without coupling domain logic to any provider.
 - PDF generation is required from the first version, even if the first templates are simple and use raw report data.
@@ -78,6 +79,7 @@ The following decisions supersede earlier draft assumptions:
 | Maintenance Activity | A preventive or corrective maintenance work item that moves through SCHEDULED, IN_PROGRESS, COMPLETED, and CLOSED states |
 | Maintenance Report | The operational document generated from a maintenance activity. It may have versions while the activity is still editable |
 | Asset | Any trackable technical item, including trains, cabinets, servers, cards, fans, software, tools, and replaceable parts |
+| Equipment / Equipo | Business-facing label for large or operationally meaningful Assets shown in the app as `Equipos`. These are the "equipos grandes" used for maintenance navigation, reporting, metrics, and history, and must be easy to distinguish from smaller assets such as cards, racks, cable runs, and replaceable components. |
 | Component | A smaller or replaceable Asset category. It is not a separate top-level entity in v1 |
 | Business Anchor Asset | A major or operationally meaningful Asset used for business questions, maintenance history, and metrics, such as a train, Zone Controller, Frontam cabinet, CRK cabinet, server, or functional software group |
 | Report Scope Asset | An Asset linked to a maintenance activity or report because it is the primary target, an involved asset, an affected asset, or a replaced/installed component |
@@ -199,6 +201,7 @@ The platform must provide explicit mechanisms for adding future modules. Each mo
 | FR-AUTH-002 | Each drawn signature must be associated with the authenticated user account that produced it. | High |
 | FR-AUTH-003 | The system must support session management appropriate for shared iPad devices (e.g., session timeout, re-authentication). | High |
 | FR-AUTH-004 | The system must prevent a user from signing on behalf of another user. | High |
+| FR-AUTH-005 | User profiles must support a profile image uploaded from the device gallery or a selectable default avatar provided by the app. | Medium |
 
 ### 5.2 User Interface (iPad)
 
@@ -275,6 +278,8 @@ Business users commonly ask questions about major operational assets, not only a
 | FR-ASM-025 | Preventive maintenance should normally use business anchor assets as the report scope, while corrective maintenance may additionally reference smaller component assets for replacement traceability. | High |
 | FR-ASM-026 | Asset history queries for a business anchor asset must include maintenance performed directly on that asset and maintenance involving its descendant assets. | High |
 | FR-ASM-027 | The system must allow logical or functional assets, such as "Software ATS Patio", when a maintenance activity targets a functional scope distributed across several physical servers. | Medium |
+| FR-ASM-028 | The app must expose business anchor assets to users under the Spanish UI label `Equipos`, while technical documentation and schema may continue using Asset / BusinessAnchorAsset terminology. | High |
+| FR-ASM-029 | The data model must support fast filtering of `Equipos` independently from smaller Assets such as cards, racks, cableado, replaceable parts, and other child components. | High |
 
 #### 6.1.5 Hierarchy Rules
 
@@ -393,6 +398,14 @@ Key characteristics:
 | FR-PRV-014 | Preventive reports remain editable while the maintenance activity is SCHEDULED, IN_PROGRESS, or COMPLETED. Each finalized edit creates a new report version. Once the activity is CLOSED, editing is blocked unless the Coordinator reopens the activity. | High |
 | FR-PRV-015 | The system must support versioning of activity procedures (e.g., when the Engineering team updates a maintenance manual). | Medium |
 | FR-PRV-018 | A preventive activity usually produces one main maintenance report, but the system must support additional report types for exceptional activities, such as track circuit calibration reports. | Medium |
+| FR-PRV-019 | Preventive detail screens must show reusable maintenance comments in a chat-like thread, including author name, role, profile image/avatar, message, and scope context. These comments must be available to future executions of the same maintenance template or same business anchor equipment. | High |
+| FR-PRV-020 | Preventive report general metadata must include site, project, stage, system, subsystem, current date, activity start time, editable activity end time, full geographic location path, equipment, and manual reference. All fields except activity end time are system-populated/read-only during execution. | High |
+| FR-PRV-021 | The preventive report form must preselect the maintainers active on the current day as participants and allow users to uncheck anyone who did not participate. | High |
+| FR-PRV-022 | Each maintenance step must contain its own tests/results section. Test results must use configured result options, presented as dropdowns when the result type is option-based. | High |
+| FR-PRV-023 | Preventive conclusions must be selected from controlled values: Equipo operativo, Equipo no operativo, Equipo medio operativo. | High |
+| FR-PRV-024 | Participant signatures should be captured from the participant row so each selected maintainer draws their own signature. | High |
+| FR-PRV-025 | Preventive detail screens must show a reference image or visual identifier for the business anchor equipment being maintained. | Medium |
+| FR-PRV-026 | Preventive detail screens must distinguish current report versions from previous reports performed on the same business anchor equipment. | High |
 
 ### 7.5 Historical Records
 
@@ -400,6 +413,7 @@ Key characteristics:
 |----|-------------|----------|
 | FR-PRV-016 | All completed preventive reports must be searchable by: date range, asset, subsystem, technician, activity type. | High |
 | FR-PRV-017 | The system must display the last execution date of each preventive activity for visibility into upcoming due dates. | Medium |
+| FR-PRV-027 | The system must show historical preventive reports for the selected business anchor equipment, including activity name, technician, date, and final result. | High |
 
 ---
 
@@ -420,7 +434,8 @@ Corrective maintenance is reactive, triggered by unexpected incidents or failure
 | ID | Requirement | Priority |
 |----|-------------|----------|
 | FR-COR-001 | The system must allow a technician to create a new Corrective Event at the start of a corrective activity. | High |
-| FR-COR-002 | A Corrective Event must capture: timestamp of occurrence (as reported), timestamp of maintenance start, location (geographic and equipment), subsystem, SAP notification code (reference field), description of the problem/incident, failure type (free text initially, standardized in future), initiating technician. | High |
+| FR-COR-002 | A Corrective Event must capture: read-only project context (site, project, stage, system, subsystem), affected asset selected from the asset hierarchy, default asset location, SAP event name, SAP notification code, notice creation timestamp, response timestamp, description of the problem/incident, failure type (free text initially, standardized in future), and initiating technician. | High |
+| FR-COR-002A | The affected asset selector must first filter by subsystem, then start from a searchable business anchor `Equipo` and allow drilling down through lower asset/component levels before confirming the exact failed asset. Physical/geographic location must not appear as a selectable asset node. | High |
 | FR-COR-003 | The system must allow multiple Corrective Reports to be linked to a single Corrective Event. | High |
 | FR-COR-004 | Each Corrective Report must be associated with the shift in which it was generated (day or night shift). | High |
 | FR-COR-005 | The system must display the event timeline across all shifts: all reports, actions, replacements, and timestamps in chronological order. | High |
@@ -431,15 +446,15 @@ Corrective maintenance is reactive, triggered by unexpected incidents or failure
 
 | ID | Requirement | Priority |
 |----|-------------|----------|
-| FR-COR-008 | Each Corrective Report must capture: technician(s) involved, shift identification, date/time, SAP notification code (typed manually), subsystem, equipment affected, failure description, fault type. | High |
-| FR-COR-009 | The system must support recording maintenance actions/tasks in a semi-structured dynamic form: each task has a type (defined in system configuration) and a description. Specialized fields appear only for task types that require them. | High |
+| FR-COR-008 | Each Corrective Report must capture: technician(s) involved, shift identification, date/time, SAP notification code, subsystem, equipment affected, physical location, recorded symptom, detailed technical description, operational impact, failure analysis, validation fields, conclusions, and signatures. | High |
+| FR-COR-009 | The system must support recording maintenance actions/tasks in a semi-structured dynamic form: each task has a type, start date/time, end date/time, and task-specific fields. Standard activities capture description; component replacement captures removed/installed asset data. | High |
 | FR-COR-010 | Task types must be configurable per system/subsystem and may include: "Component Replacement", "Inspection", "Cleaning", "Adjustment", "Measurement", "Software Action", "Other." | Medium |
 | FR-COR-011 | When the task type is "Component Replacement", the system must invoke the asset replacement workflow (see FR-ASM-013 through FR-ASM-017). | High |
 | FR-COR-012 | The system must support logging tools used in the corrective activity by serial number. | High |
 | FR-COR-013 | The system must support image attachments captured or uploaded during the corrective report. | High |
 | FR-COR-014 | The system must support free-text comments/observations. | High |
 | FR-COR-015 | Each corrective report must be signed by all participating technicians before submission. | High |
-| FR-COR-016 | Corrective reports remain editable while the corrective event is IN_PROGRESS or COMPLETED. Each finalized edit creates a new report version. Once the corrective event is CLOSED, editing is blocked unless the Coordinator reopens the event. | High |
+| FR-COR-016 | Corrective reports can be created or edited only while the corrective event is IN_PROGRESS. Each finalized edit creates a new report version. Completed or closed events are read-only for report editing unless reopened into an editable state. | High |
 | FR-COR-019 | Corrective reports must not be constrained to a fixed 6-section structure. The UI should follow the real corrective report format and use dynamic blocks, especially for component replacement activities. | High |
 
 ### 8.4 Asset Replacement Sub-Workflow

@@ -1,0 +1,4 @@
+app
+extensions
+modules
+shared_kernel

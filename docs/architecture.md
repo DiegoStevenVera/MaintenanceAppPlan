@@ -1250,8 +1250,8 @@ Standard HTTP status codes:
 └──────────────┘     └──────────────┘     └──────────────┘     └──────────────┘
 `
 
-**iOS 17+ specific capabilities leveraged:**
-- Observable macro (iOS 17) for reactive state management (replacing ObservableObject)
+**iPadOS/iOS 26.5 specific capabilities leveraged:**
+- SwiftUI Observable patterns for reactive state management
 - NavigationStack with programmatic navigation
 - SwiftData or NSFetchRequest for local draft caching
 - PhotosPicker for image selection
@@ -1259,6 +1259,7 @@ Standard HTTP status codes:
 - SwiftUI-Shimmer or custom transitions for loading states
 - MatchedGeometryEffect for smooth hierarchy navigation transitions
 - .scrollTransition for modern scroll effects
+- Liquid Glass-capable surfaces for dashboards, controls, cards, and native navigation chrome
 - VisionKit for future document scanning
 
 ### 6.2 Navigation Structure
@@ -1320,7 +1321,7 @@ Tab 6: Profile / Settings
     └── Logout
 `
 
-### 6.3 Navigation in iOS 17+
+### 6.3 Navigation in iPadOS/iOS 26.5
 
 | Pattern | Usage |
 |---------|-------|
@@ -1424,7 +1425,7 @@ Endpoint enum (per module):
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        User Device                           │
-│              iOS 17+ Native SwiftUI App                      │
+│              iPadOS/iOS 26.5 Native SwiftUI App              │
 └──────────────────────┬──────────────────────────────────────┘
                        │ HTTPS (TLS 1.3)
                        ▼
@@ -1616,7 +1617,7 @@ The following architectural decisions were made during the creation of this docu
 | ADR-006 | **CQRS-Lite (No Separate Read/Write Models)** | Single model serves both purposes. Optimized projections (closure table, event store) exist within same database. | Read model tuning is per-use-case rather than architectural split. |
 | ADR-007 | **Enum User Roles (Not RBAC)** | Four roles (Technician, Coordinator, Boss, Administrator). No requirement for custom role creation. | Future RBAC would require refactoring; document extensibility path. |
 | ADR-008 | **Polymorphic Report References** | `Report` base with `CorrectiveReport` and `PreventiveReport` subtypes. Shared core fields, distinct behavior. | ORM mapping complexity; future evolution path to fully separate entities if divergence grows. |
-| ADR-009 | **iOS 17+ Native SwiftUI (Not React/Flutter)** | Enterprise iOS-only deployment. Premium animations, PencilKit, native camera API. | Single-platform only; future web frontend is a separate project. |
+| ADR-009 | **iPadOS/iOS 26.5 Native SwiftUI (Not React/Flutter)** | Enterprise Apple-platform deployment on current team devices. Premium animations, PencilKit, native camera API, adaptive TabView, and Liquid Glass-capable SwiftUI surfaces. | Single-platform only; future web frontend is a separate project. Requires Xcode/SDK support compatible with iOS 26.x; current local Xcode 26.2 accepts deployment target 26.5 with a warning until an SDK 26.5 toolchain is installed. |
 | ADR-010 | **REST API over GraphQL** | Simple CRUD patterns, well-known ecosystem, easy to secure and cache. | Future GraphQL wrapper possible for complex hierarchy queries. |
 | ADR-011 | **JWT Bearer Tokens (Short-Lived Access + Refresh)** | Stateless auth, no server-side session storage. Refresh token rotation. | Token revocation requires blacklist or short expiry. |
 | ADR-012 | **Event Store in Same PostgreSQL Instance** | Single database for transactional data and event store (separate schema). No operational complexity. | Migration path to dedicated event store if event volume grows significantly. |
@@ -1625,4 +1626,3 @@ The following architectural decisions were made during the creation of this docu
 | ADR-015 | **Jinja2 + WeasyPrint for PDF Generation** | PDF is a pure infrastructure concern. Jinja2 HTML templates + WeasyPrint rendering is the simplest Python PDF pipeline. No expensive report designer tooling. | Two templates (preventive/corrective). GeneratedReport entity for traceability only. Generation triggered at report submission. |
 | ADR-016 | **Dynamic Corrective Report Blocks** | Corrective reports must follow the real report format and show specialized blocks only when needed, such as component replacement inside activities performed. | Avoids forcing a rigid six-section workflow. Requires block schemas and validation per task type. |
 | ADR-017 | **Client-Side Share Sheet for v1 Email** | iOS native UIActivityViewController (Share Sheet) for PDF sharing — zero backend complexity. Backend async notification (email/SMS) is v2. Email is a presentation concern, not a domain concern. | PDF must be downloaded to device first. No delivery tracking, no scheduled notifications in v1. |
-

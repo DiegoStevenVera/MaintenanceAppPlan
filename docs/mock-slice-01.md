@@ -29,7 +29,7 @@ This slice is UI-only and must use local mock data.
 - Basic preventive report form mock.
 - Report version list mock.
 - PDF preview placeholder.
-- Share Sheet placeholder/action stub.
+- Share Sheet mock using native iOS sharing.
 - Role-aware actions for Technician, Coordinator, Boss, and Administrator.
 
 ### Not Included
@@ -47,7 +47,7 @@ This slice is UI-only and must use local mock data.
 
 ## 3. Primary User Story
 
-As a `Tecnico mantenedor`, I want to open the iPad app, see today's preventive activities, start one activity, fill a basic report mock, finalize a version, and preview/share the generated report placeholder.
+As a `Ingeniero de Mantenimiento`, I want to open the iPad app, see today's preventive activities, start one activity, fill a basic report mock, finalize a version, and preview/share the generated report placeholder.
 
 ---
 
@@ -153,7 +153,7 @@ Action matrix:
 |--------|------------|-------------|------|---------------|
 | Programado | Iniciar | Iniciar | View only | Iniciar |
 | En progreso | Editar reporte, Completar | Editar reporte, Completar | View only | Editar reporte, Completar |
-| Completado | Editar reporte, Compartir PDF | Editar reporte, Compartir PDF, Cerrar | View only | Editar reporte, Compartir PDF, Cerrar |
+| Completado | Reabrir, Compartir PDF | Reabrir, Compartir PDF, Cerrar | View only | Reabrir, Compartir PDF, Cerrar |
 | Cerrado | View only | Reabrir | View only | Reabrir |
 
 ### 5.5 Formulario Reporte Preventivo
@@ -161,21 +161,39 @@ Action matrix:
 Mock form sections:
 
 1. Datos generales.
-2. Personal participante.
-3. Herramientas.
-4. Pasos del mantenimiento.
-5. Pruebas y resultados.
-6. Evidencias.
-7. Conclusiones.
-8. Firmas.
+2. Herramientas.
+3. Pasos del mantenimiento con pruebas/resultados por paso.
+4. Evidencias.
+5. Participantes y firmas.
+6. Conclusiones.
 
 Minimum interactive behavior:
 
 - mark steps as completed,
 - enter comments,
-- select participants,
-- show signature placeholder,
+- select active-day participants checked by default,
+- capture/show drawable signature per participant,
+- select test results from dropdowns within each step,
+- select conclusion from the controlled list using the label `Estado final del equipo`,
+- enter `Comentarios adicionales del mantenimiento`,
 - finalize mock version.
+
+Detalle preventivo:
+
+- El bloque `Acciones` aparece despues de la imagen referencial del equipo y antes de datos generales.
+- El mantenimiento preventivo ATS usa una imagen referencial de gabinete/rack en el mock para validar como se muestran fotografias reales del equipo.
+- Los botones de accion usan grilla adaptable con icono y ancho completo disponible.
+- `Reportes anteriores` lista historicos del mismo equipo grande y cada item navega a la vista previa PDF historica.
+- La pantalla de `Preventivos` incluye filtros tipo botonera: `Hoy`, `Esta semana`, `Este Mes` y `Mes especifico` con selector de mes/anio.
+- Los filtros de `Preventivos` actuan sobre la fecha de programacion del mantenimiento e incluyen busqueda por nombre de mantenimiento.
+- La pantalla de `Correctivos` reutiliza la misma seccion de filtros, pero la fecha es opcional: sin filtro activo muestra correctivos abiertos, en progreso, completados y cerrados; con filtro activo usa la fecha de creacion de aviso.
+- La pantalla de `Equipos` mantiene solo `Mantenimientos realizados`, con reportes/versiones ya generados que abren vista previa PDF.
+
+Firmas:
+
+- Preventivos y correctivos usan el mismo componente visual de `Participantes y firmas`.
+- El boton de firma y la previsualizacion de firma aparecen en una misma fila.
+- La firma capturada se escala para verse completa en la previsualizacion y en el PDF mock.
 
 ### 5.6 PDF Preview Placeholder
 
@@ -185,10 +203,10 @@ Shows:
 - activity metadata,
 - participant list,
 - step summary,
-- signature placeholders,
+- participant signatures,
 - version number.
 
-The share action should open a placeholder flow in this slice. Real PDF generation and iOS Share Sheet integration come later.
+The share action opens the native iOS Share Sheet in the SwiftUI mock using temporary share text. The real app should share the generated PDF artifact.
 
 ---
 
@@ -198,7 +216,7 @@ Use data from `docs/mock-data.md`.
 
 Minimum records needed:
 
-- `user-diego` as `Tecnico mantenedor`.
+- `user-diego` as `Ingeniero de Mantenimiento`.
 - `user-coordinator` as `Coordinador`.
 - `user-boss` as `Jefe`.
 - `prv-001`.
@@ -226,7 +244,8 @@ Rules:
 - Finalizing a report creates or updates a mock report version.
 - `Completar` moves the activity to `Completado`.
 - `Cerrar` is visible only for Coordinator and Administrator.
-- `Reabrir` is visible only for Coordinator and Administrator when status is `Cerrado`.
+- `Reabrir` from `Completado` is visible for Technician, Coordinator, and Administrator and moves the maintenance back to `En progreso`.
+- `Reabrir` from `Cerrado` is visible only for Coordinator and Administrator and moves the maintenance back to `En progreso`.
 - Boss can navigate and view but cannot mutate state.
 
 ---
@@ -243,7 +262,8 @@ Rules:
 - Finalizing the form creates a visible report version.
 - Completing the activity changes state to `Completado`.
 - Coordinator can close and reopen; Boss cannot.
-- No screen requires network, backend, database, or real login.
+- The mock starts with a local login screen. It does not require network, backend, database, or real authentication.
+- Test users use `123456` as temporary password while validating flows.
 
 ---
 
@@ -257,4 +277,3 @@ Use these questions after the first iPad mock is available:
 4. Is the report form order natural compared with current work?
 5. Are the actions by role correct?
 6. Does the Hitachi visual direction feel appropriate without distracting from field work?
-

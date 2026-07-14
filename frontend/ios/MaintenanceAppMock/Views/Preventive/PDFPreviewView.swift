@@ -13,56 +13,82 @@ struct PDFPreviewView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpacing.lg) {
                 Text("Vista previa PDF")
-                    .font(.largeTitle.weight(.bold))
+                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
 
                 if let activity {
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text(activity.name)
-                            .font(.title2.weight(.semibold))
-                        Text("Version \(version.versionNumber)")
-                        Text("Creado por \(version.createdBy)")
-                        Divider()
-                        Text("Activos: \(activity.assets.joined(separator: ", "))")
-                        Text("Ubicacion: \(activity.location)")
-                        Text("Subsistema: \(activity.subsystem)")
-                    }
-
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text("Resumen de pasos")
-                            .font(.headline)
-                        ForEach(activity.steps) { step in
-                            Label(step.title, systemImage: step.isCompleted ? "checkmark.circle.fill" : "circle")
+                    GlassPanel {
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Text(activity.name)
+                                .font(.title2.weight(.semibold))
+                            Text("Version \(version.versionNumber)")
+                            Text("Creado por \(version.createdBy)")
+                            Text(version.summary)
+                                .foregroundStyle(.secondary)
+                            Divider()
+                            Text("Proyecto: \(activity.project) · \(activity.stage)")
+                            Text("Sistema: \(activity.system) · \(activity.subsystem)")
+                            Text("Equipos: \(activity.assets.joined(separator: ", "))")
+                            Text("Ubicacion: \(activity.locationPath)")
                         }
                     }
 
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text("Firmas")
-                            .font(.headline)
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(.secondary, style: StrokeStyle(lineWidth: 1, dash: [6]))
-                            .frame(height: 96)
-                            .overlay(Text("Firma digitalizada"))
+                    GlassPanel {
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Text("Pasos, pruebas y resultados")
+                                .font(.headline)
+                            ForEach(activity.steps) { step in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    Label(step.title, systemImage: step.isCompleted ? "checkmark.circle.fill" : "circle")
+                                    if !step.comment.isEmpty {
+                                        Text(step.comment)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    ForEach(step.tests) { test in
+                                        Text("- \(test.name): \(test.selectedResult)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
                     }
 
-                    Button("Compartir PDF") {}
-                        .buttonStyle(.borderedProminent)
-                        .tint(BrandColor.red)
+                    GlassPanel {
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Text("Firmas")
+                                .font(.headline)
+                            ReportSignaturesPreview(signatures: store.preventiveReportSignatures[activity.id] ?? [])
+                        }
+                    }
+
+                    GlassPanel {
+                        ActionButtonGrid {
+                            ShareLink(item: store.preventivePDFShareText(activity: activity, version: version)) {
+                                Label("Compartir PDF", systemImage: "square.and.arrow.up")
+                            }
+                            .buttonStyle(ActionTileButtonStyle(prominent: true))
+                        }
+                    }
                 }
             }
             .padding(AppSpacing.lg)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: 860, alignment: .leading)
+            .frame(maxWidth: .infinity)
         }
+        .background(MaintenanceScreenBackground())
         .navigationTitle("PDF")
     }
 }
 
-#Preview {
-    NavigationStack {
-        PDFPreviewView(
-            activityID: "prv-002",
-            version: ReportVersion(id: UUID(), versionNumber: 1, createdBy: "Diego Vera", createdAt: Date())
-        )
-        .environmentObject(MockMaintenanceStore())
+struct PDFPreviewView_Previews: PreviewProvider {
+    static var previews: some View {
+        NavigationStack {
+            PDFPreviewView(
+                activityID: "prv-002",
+                version: ReportVersion(id: UUID(), versionNumber: 1, createdBy: "Diego Vera", createdAt: Date())
+            )
+            .environmentObject(MockMaintenanceStore())
+        }
     }
 }
-
