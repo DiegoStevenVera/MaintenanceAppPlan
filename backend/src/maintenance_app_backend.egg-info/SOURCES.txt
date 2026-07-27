@@ -1,6 +1,7 @@
 README.md
 pyproject.toml
 src/app/__init__.py
+src/app/app_state_seed.py
 src/app/config.py
 src/app/database.py
 src/app/main.py
@@ -11,6 +12,14 @@ src/maintenance_app_backend.egg-info/SOURCES.txt
 src/maintenance_app_backend.egg-info/dependency_links.txt
 src/maintenance_app_backend.egg-info/requires.txt
 src/maintenance_app_backend.egg-info/top_level.txt
+src/modules/app_state/__init__.py
+src/modules/app_state/application/__init__.py
+src/modules/app_state/domain/__init__.py
+src/modules/app_state/infrastructure/__init__.py
+src/modules/app_state/infrastructure/postgres/models.py
+src/modules/app_state/infrastructure/postgres/repository.py
+src/modules/app_state/interfaces/__init__.py
+src/modules/app_state/interfaces/router.py
 src/modules/asset_management/__init__.py
 src/modules/asset_management/application/__init__.py
 src/modules/asset_management/domain/__init__.py

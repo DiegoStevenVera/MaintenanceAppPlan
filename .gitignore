@@ -53,3 +53,7 @@ temp/
 
 # Logs
 *.log
+
+# Databases
+docs/OldVersionApp/Database/*
+docs/OldVersionApp/Formats/*
