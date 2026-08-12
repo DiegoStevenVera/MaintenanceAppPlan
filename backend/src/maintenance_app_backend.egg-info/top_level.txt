@@ -1,3 +1,5 @@
 app
+extensions
+legacy_import
 modules
 shared_kernel

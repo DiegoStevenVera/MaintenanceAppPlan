@@ -14,9 +14,12 @@ from modules.asset_management.infrastructure.postgres.catalog_models import (
     SlotTypeRecord,
 )
 from modules.asset_management.infrastructure.postgres.models import AssetHistoryRecord, AssetRecord
-from modules.identity_access.infrastructure.postgres.models import UserRecord
+from modules.identity_access.infrastructure.postgres.models import RefreshSessionRecord, UserRecord
 from modules.maintenance_execution.infrastructure.postgres import (
     report_models as _report_models,  # noqa: F401
+)
+from modules.maintenance_execution.infrastructure.postgres import (
+    planning_models as _planning_models,  # noqa: F401
 )
 from modules.maintenance_execution.infrastructure.postgres import (
     template_models as _template_models,  # noqa: F401
@@ -57,6 +60,7 @@ __all__ = [
     "MovementTypeRecord",
     "PreventiveScheduleRecord",
     "ProjectRecord",
+    "RefreshSessionRecord",
     "SiteRecord",
     "SlotTypeRecord",
     "StageRecord",

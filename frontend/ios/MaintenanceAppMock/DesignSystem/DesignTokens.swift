@@ -1,4 +1,12 @@
 import SwiftUI
+import UIKit
+
+func maintenanceBundleImage(_ name: String) -> Image {
+    guard let image = UIImage(named: name, in: .main, compatibleWith: nil) else {
+        return Image(systemName: "photo")
+    }
+    return Image(uiImage: image)
+}
 
 enum BrandColor {
     static let red = Color(red: 0.902, green: 0.0, blue: 0.071)
@@ -105,6 +113,36 @@ struct GlassPanel<Content: View>: View {
     }
 }
 
+/// Liquid Glass surface for paginated, scrollable content.
+///
+/// The outer surface keeps the original material and tint, but leaves touch
+/// interaction to the individual rows so a tall panel does not become one
+/// giant interactive texture while scrolling.
+struct ContentGlassPanel<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppSpacing.md)
+            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    .stroke(BrandColor.glassStroke, lineWidth: 1)
+            }
+            .glassEffect(
+                .regular.tint(BrandColor.red.opacity(0.04)),
+                in: .rect(cornerRadius: 18)
+            )
+            .shadow(color: BrandColor.signalInk.opacity(0.08), radius: 18, x: 0, y: 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct DetailTile: View {
     let title: String
     let value: String
@@ -160,6 +198,203 @@ struct ActionTileButtonStyle: ButtonStyle {
             )
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .animation(.snappy(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
+struct MaintenanceLifecycleActionPanel: View {
+    let status: String
+    let role: UserRole
+    let isWorking: Bool
+    let errorMessage: String?
+    let onClearError: () -> Void
+    let onPerform: (MaintenanceLifecycleCommand, String?) -> Void
+
+    @State private var confirmationCommand: MaintenanceLifecycleCommand?
+    @State private var isShowingReopenSheet = false
+    @State private var reopenReason = ""
+
+    var body: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Acciones",
+                    subtitle: "Cambios de estado registrados con tu usuario"
+                )
+
+                ActionButtonGrid {
+                    ForEach(Self.commands(status: status, role: role)) { command in
+                        Button {
+                            if command == .reopen {
+                                reopenReason = ""
+                                isShowingReopenSheet = true
+                            } else {
+                                confirmationCommand = command
+                            }
+                        } label: {
+                            Label(command.label, systemImage: command.icon)
+                        }
+                        .buttonStyle(
+                            ActionTileButtonStyle(
+                                prominent: command == .start || command == .complete
+                            )
+                        )
+                        .disabled(isWorking)
+                        .opacity(isWorking ? 0.55 : 1)
+                        .accessibilityHint(command.accessibilityHint)
+                    }
+                }
+
+                if isWorking {
+                    HStack(spacing: AppSpacing.sm) {
+                        ProgressView()
+                        Text("Actualizando el mantenimiento...")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
+
+                if let errorMessage {
+                    HStack(alignment: .top, spacing: AppSpacing.sm) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(BrandColor.red)
+                        Text(errorMessage)
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                        Spacer()
+                        Button("Cerrar", action: onClearError)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .padding(AppSpacing.md)
+                    .background(
+                        BrandColor.red.opacity(0.10),
+                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    )
+                }
+            }
+        }
+        .alert(
+            confirmationCommand?.confirmationTitle ?? "Confirmar accion",
+            isPresented: confirmationBinding,
+            presenting: confirmationCommand
+        ) { command in
+            if command == .close {
+                Button(command.label, role: .destructive) {
+                    onPerform(command, nil)
+                }
+            } else {
+                Button(command.label) {
+                    onPerform(command, nil)
+                }
+            }
+            Button("Cancelar", role: .cancel) {}
+        } message: { command in
+            Text(command.confirmationMessage)
+        }
+        .sheet(isPresented: $isShowingReopenSheet) {
+            NavigationStack {
+                Form {
+                    Section("Motivo de reapertura") {
+                        TextEditor(text: $reopenReason)
+                            .frame(minHeight: 120)
+                        Text("El motivo quedara registrado en el historial del mantenimiento.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .navigationTitle("Reabrir mantenimiento")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Cancelar") {
+                            isShowingReopenSheet = false
+                        }
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Reabrir") {
+                            let reason = reopenReason.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            )
+                            isShowingReopenSheet = false
+                            onPerform(.reopen, reason)
+                        }
+                        .disabled(
+                            reopenReason.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).count < 3
+                        )
+                    }
+                }
+            }
+            .presentationDetents([.medium])
+        }
+    }
+
+    static func hasActions(status: String, role: UserRole) -> Bool {
+        !commands(status: status, role: role).isEmpty
+    }
+
+    private var confirmationBinding: Binding<Bool> {
+        Binding(
+            get: { confirmationCommand != nil },
+            set: { isPresented in
+                if !isPresented {
+                    confirmationCommand = nil
+                }
+            }
+        )
+    }
+
+    private static func commands(
+        status: String,
+        role: UserRole
+    ) -> [MaintenanceLifecycleCommand] {
+        guard role != .boss else { return [] }
+        switch status {
+        case "SCHEDULED":
+            return [.start]
+        case "IN_PROGRESS":
+            return [.complete]
+        case "COMPLETED":
+            return role.canCloseMaintenance ? [.reopen, .close] : [.reopen]
+        case "CLOSED":
+            return role.canCloseMaintenance ? [.reopen] : []
+        default:
+            return []
+        }
+    }
+}
+
+private extension MaintenanceLifecycleCommand {
+    var confirmationTitle: String {
+        switch self {
+        case .start: return "¿Iniciar mantenimiento?"
+        case .complete: return "¿Completar mantenimiento?"
+        case .close: return "¿Cerrar mantenimiento?"
+        case .reopen: return "Reabrir mantenimiento"
+        }
+    }
+
+    var confirmationMessage: String {
+        switch self {
+        case .start:
+            return "La hora actual quedara registrada como inicio real."
+        case .complete:
+            return "La hora actual y tu usuario quedaran registrados como finalizacion."
+        case .close:
+            return "Una vez cerrado, solo un Coordinador o Administrador podra reabrirlo."
+        case .reopen:
+            return "El mantenimiento volvera al estado En progreso."
+        }
+    }
+
+    var accessibilityHint: String {
+        switch self {
+        case .start: return "Cambia el mantenimiento programado a En progreso."
+        case .complete: return "Marca el mantenimiento en progreso como Completado."
+        case .close: return "Cierra el mantenimiento completado."
+        case .reopen: return "Solicita un motivo y devuelve el mantenimiento a En progreso."
+        }
     }
 }
 
@@ -273,6 +508,124 @@ struct SignaturePreview: View {
         }
         .frame(maxWidth: .infinity, minHeight: 96)
         .accessibilityLabel(isSigned ? "Firma capturada de \(name)" : "Firma pendiente de \(name)")
+    }
+}
+
+struct ReportParticipantsPanel: View {
+    @Binding var participants: [ReportFormParticipant]
+    let onSign: (String) -> Void
+    @State private var showsUnselected = false
+
+    private var selectedIndices: [Int] {
+        participants.indices.filter { participants[$0].isSelected }
+    }
+
+    private var unselectedIndices: [Int] {
+        participants.indices.filter { !participants[$0].isSelected }
+    }
+
+    var body: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Participantes y firmas",
+                    subtitle: "\(selectedIndices.count) seleccionado(s)"
+                )
+
+                if selectedIndices.isEmpty {
+                    Label(
+                        "Seleccione al menos un participante",
+                        systemImage: "person.crop.circle.badge.exclamationmark"
+                    )
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, AppSpacing.sm)
+                }
+
+                ForEach(selectedIndices, id: \.self) { index in
+                    selectedParticipant(participant: $participants[index])
+                }
+
+                if !unselectedIndices.isEmpty {
+                    DisclosureGroup(
+                        isExpanded: $showsUnselected
+                    ) {
+                        VStack(spacing: AppSpacing.xs) {
+                            ForEach(unselectedIndices, id: \.self) { index in
+                                Toggle(
+                                    isOn: $participants[index].isSelected
+                                ) {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(participants[index].name)
+                                            .font(.subheadline.weight(.semibold))
+                                        Text(participants[index].role)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(.vertical, AppSpacing.xs)
+                            }
+                        }
+                        .padding(.top, AppSpacing.sm)
+                    } label: {
+                        Label(
+                            "No seleccionados (\(unselectedIndices.count))",
+                            systemImage: "person.2.slash"
+                        )
+                        .font(.subheadline.weight(.semibold))
+                    }
+                    .padding(AppSpacing.md)
+                    .background(
+                        .background.opacity(0.58),
+                        in: RoundedRectangle(cornerRadius: 10)
+                    )
+                }
+            }
+        }
+    }
+
+    private func selectedParticipant(
+        participant: Binding<ReportFormParticipant>
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Toggle(isOn: participant.isSelected) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(participant.wrappedValue.name).font(.headline)
+                    Text(participant.wrappedValue.role)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            HStack(spacing: AppSpacing.md) {
+                Button {
+                    onSign(participant.wrappedValue.id)
+                } label: {
+                    Label(
+                        participant.wrappedValue.strokes.isEmpty
+                            ? "Dibujar firma"
+                            : "Volver a firmar",
+                        systemImage: "pencil.and.scribble"
+                    )
+                }
+                .buttonStyle(
+                    ActionTileButtonStyle(
+                        prominent: participant.wrappedValue.strokes.isEmpty
+                    )
+                )
+                .frame(maxWidth: 250)
+
+                SignaturePreview(
+                    name: participant.wrappedValue.name,
+                    isSigned: !participant.wrappedValue.strokes.isEmpty,
+                    strokes: participant.wrappedValue.strokes
+                )
+            }
+        }
+        .padding(AppSpacing.md)
+        .background(
+            .background.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 12)
+        )
     }
 }
 
@@ -401,6 +754,7 @@ struct MetricGlassCard: View {
     let icon: String
     var tint: Color = BrandColor.red
     var statusText: String = "Accion requerida"
+    var isSelected = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
@@ -439,8 +793,16 @@ struct MetricGlassCard: View {
         .background(colorScheme == .dark ? Color(.secondarySystemBackground) : Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.04), lineWidth: 1)
+                .stroke(
+                    isSelected
+                        ? tint.opacity(0.85)
+                        : colorScheme == .dark
+                            ? Color.white.opacity(0.10)
+                            : Color.black.opacity(0.04),
+                    lineWidth: isSelected ? 2 : 1
+                )
         }
+        .scaleEffect(isSelected ? 1.015 : 1)
         .shadow(color: BrandColor.signalInk.opacity(colorScheme == .dark ? 0.0 : 0.06), radius: 16, x: 0, y: 8)
         .glassEffect(.regular.tint(tint.opacity(0.025)).interactive(), in: .rect(cornerRadius: 18))
         .accessibilityElement(children: .combine)
@@ -459,6 +821,76 @@ struct SectionHeaderText: View {
                 Text(subtitle)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct MaintenanceCommentsPanel: View {
+    let comments: [APIMaintenanceComment]
+    @Binding var message: String
+    let isSending: Bool
+    let errorMessage: String?
+    let title: String
+    let subtitle: String
+    let onSend: () -> Void
+
+    var body: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(title: title, subtitle: subtitle)
+
+                if comments.isEmpty {
+                    Label("Aún no hay comentarios para este mantenimiento.", systemImage: "bubble.left")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, AppSpacing.xs)
+                } else {
+                    ForEach(comments) { comment in
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                            HStack(alignment: .top, spacing: AppSpacing.sm) {
+                                Image(systemName: "person.crop.circle.fill")
+                                    .font(.title2)
+                                    .foregroundStyle(BrandColor.red)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(comment.authorName)
+                                        .font(.headline)
+                                    Text(comment.authorRole)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(comment.createdAt, style: .date)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(comment.message)
+                                .font(.body)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(AppSpacing.md)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    }
+                }
+
+                TextField("Escribir comentario", text: $message, axis: .vertical)
+                    .lineLimit(3, reservesSpace: true)
+                    .textFieldStyle(.roundedBorder)
+
+                if let errorMessage {
+                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundStyle(BrandColor.red)
+                }
+
+                Button(action: onSend) {
+                    Label(
+                        isSending ? "Guardando comentario..." : "Guardar comentario",
+                        systemImage: "paperplane.fill"
+                    )
+                }
+                .buttonStyle(ActionTileButtonStyle())
+                .disabled(isSending || message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
     }

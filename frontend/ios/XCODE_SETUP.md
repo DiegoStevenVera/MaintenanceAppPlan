@@ -20,21 +20,40 @@ The source files under `frontend/ios/MaintenanceAppMock/` are already attached t
 
 The first run should show:
 
+- authenticated login backed by FastAPI,
 - tab navigation,
 - `Inicio`,
 - `Preventivos`,
 - functional mock tabs for `Correctivos`, `Activos`, `Stock`, and `Perfil`,
 - Hitachi red accent,
-- local preventive activity data,
-- local corrective event, asset, and stock data,
-- status transitions in memory.
 - iPadOS/iOS 26.5 deployment target with Liquid Glass-capable SwiftUI surfaces.
 - universal iPhone/iPad target for later iPhone validation.
 
-## 4. Known Limitations
+## 4. Physical iPad Local Backend
 
-- No backend.
-- No real auth.
-- No real PDF generation.
-- No real Share Sheet yet.
-- No persistence after app restart.
+Start FastAPI on every Mac network interface:
+
+```bash
+make backend-dev-postgres
+```
+
+Find the Mac Wi-Fi address:
+
+```bash
+ipconfig getifaddr en0
+```
+
+Enter `http://<mac-ip>:8000` on the login screen. The Mac and iPad must be on the same LAN, with
+VPN and guest-network client isolation disabled. On first access, accept the iPadOS local-network
+permission. If it was previously denied, enable MaintenanceAppMock under Settings > Privacy &
+Security > Local Network.
+
+The target declares `NSLocalNetworkUsageDescription` and `NSAllowsLocalNetworking` in
+`Info.plist`. When these keys change, delete the previous app from the iPad and install the new
+build so iPadOS requests permission again.
+
+## 5. Known Limitations
+
+- Authentication is connected to FastAPI, but operational screens are still moving from the
+  transitional store to normalized domain APIs.
+- PDF generation and file download are pending backend implementation.

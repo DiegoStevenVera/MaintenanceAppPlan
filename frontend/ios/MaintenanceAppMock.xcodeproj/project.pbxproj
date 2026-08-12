@@ -29,6 +29,10 @@
 		AA0000000000000000000020 /* Networking/APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000020 /* Networking/APIClient.swift */; };
 		AA0000000000000000000021 /* Networking/AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000021 /* Networking/AuthService.swift */; };
 		AA0000000000000000000022 /* Networking/AppStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000022 /* Networking/AppStateService.swift */; };
+		AA0000000000000000000023 /* Networking/ReportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000023 /* Networking/ReportService.swift */; };
+		AA0000000000000000000024 /* Networking/OfflineReportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000024 /* Networking/OfflineReportStore.swift */; };
+		AA0000000000000000000025 /* Views/Planning/PCONPlanningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000025 /* Views/Planning/PCONPlanningView.swift */; };
+		AA0000000000000000000026 /* Views/Shared/ReportEvidenceGrid.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000026 /* Views/Shared/ReportEvidenceGrid.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +58,10 @@
 		BB0000000000000000000020 /* Networking/APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/APIClient.swift; sourceTree = "<group>"; };
 		BB0000000000000000000021 /* Networking/AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/AuthService.swift; sourceTree = "<group>"; };
 		BB0000000000000000000022 /* Networking/AppStateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/AppStateService.swift; sourceTree = "<group>"; };
+		BB0000000000000000000023 /* Networking/ReportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/ReportService.swift; sourceTree = "<group>"; };
+		BB0000000000000000000024 /* Networking/OfflineReportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/OfflineReportStore.swift; sourceTree = "<group>"; };
+		BB0000000000000000000025 /* Views/Planning/PCONPlanningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Planning/PCONPlanningView.swift; sourceTree = "<group>"; };
+		BB0000000000000000000026 /* Views/Shared/ReportEvidenceGrid.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Shared/ReportEvidenceGrid.swift; sourceTree = "<group>"; };
 		BB0000000000000000000100 /* MaintenanceAppMock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MaintenanceAppMock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -101,6 +109,10 @@
 				BB0000000000000000000020 /* Networking/APIClient.swift */,
 				BB0000000000000000000021 /* Networking/AuthService.swift */,
 				BB0000000000000000000022 /* Networking/AppStateService.swift */,
+				BB0000000000000000000023 /* Networking/ReportService.swift */,
+				BB0000000000000000000024 /* Networking/OfflineReportStore.swift */,
+				BB0000000000000000000025 /* Views/Planning/PCONPlanningView.swift */,
+				BB0000000000000000000026 /* Views/Shared/ReportEvidenceGrid.swift */,
 			);
 			path = MaintenanceAppMock;
 			sourceTree = "<group>";
@@ -203,6 +215,10 @@
 				AA0000000000000000000020 /* Networking/APIClient.swift in Sources */,
 				AA0000000000000000000021 /* Networking/AuthService.swift in Sources */,
 				AA0000000000000000000022 /* Networking/AppStateService.swift in Sources */,
+				AA0000000000000000000023 /* Networking/ReportService.swift in Sources */,
+				AA0000000000000000000024 /* Networking/OfflineReportStore.swift in Sources */,
+				AA0000000000000000000025 /* Views/Planning/PCONPlanningView.swift in Sources */,
+				AA0000000000000000000026 /* Views/Shared/ReportEvidenceGrid.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

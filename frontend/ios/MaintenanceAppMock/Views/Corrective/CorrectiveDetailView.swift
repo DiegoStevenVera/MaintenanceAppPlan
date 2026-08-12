@@ -1,104 +1,300 @@
 import SwiftUI
 
 struct CorrectiveDetailView: View {
-    @EnvironmentObject private var store: MockMaintenanceStore
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var activityStore: MaintenanceActivityStore
     let eventID: String
-    @State private var newComment = ""
 
-    private var event: CorrectiveEvent? {
-        store.correctiveEvents.first { $0.id == eventID }
-    }
+    @State private var comments: [APIMaintenanceComment] = []
+    @State private var commentText = ""
+    @State private var isSendingComment = false
+    @State private var commentError: String?
 
     var body: some View {
         Group {
-            if let event {
+            if let detail = activityStore.details[eventID] {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                        header(event)
-                        actions(event)
-                        eventData(event)
-                        failureDescription(event)
-                        activities(event)
-                        timeline(event)
-                        comments(event)
-                        reportVersions(event)
+                        header(detail)
+                        lifecycleActions(detail)
+                        reportActions(detail)
+                        statusPanel(detail)
+                        eventData(detail)
+                        correctiveReport(detail)
+                        commentsPanel
+                        reportVersions(detail)
                     }
                     .padding(AppSpacing.lg)
                     .frame(maxWidth: 900, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
-                .background(MaintenanceScreenBackground())
-                .navigationTitle("Detalle correctivo")
+                .refreshable {
+                    await activityStore.loadDetail(id: eventID, session: session, force: true)
+                    await loadComments()
+                }
+            } else if activityStore.loadingDetailIDs.contains(eventID) {
+                ProgressView("Cargando detalle")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = activityStore.detailErrors[eventID] {
+                ContentUnavailableView {
+                    Label("No se pudo cargar el correctivo", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Reintentar") {
+                        Task { await activityStore.loadDetail(id: eventID, session: session, force: true) }
+                    }
+                }
             } else {
-                ContentUnavailableView("Evento no encontrado", systemImage: "exclamationmark.triangle")
+                ProgressView()
+            }
+        }
+        .background(MaintenanceScreenBackground())
+        .navigationTitle("Detalle correctivo")
+        .task {
+            await activityStore.loadDetail(id: eventID, session: session)
+            await loadComments()
+        }
+    }
+
+    private var commentsPanel: some View {
+        MaintenanceCommentsPanel(
+            comments: comments,
+            message: $commentText,
+            isSending: isSendingComment,
+            errorMessage: commentError,
+            title: "Comentarios del correctivo",
+            subtitle: "Pertenecen únicamente a esta actividad correctiva",
+            onSend: { Task { await addComment() } }
+        )
+    }
+
+    @MainActor
+    private func loadComments() async {
+        do {
+            comments = try await session.withValidAccessToken { token in
+                try await reportService.comments(activityID: eventID, accessToken: token)
+            }
+        } catch {
+            commentError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func addComment() async {
+        let message = commentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty, !isSendingComment else { return }
+
+        isSendingComment = true
+        commentError = nil
+        defer { isSendingComment = false }
+        do {
+            let comment = try await session.withValidAccessToken { token in
+                try await reportService.addComment(
+                    activityID: eventID,
+                    message: message,
+                    accessToken: token
+                )
+            }
+            comments.append(comment)
+            commentText = ""
+        } catch {
+            commentError = error.localizedDescription
+        }
+    }
+
+    private var reportService: ReportAPIService {
+        ReportAPIService(
+            baseURLString: UserDefaults.standard.string(forKey: "apiBaseURL") ?? ""
+        )
+    }
+
+    @ViewBuilder
+    private func reportActions(_ detail: APIActivityDetail) -> some View {
+        let latestReport = detail.reports.first
+
+        if detail.status == "IN_PROGRESS", session.currentUser?.role != .boss {
+            GlassPanel {
+                ActionButtonGrid {
+                    NavigationLink {
+                        CorrectiveReportFormView(eventID: eventID)
+                    } label: {
+                        Label(
+                            detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte",
+                            systemImage: "wrench.and.screwdriver.fill"
+                        )
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+
+                    if let latestReport,
+                       latestReport.documentStatus == "FINALIZED" {
+                        NavigationLink {
+                            PDFPreviewView(versionID: latestReport.id)
+                        } label: {
+                            Label("Generar PDF", systemImage: "doc.badge.plus")
+                        }
+                        .buttonStyle(ActionTileButtonStyle())
+                    }
+                }
+            }
+        } else if let latestReport,
+                  latestReport.documentStatus == "FINALIZED" {
+            GlassPanel {
+                ActionButtonGrid {
+                    NavigationLink {
+                        PDFPreviewView(versionID: latestReport.id)
+                    } label: {
+                        Label("Generar PDF", systemImage: "doc.badge.plus")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+                }
             }
         }
     }
 
-    private func header(_ event: CorrectiveEvent) -> some View {
+    private func header(_ detail: APIActivityDetail) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text(event.code)
+            Text(detail.eventCode ?? detail.internalCode)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(BrandColor.red)
-            Text(event.name)
+            Text(detail.title)
                 .font(.system(.largeTitle, design: .rounded).weight(.black))
+                .lineLimit(3)
             HStack(spacing: AppSpacing.sm) {
-                StatusBadge(status: event.status)
-                Text("Severidad: \(event.severity.label)")
-                    .font(.headline)
-                    .foregroundStyle(event.severity.color)
+                APIStatusBadge(status: detail.status)
+                if let severity = detail.severity {
+                    Text("Severidad: \(severity)")
+                        .font(.headline)
+                        .foregroundStyle(severity == "HIGH" ? BrandColor.red : BrandColor.amber)
+                }
             }
         }
     }
 
-    private func eventData(_ event: CorrectiveEvent) -> some View {
+    private func statusPanel(_ detail: APIActivityDetail) -> some View {
+        GlassPanel {
+            HStack(spacing: AppSpacing.md) {
+                Image(systemName: "wrench.and.screwdriver.fill")
+                    .font(.title)
+                    .foregroundStyle(BrandColor.red)
+                    .frame(width: 52, height: 52)
+                    .background(BrandColor.red.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Evento correctivo").font(.headline)
+                    Text("\(detail.reportVersionCount) versión(es) de reporte registrada(s)")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func lifecycleActions(_ detail: APIActivityDetail) -> some View {
+        if let role = session.currentUser?.role,
+           MaintenanceLifecycleActionPanel.hasActions(
+               status: detail.status,
+               role: role
+           ) {
+            MaintenanceLifecycleActionPanel(
+                status: detail.status,
+                role: role,
+                isWorking: activityStore.transitioningIDs.contains(eventID),
+                errorMessage: activityStore.transitionErrors[eventID],
+                onClearError: {
+                    activityStore.clearTransitionError(id: eventID)
+                },
+                onPerform: { command, reason in
+                    Task {
+                        await activityStore.performLifecycle(
+                            id: eventID,
+                            command: command,
+                            reason: reason,
+                            session: session
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    private func eventData(_ detail: APIActivityDetail) -> some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Datos del evento")
-                DetailTile(title: "Sede", value: event.site)
-                DetailTile(title: "Proyecto", value: event.project)
-                DetailTile(title: "Etapa", value: event.stage)
-                DetailTile(title: "Sistema", value: event.system)
-                DetailTile(title: "Codigo", value: event.code)
-                DetailTile(title: "SAP", value: event.sapCode)
-                DetailTile(title: "Activo", value: event.affectedAsset)
-                DetailTile(title: "Ubicacion", value: event.location)
-                DetailTile(title: "Subsistema", value: event.subsystem)
-                DetailTile(title: "Creacion de aviso", value: Self.dateTimeFormatter.string(from: event.noticeCreatedAt))
-                DetailTile(title: "Respuesta", value: Self.dateTimeFormatter.string(from: event.responseAt))
-                DetailTile(title: "Impacto", value: event.operationalImpact)
+                SectionHeaderText(title: "Datos del evento", subtitle: "Contexto normalizado del aviso")
+                DetailTile(title: "Sede", value: detail.site.orFallback("No registrada"))
+                DetailTile(title: "Proyecto", value: detail.project.orFallback("No registrado"))
+                DetailTile(title: "Etapa", value: detail.stage.orFallback("No registrada"))
+                DetailTile(title: "Sistema", value: detail.system.orFallback("No registrado"))
+                DetailTile(title: "Subsistema", value: detail.subsystem)
+                DetailTile(title: "Equipo / asset", value: detail.assets.map(\.name).joined(separator: ", ").orFallback("No registrado"))
+                DetailTile(title: "Ubicacion fisica", value: detail.locationPath.orFallback("No registrada"))
+                if let start = detail.actualStartAt {
+                    DetailTile(title: "Inicio real", value: Self.dateFormatter.string(from: start))
+                }
+                if let end = detail.actualEndAt {
+                    DetailTile(title: "Fin real", value: Self.dateFormatter.string(from: end))
+                }
             }
         }
     }
 
-    private func failureDescription(_ event: CorrectiveEvent) -> some View {
+    @ViewBuilder
+    private func correctiveReport(_ detail: APIActivityDetail) -> some View {
+        if let report = detail.correctiveReport {
+            VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                failurePanel(report)
+                analysisPanel(report)
+                activitiesPanel(report)
+                validationPanel(report)
+                conclusionsPanel(report)
+            }
+        } else {
+            GlassPanel {
+                SectionHeaderText(title: "Reporte correctivo", subtitle: "Aun no existe una versión normalizada para este evento")
+            }
+        }
+    }
+
+    private func failurePanel(_ report: APICorrectiveReport) -> some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Descripcion de falla")
-                Text(event.failureDescription)
-                    .font(.headline)
+                DetailTile(title: "Sintoma registrado", value: report.symptom.orFallback("No registrado"))
+                DetailTile(title: "Descripcion tecnica", value: report.technicalDescription.orFallback("No registrada"))
+                DetailTile(title: "Impacto operacional", value: report.operationalImpact.orFallback("No registrado"))
             }
         }
     }
 
-    private func activities(_ event: CorrectiveEvent) -> some View {
+    private func analysisPanel(_ report: APICorrectiveReport) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(title: "Analisis de la falla")
+                DetailTile(title: "Tipo", value: report.failureAnalysisType.orFallback("No registrado"))
+            }
+        }
+    }
+
+    private func activitiesPanel(_ report: APICorrectiveReport) -> some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Actividades realizadas")
-                if event.activities.isEmpty {
-                    Text("Aun no hay actividades registradas.")
-                        .foregroundStyle(.secondary)
+                if report.activities.isEmpty {
+                    Text("No hay actividades registradas.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(event.activities) { activity in
-                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                            Text(activity.type.label)
-                                .font(.headline)
-                            Text(activity.description)
-                            if let replacement = activity.replacement {
-                                Text("\(replacement.removedAsset) -> \(replacement.installedAsset)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                    ForEach(report.activities) { activity in
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Text(activity.name).font(.headline)
+                            Text(activity.description).font(.body)
+                            HStack {
+                                Label(Self.dateFormatter.string(from: activity.startedAt), systemImage: "clock")
+                                Spacer()
+                                if let endedAt = activity.endedAt {
+                                    Text(Self.dateFormatter.string(from: endedAt))
+                                }
                             }
+                            .font(.caption).foregroundStyle(.secondary)
                         }
                         .padding(AppSpacing.md)
                         .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
@@ -108,232 +304,98 @@ struct CorrectiveDetailView: View {
         }
     }
 
-    private func timeline(_ event: CorrectiveEvent) -> some View {
+    private func validationPanel(_ report: APICorrectiveReport) -> some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Timeline")
-                ForEach(event.timeline) { entry in
-                    HStack(alignment: .top, spacing: AppSpacing.sm) {
-                        Circle()
-                            .fill(BrandColor.red)
-                            .frame(width: 8, height: 8)
-                            .padding(.top, 6)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(entry.timestamp)
-                                .font(.caption.weight(.bold))
-                                .foregroundStyle(.secondary)
-                            Text(entry.text)
-                                .font(.headline)
-                        }
-                    }
-                    .padding(AppSpacing.md)
-                    .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                SectionHeaderText(title: "Pruebas y validacion")
+                DetailTile(title: "Pruebas funcionales", value: report.functionalTests.orFallback("No registradas"))
+                DetailTile(title: "Resultado", value: report.validationResult.orFallback("No registrado"))
+                DetailTile(title: "Liberacion para servicio", value: report.serviceReleased ? "Si" : "No")
+                if let releasedAt = report.serviceReleasedAt {
+                    DetailTile(title: "Fecha de liberacion", value: Self.dateFormatter.string(from: releasedAt))
+                }
+                DetailTile(title: "Responsable de validacion", value: report.validationResponsible.orFallback("No registrado"))
+            }
+        }
+    }
+
+    private func conclusionsPanel(_ report: APICorrectiveReport) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(title: "Conclusiones / Comentarios")
+                DetailTile(title: "Estado tecnico del equipo", value: report.technicalStatus.orFallback("No registrado"))
+                DetailTile(title: "Observaciones", value: report.conclusion.orFallback("No registradas"))
+                if let comments = report.additionalComments, !comments.isEmpty {
+                    DetailTile(title: "Comentarios adicionales", value: comments)
                 }
             }
         }
     }
 
-    private func reportVersions(_ event: CorrectiveEvent) -> some View {
+    private func reportVersions(_ detail: APIActivityDetail) -> some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Versiones del reporte")
-                if event.reportVersions.isEmpty {
-                    Text("Aun no hay versiones generadas.")
-                        .foregroundStyle(.secondary)
+                SectionHeaderText(title: "Versiones del reporte", subtitle: "Historial normalizado")
+                if detail.reports.isEmpty {
+                    Text("Aun no hay versiones generadas.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(event.reportVersions) { version in
+                    ForEach(detail.reports) { report in
                         NavigationLink {
-                            CorrectivePDFPreviewView(eventID: event.id, version: version)
+                            PDFPreviewView(versionID: report.id)
                         } label: {
-                            HStack {
+                            HStack(spacing: AppSpacing.md) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .foregroundStyle(BrandColor.red)
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("Version \(version.versionNumber)")
-                                        .font(.headline)
-                                    Text(version.summary)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                    Text("Version \(report.versionNumber)").font(.headline)
+                                    Text(report.summary.orFallback("Reporte \(report.reportKind)"))
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Image(systemName: "doc.richtext")
-                                    .foregroundStyle(BrandColor.red)
+                                Text(report.documentStatus)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(BrandColor.green)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary)
                             }
-                            .padding(.vertical, AppSpacing.xs)
                         }
                         .buttonStyle(.plain)
+                        .padding(.vertical, AppSpacing.xs)
                     }
                 }
             }
         }
     }
 
-    private func comments(_ event: CorrectiveEvent) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Comentarios del correctivo", subtitle: "Notas asociadas solo a este evento")
-                let comments = store.comments(for: event)
-                if comments.isEmpty {
-                    Text("Aun no hay comentarios para este correctivo.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(comments) { comment in
-                        CorrectiveCommentBubble(comment: comment, eventCode: event.code)
-                    }
-                }
-
-                if store.currentUser.role.canEditMaintenance {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        TextField("Escribir comentario de este correctivo", text: $newComment, axis: .vertical)
-                            .lineLimit(2, reservesSpace: true)
-                            .padding(AppSpacing.sm)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                        ActionButtonGrid {
-                            Button {
-                                store.addComment(to: event, message: newComment)
-                                newComment = ""
-                            } label: {
-                                Label("Guardar comentario", systemImage: "text.bubble.fill")
-                            }
-                            .buttonStyle(ActionTileButtonStyle())
-                            .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private func actions(_ event: CorrectiveEvent) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Acciones")
-                ActionButtonGrid {
-                    actionButtons(event)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func actionButtons(_ event: CorrectiveEvent) -> some View {
-        let role = store.currentUser.role
-
-        if event.status == .scheduled, role.canEditMaintenance {
-            Button {
-                store.start(event)
-            } label: {
-                Label("Iniciar", systemImage: "play.fill")
-            }
-            .buttonStyle(ActionTileButtonStyle(prominent: true))
-        }
-
-        if event.status == .inProgress, role.canEditMaintenance {
-            NavigationLink {
-                CorrectiveReportFormView(eventID: event.id)
-            } label: {
-                Label(event.reportVersions.isEmpty ? "Crear reporte" : "Editar reporte", systemImage: "square.and.pencil")
-            }
-            .buttonStyle(ActionTileButtonStyle(prominent: true))
-        }
-
-        if event.status == .inProgress, role.canEditMaintenance {
-            Button {
-                store.complete(event)
-            } label: {
-                Label("Completar", systemImage: "checkmark.circle.fill")
-            }
-            .buttonStyle(ActionTileButtonStyle())
-        }
-
-        if event.status == .completed {
-            if role.canEditMaintenance {
-                Button {
-                    store.reopen(event)
-                } label: {
-                    Label("Reabrir", systemImage: "arrow.uturn.backward.circle.fill")
-                }
-                .buttonStyle(ActionTileButtonStyle(prominent: true))
-            }
-            if let version = event.reportVersions.first {
-                NavigationLink {
-                    CorrectivePDFPreviewView(eventID: event.id, version: version)
-                } label: {
-                    Label("Compartir PDF", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(ActionTileButtonStyle())
-            }
-            if role.canCloseMaintenance {
-                Button {
-                    store.close(event)
-                } label: {
-                    Label("Cerrar", systemImage: "lock.fill")
-                }
-                .buttonStyle(ActionTileButtonStyle())
-            }
-        }
-
-        if event.status == .closed, role.canCloseMaintenance {
-            Button {
-                store.reopen(event)
-            } label: {
-                Label("Reabrir", systemImage: "lock.open.fill")
-            }
-            .buttonStyle(ActionTileButtonStyle(prominent: true))
-        }
-
-        if !role.canEditMaintenance {
-            Text("Vista de solo lectura para Jefe.")
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    private static let dateTimeFormatter: DateFormatter = {
+    private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "es_PE")
         return formatter
     }()
-}
-
-private struct CorrectiveCommentBubble: View {
-    let comment: CorrectiveComment
-    let eventCode: String
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppSpacing.sm) {
-            Image(systemName: comment.author.avatarSystemImage)
-                .font(.title2)
-                .foregroundStyle(BrandColor.red)
-                .frame(width: 36, height: 36)
-                .background(BrandColor.red.opacity(0.10))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(comment.author.name)
-                        .font(.subheadline.weight(.semibold))
-                    Text(comment.author.role.label)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Text(comment.message)
-                    .font(.body)
-                Text("Comentario asociado a \(eventCode)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(AppSpacing.sm)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-        .padding(.vertical, 4)
-    }
 }
 
 struct CorrectiveDetailView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationStack {
-            CorrectiveDetailView(eventID: "cor-001")
-                .environmentObject(MockMaintenanceStore())
+            CorrectiveDetailView(eventID: "event")
+                .environmentObject(SessionStore())
+                .environmentObject(MaintenanceActivityStore())
         }
+    }
+}
+
+private extension Optional where Wrapped == String {
+    func orFallback(_ fallback: String) -> String {
+        guard let value = self, !value.isEmpty else { return fallback }
+        return value
+    }
+}
+
+private extension String {
+    func orFallback(_ fallback: String) -> String {
+        isEmpty ? fallback : self
     }
 }

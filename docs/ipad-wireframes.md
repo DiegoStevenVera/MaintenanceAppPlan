@@ -96,7 +96,7 @@ Visible items:
 
 | Role | Behavior |
 |------|----------|
-| Technician | Sees own/current-scope operational work |
+| Maintenance Engineer | Sees own/current-scope operational work |
 | Coordinator | Also sees pending closure |
 | Boss | Sees metrics and read-only summaries |
 | Administrator | Sees all data and admin shortcuts |
@@ -176,14 +176,14 @@ App-visible labels:
 │ Reportes anteriores                                        │
 │ - Historico del equipo grande -> abre vista previa PDF     │
 ├────────────────────────────────────────────────────────────┤
-│ Notas de mantenedores                                      │
+│ Notas de ingenieros                                        │
 │ - Revisar ventiladores antes de iniciar limpieza.          │
 └────────────────────────────────────────────────────────────┘
 ```
 
 ### 5.2 Actions by Status
 
-| Status | Technician | Coordinator | Boss |
+| Status | Maintenance Engineer | Coordinator | Boss |
 |--------|------------|-------------|------|
 | Programado | Iniciar | Iniciar | Ver |
 | En progreso | Generar/Editar reporte, Completar | Generar/Editar reporte, Completar | Ver |
@@ -273,7 +273,7 @@ When user taps `Finalizar reporte`:
 
 Visible to:
 
-- Technician,
+- Maintenance Engineer,
 - Coordinator,
 - Administrator.
 
@@ -345,7 +345,7 @@ The `+` opens a large iPad sheet with a focused creation flow.
 
 ### 8.2 Actions by Status
 
-| Status | Technician | Coordinator | Boss |
+| Status | Maintenance Engineer | Coordinator | Boss |
 |--------|------------|-------------|------|
 | Programado/Abierto | Iniciar | Iniciar | Ver |
 | En progreso | Crear/Editar reporte, Completar | Crear/Editar reporte, Completar | Ver |

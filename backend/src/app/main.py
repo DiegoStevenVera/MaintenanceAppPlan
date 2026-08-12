@@ -2,12 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 
+import app.models  # noqa: F401
 from app.config import settings
 from app.database import async_session_factory, uses_postgres
 from modules.app_state.interfaces.router import router as app_state_router
 from modules.asset_management.interfaces.router import router as asset_router
 from modules.identity_access.interfaces.router import router as identity_router
 from modules.maintenance_execution.interfaces.router import router as maintenance_router
+from modules.maintenance_execution.interfaces.planning_router import router as planning_router
 
 
 def create_app() -> FastAPI:
@@ -43,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(app_state_router, prefix=settings.api_v1_prefix)
     app.include_router(asset_router, prefix=settings.api_v1_prefix)
     app.include_router(maintenance_router, prefix=settings.api_v1_prefix)
+    app.include_router(planning_router, prefix=settings.api_v1_prefix)
     return app
 
 

@@ -208,7 +208,15 @@ preventive_test_results (
 );
 ```
 
-The `Reportes anteriores` section in preventive detail is a read model over finalized historical reports for the same business anchor equipment, not a version list for the current report. Each row opens the PDF preview for the report generated at that historical execution.
+Preventive detail separates three domain levels:
+
+- `maintenance_templates` defines the reusable guide with expected steps and tests.
+- `maintenance_activities` represents the scheduled occurrence and supplies its scheduled date and equipment context.
+- `report_versions` stores immutable execution data, including captured results, participants, signatures, evidence, and conclusions.
+
+The initial preventive detail must never derive its guide from `preventive_step_results` or `preventive_test_results`. It reads the guide from the template linked by `maintenance_template_id`.
+
+The `Reportes anteriores` section is a read model over the latest finalized version of each previous activity that has both the same `maintenance_template_id` and the same business-anchor asset. It excludes the current activity and is not a version list for the current report. Each row opens the read-only report-version detail and its generated PDF.
 
 ```sql
 previous_preventive_reports_by_equipment as
@@ -218,7 +226,7 @@ select
   pr.actual_date,
   pr.final_result,
   mt.name as activity_name,
-  u.full_name as technician_name
+  u.full_name as engineer_name
 from preventive_reports pr
 join maintenance_activity_assets maa
   on maa.maintenance_activity_id = pr.maintenance_activity_id
@@ -275,7 +283,7 @@ user_profiles (
 
 ## 6. Stages as Rollout Scope
 
-Stage is a rollout/planning dimension. It must not prevent technicians from seeing assets that belong to their project.
+Stage is a rollout/planning dimension. It must not prevent maintenance engineers from seeing assets that belong to their project.
 
 Assets and locations can belong to more than one stage over time.
 

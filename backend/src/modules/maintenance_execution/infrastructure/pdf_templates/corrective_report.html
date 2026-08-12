@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page {
+      size: Letter;
+      margin: 29mm 18mm 15mm;
+      @top-center { content: element(reportHeader); }
+      @bottom-right {
+        content: "Página " counter(page) " de " counter(pages);
+        font: 7.5pt Arial, sans-serif;
+      }
+    }
+    @page photos {
+      size: Letter;
+      margin: 16mm 18mm;
+      @top-center { content: none; }
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #111; font: 9pt Arial, Helvetica, sans-serif; }
+    .report-header {
+      position: running(reportHeader);
+      width: 100%;
+      height: 22mm;
+      border-bottom: 1.3px solid #111;
+    }
+    .report-header table { border: 0; }
+    .report-header td { border: 0; padding: 0; vertical-align: middle; }
+    .logo { width: 29%; }
+    .logo img { display: block; width: 34mm; height: 15mm; object-fit: contain; object-position: left center; }
+    .contract { width: 71%; text-align: center; font-weight: bold; line-height: 1.35; }
+    h1 { margin: 3mm 0 5mm; text-align: center; font-size: 12pt; line-height: 1.45; text-decoration: underline; }
+    .document-meta { width: 100%; margin-bottom: 6mm; border-collapse: separate; border-spacing: 12mm 0; }
+    .document-meta td { border: 1px solid #111; padding: 3px 7px; text-align: center; font-weight: bold; }
+    .section { margin: 0 0 5mm; }
+    .section-title { margin: 0 0 2.5mm; font-weight: bold; text-decoration: underline; text-transform: uppercase; }
+    .section-number { display: inline-block; width: 9mm; font-weight: normal; text-decoration: none; }
+    table.data { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    table.data th, table.data td { border: 1px solid #111; padding: 3px 5px; vertical-align: middle; }
+    table.data th { font-weight: bold; text-align: center; }
+    .field-label { width: 39%; text-align: center; font-weight: bold; }
+    .center { text-align: center; }
+    .activity-item { width: 7%; text-align: center; }
+    .activity-name { width: 33%; text-align: center; }
+    .activity-description { width: 60%; white-space: pre-wrap; line-height: 1.35; }
+    .muted { color: #555; }
+    .signatures td { height: 12mm; text-align: center; }
+    .signature { display: block; width: 42mm; height: 9mm; margin: 0 auto; object-fit: contain; }
+    .avoid-break { break-inside: avoid; page-break-inside: avoid; }
+    .photo-page { page: photos; break-before: page; page-break-before: always; }
+    .photo-page h2 { margin: 0 0 8mm; font-size: 11pt; font-weight: normal; }
+    .photo-grid { width: 100%; border-collapse: separate; border-spacing: 7mm 5mm; table-layout: fixed; }
+    .photo-grid td { width: 50%; height: 67mm; border: 0; padding: 0; vertical-align: top; }
+    .photo-title { min-height: 6mm; margin-bottom: 2mm; font-size: 9pt; }
+    .photo-grid img { display: block; width: 100%; height: 56mm; object-fit: contain; object-position: top center; }
+  </style>
+</head>
+<body>
+  <header class="report-header">
+    <table><tr>
+      <td class="logo"><img src="{{ logo_data_uri }}" alt="Hitachi Rail"></td>
+      <td class="contract">Línea 2 y Ramal Av. Faucett - Av. Gambetta de la<br>Red Básica del Metro de Lima y Callao</td>
+    </tr></table>
+  </header>
+
+  <h1>REPORTE DE EJECUCIÓN DE MANTENIMIENTO CORRECTIVO<br>SISTEMA DE SEÑALIZACIÓN</h1>
+  <table class="document-meta"><tr>
+    <td>Fecha: {{ report_date }}</td>
+    <td>FOR: {{ report_code }}</td>
+    <td>N° REPORTE: {{ report_number }}</td>
+  </tr></table>
+
+  <section class="section avoid-break">
+    <div class="section-title"><span class="section-number">1.</span>Datos generales</div>
+    <table class="data">
+      <tr><td class="field-label">Tramo / Estación</td><td>{{ activity.site or "No registrado" }} / {{ activity.location_path or "No registrada" }}</td></tr>
+      <tr><td class="field-label">Equipo / activo</td><td>{{ activity.assets | map(attribute="name") | join(", ") or report.affected_asset_path or "No registrado" }}</td></tr>
+      <tr><td class="field-label">Notificación/Aviso de mantenimiento</td><td>{{ report.sap_event_name or "No registrado" }}</td></tr>
+      <tr><td class="field-label">Orden de mantenimiento</td><td>{{ report.sap_notification or activity.internal_code }}</td></tr>
+      <tr><td class="field-label">Fecha y hora de creación del aviso</td><td>{{ format_datetime(report.notice_created_at) }}</td></tr>
+    </table>
+  </section>
+
+  <section class="section avoid-break">
+    <div class="section-title"><span class="section-number">2.</span>Activo de señalización</div>
+    <table class="data">
+      <tr><td class="field-label">Subsistema</td><td>{{ activity.subsystem }}</td></tr>
+      <tr><td class="field-label">Equipo</td><td>{{ report.affected_asset_path or (activity.assets | map(attribute="name") | join(", ")) }}</td></tr>
+      <tr><td class="field-label">Elemento crítico</td><td>{{ critical_element }}</td></tr>
+    </table>
+  </section>
+
+  <section class="section avoid-break">
+    <div class="section-title"><span class="section-number">3.</span>Descripción de la falla (Aviso SAP)</div>
+    <table class="data">
+      <tr><td class="field-label">Síntoma registrado</td><td>{{ report.symptom or "No registrado" }}</td></tr>
+      <tr><td class="field-label">Descripción técnica detallada</td><td>{{ report.technical_description or "No registrada" }}</td></tr>
+      <tr><td class="field-label">Impacto operacional</td><td>{{ report.operational_impact or "No registrado" }}</td></tr>
+    </table>
+  </section>
+
+  <section class="section avoid-break">
+    <div class="section-title"><span class="section-number">4.</span>Análisis de la falla</div>
+    <table class="data"><tr><td class="field-label">Tipo de falla</td><td>{{ report.failure_analysis_type or "No registrado" }}</td></tr></table>
+  </section>
+
+  <section class="section">
+    <div class="section-title"><span class="section-number">5.</span>Actividades correctivas ejecutadas</div>
+    <table class="data">
+      <thead><tr><th class="activity-item">Ítem</th><th class="activity-name">Actividad</th><th class="activity-description">Descripción</th></tr></thead>
+      <tbody>
+        {% set activity_counter = namespace(value=0) %}
+        {% for item in report.activities %}
+          {% set activity_counter.value = activity_counter.value + 1 %}
+          <tr>
+            <td class="activity-item">{{ activity_counter.value }}</td>
+            <td class="activity-name">{{ item.name }}</td>
+            <td class="activity-description">Fecha y hora inicio: {{ format_datetime(item.started_at) }}
+Fecha y hora fin: {{ format_datetime(item.ended_at) }}
+
+{{ item.description }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="3" class="center muted">No se registraron actividades correctivas.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <div class="section-title"><span class="section-number">6.</span>Componentes afectados y repuestos empleados</div>
+    <table class="data">
+      <thead><tr><th style="width:7%">Ítem</th><th style="width:27%">Nombre componente</th><th style="width:23%">Número serial</th><th style="width:19%">Estado</th><th>Ubicación</th></tr></thead>
+      <tbody>
+        {% set component_counter = namespace(value=0) %}
+        {% for item in report.activities if item.replacement %}
+          {% set component_counter.value = component_counter.value + 1 %}
+          <tr>
+            <td class="center">{{ component_counter.value }}</td>
+            <td>{{ item.replacement.removed_asset_name or item.replacement.removed_asset_id }}</td>
+            <td>{{ item.replacement.removed_serial_number or "No registrado" }}</td>
+            <td>{{ item.replacement.removed_condition or "No registrado" }}</td>
+            <td>Retirado hacia: {{ item.replacement.destination_description }}</td>
+          </tr>
+          {% set component_counter.value = component_counter.value + 1 %}
+          <tr>
+            <td class="center">{{ component_counter.value }}</td>
+            <td>{{ item.replacement.installed_asset_name or item.replacement.installed_asset_id }}</td>
+            <td>{{ item.replacement.installed_serial_number or "No registrado" }}</td>
+            <td>{{ item.replacement.installed_condition or "No registrado" }}</td>
+            <td>Obtenido de: {{ item.replacement.source_description }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5" class="center muted">No se registraron componentes reemplazados.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section avoid-break">
+    <div class="section-title"><span class="section-number">7.</span>Pruebas y validación operativa</div>
+    <table class="data">
+      <tr><td class="field-label">Pruebas funcionales realizadas</td><td>{{ report.functional_tests or "No registradas" }}</td></tr>
+      <tr><td class="field-label">Resultado</td><td>{{ report.validation_result or "No registrado" }}</td></tr>
+      <tr><td class="field-label">Liberación para servicio</td><td>{{ "Sí" if report.service_released else "No" }}</td></tr>
+      <tr><td class="field-label">Responsable de validación</td><td>{{ report.validation_responsible or "No registrado" }}</td></tr>
+    </table>
+  </section>
+
+  <section class="section avoid-break">
+    <div class="section-title"><span class="section-number">8.</span>Tiempos de mantenimiento</div>
+    <table class="data">
+      <tr><td class="field-label">Fecha y hora de notificación</td><td>{{ format_datetime(report.notice_created_at) }}</td></tr>
+      <tr><td class="field-label">Fecha y hora de respuesta</td><td>{{ format_datetime(report.response_at) }}</td></tr>
+      <tr><td class="field-label">Fecha y hora de inicio de actividades</td><td>{{ format_datetime(report.corrective_started_at) }}</td></tr>
+      <tr><td class="field-label">Fecha y hora de fin de actividades</td><td>{{ format_datetime(report.corrective_ended_at) }}</td></tr>
+      <tr><td class="field-label">Fecha y hora de liberación tras validación</td><td>{{ format_datetime(report.service_released_at) }}</td></tr>
+    </table>
+  </section>
+
+  <section class="section avoid-break">
+    <div class="section-title"><span class="section-number">9.</span>Resultados finales</div>
+    <table class="data">
+      <tr><td class="field-label">Estado técnico del equipo</td><td>{{ report.technical_status or "No registrado" }}</td></tr>
+      <tr><td class="field-label">Observaciones / Comentarios</td><td>{{ report.conclusion or report.additional_comments or "Sin observaciones" }}</td></tr>
+    </table>
+  </section>
+
+  <section class="section avoid-break">
+    <div class="section-title">Mantenedores a cargo</div>
+    <table class="data signatures">
+      <thead><tr><th>Participantes</th><th>Cargo</th><th>Firma</th></tr></thead>
+      <tbody>
+        {% for participant in participants %}
+        <tr>
+          <td>{{ participant.name }}</td>
+          <td>{{ participant.role }}</td>
+          <td>{% for signature in signatures if signature.participant_id == participant.id %}<img class="signature" src="{{ signature.data_uri }}" alt="Firma de {{ participant.name }}">{% else %}<span class="muted">Sin firma</span>{% endfor %}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="muted">No se registraron participantes.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <table class="data" style="margin-top:5mm">
+      <tr><td class="field-label">Elaborado por</td><td>{{ creator_name }}</td></tr>
+      <tr><td class="field-label">Fecha</td><td>{{ report_date }}</td></tr>
+    </table>
+  </section>
+
+  {% for photo_page in photos|batch(6) %}
+  <section class="photo-page">
+    <h2>Registro Fotográfico {{ loop.index }}</h2>
+    <table class="photo-grid">
+      {% for photo_row in photo_page|batch(2) %}
+      <tr>
+        {% for photo in photo_row %}
+        <td><div class="photo-title">{{ photo.title }}{% if photo.description %}: {{ photo.description }}{% endif %}</div><img src="{{ photo.data_uri }}" alt="{{ photo.title }}"></td>
+        {% endfor %}
+        {% if photo_row|length == 1 %}<td></td>{% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endfor %}
+</body>
+</html>

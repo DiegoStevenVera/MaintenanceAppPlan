@@ -18,11 +18,20 @@ struct MainTabView: View {
             }
 
             NavigationStack {
-                CorrectiveListView()
+                DatabaseCorrectiveListView()
             }
             .tabItem {
                 Label("Correctivos", systemImage: "wrench.and.screwdriver")
             }
+            
+            /* TODO: PCON PLANIFICATION
+            NavigationStack {
+                PCONPlanningView()
+            }
+            .tabItem {
+                Label("PCON", systemImage: "calendar.badge.clock")
+            }
+             */
 
             NavigationStack {
                 AssetSearchView()
@@ -45,6 +54,9 @@ struct MainTabView: View {
                 Label("Perfil", systemImage: "person.crop.circle")
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            OfflineStatusBar()
+        }
     }
 }
 
@@ -64,5 +76,9 @@ struct MainTabView_Previews: PreviewProvider {
     static var previews: some View {
         MainTabView()
             .environmentObject(MockMaintenanceStore())
+            .environmentObject(SessionStore())
+            .environmentObject(AssetStore())
+            .environmentObject(MaintenanceActivityStore())
+            .environmentObject(OfflineReportStore())
     }
 }

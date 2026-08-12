@@ -60,11 +60,11 @@ Important decisions:
 - The app starts mock-first for iPad.
 - App-visible labels/data must be in Spanish.
 - Documentation, code, schema names, and comments must be in English.
-- Roles are Technician, Coordinator, Boss, Administrator in documentation; Spanish UI labels are Ingeniero de Mantenimiento, Coordinador, Jefe, Administrador.
+- Roles are Maintenance Engineer, Coordinator, Boss, Administrator in documentation; Spanish UI labels are Ingeniero de Mantenimiento, Coordinador, Jefe, Administrador.
 - The Asset model is unified. Component is an Asset category.
 - Business anchor assets are the primary reporting/metrics assets.
 - Maintenance reports link to report scope assets with roles.
-- Stage is rollout/planning scope, not a hard technician visibility boundary.
+- Stage is rollout/planning scope, not a hard maintenance engineer visibility boundary.
 
 After reading, summarize what you understand and propose the next mock-first SwiftUI design slice.
 ```

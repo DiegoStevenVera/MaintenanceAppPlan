@@ -6,6 +6,7 @@ import app.models  # noqa: F401
 from app.app_state_seed import build_app_state
 from app.database import Base, async_session_factory, engine
 from modules.app_state.infrastructure.postgres.repository import PostgresAppStateRepository
+from modules.identity_access.application.security import hash_password
 from modules.asset_management.infrastructure.postgres.models import (
     AssetHistoryRecord,
     AssetRecord,
@@ -43,7 +44,7 @@ async def seed_database() -> None:
                     email=user["email"],
                     role=_role_to_backend(user["role"]),
                     role_label=_role_label(user["role"]),
-                    password_hash="mock:123456",
+                    password_hash=hash_password("123456"),
                 )
             )
 
@@ -141,7 +142,7 @@ async def seed_database() -> None:
 
 def _role_to_backend(role: str) -> str:
     return {
-        "technician": "TECHNICIAN",
+        "maintenanceEngineer": "MAINTENANCE_ENGINEER",
         "coordinator": "COORDINATOR",
         "boss": "BOSS",
         "administrator": "ADMINISTRATOR",
@@ -150,7 +151,7 @@ def _role_to_backend(role: str) -> str:
 
 def _role_label(role: str) -> str:
     return {
-        "technician": "Ingeniero de Mantenimiento",
+        "maintenanceEngineer": "Ingeniero de Mantenimiento",
         "coordinator": "Coordinador",
         "boss": "Jefe",
         "administrator": "Administrador",

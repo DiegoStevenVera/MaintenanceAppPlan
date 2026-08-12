@@ -2,7 +2,7 @@
 
 **Status:** Implemented and validated with transactional dry runs  
 **Source workbooks:** `WBS_V2.xlsx` and `BD_Storage.xlsx`  
-**Database migration head:** `20260724_0005`
+**Database migration head:** `20260730_0010`
 
 ## 1. Purpose
 
@@ -150,6 +150,9 @@ row-result, source hash, and source-to-target mapping records.
 - Transmitter and receiver measurements remain separate ordered rows.
 - Components without a mapped component type use the Spanish business value
   `Componente no tipificado`; their source mapping remains auditable.
+- A component's immediate parent is the component occupying its nearest ancestor slot in the same
+  inventory location. When no ancestor slot is occupied, the related large equipment remains the
+  parent. This keeps the asset hierarchy aligned with the independent `slot_locations` hierarchy.
 - Duplicate source serial numbers are not accepted as unique serial identities. They remain in the
   legacy display value and use `REQUIRES_VERIFICATION`.
 - Historical tasks or parent rows missing from the current workbook are reconstructed with an

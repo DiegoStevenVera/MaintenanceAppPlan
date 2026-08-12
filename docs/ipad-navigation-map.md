@@ -2,7 +2,7 @@
 
 **Version:** 0.1  
 **Status:** Draft  
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-07-29
 
 ---
 
@@ -25,11 +25,42 @@ flowchart TD
 
     Tabs --> Home["Inicio"]
     Tabs --> Preventive["Preventivos"]
+    Tabs --> PCON["PCON"]
     Tabs --> Corrective["Correctivos"]
-    Tabs --> Assets["Activos"]
+    Tabs --> Assets["Equipos"]
     Tabs --> Stock["Stock"]
     Tabs --> Profile["Perfil"]
 ```
+
+### 2.1 PCON Navigation
+
+```mermaid
+flowchart TD
+    PCON["PCON"]
+    Annual["Plan anual"]
+    Weekly["Programación semanal"]
+    CellDetail["Cantidad mensual / ocurrencias"]
+    AddMaintenance["Agregar mantenimiento"]
+    CopyYear["Copiar año anterior"]
+    OccurrenceAdmin["Mover / Eliminar / Cancelar ocurrencia"]
+    History["Historial (toolbar)"]
+    Proposal["Programar / Reprogramar"]
+    BlockConfirmation["Confirmar semana"]
+
+    PCON --> Annual
+    PCON --> Weekly
+    PCON --> History
+    Annual --> CellDetail
+    Annual --> AddMaintenance
+    Annual --> CopyYear
+    CellDetail --> OccurrenceAdmin
+    Weekly --> Proposal
+    Weekly --> BlockConfirmation
+```
+
+Coordinator and Administrator can open the editing sheets and confirm the
+weekly block. Maintenance Engineer and Boss navigate the same screens in
+read-only mode.
 
 ---
 
@@ -91,9 +122,11 @@ flowchart TD
 Additional detail behavior:
 
 - Detalle preventivo muestra `Acciones` despues de la imagen del equipo grande y antes de datos generales.
+- La pantalla inicial funciona como guia del tipo de mantenimiento: conserva el contexto de la actividad programada, pero obtiene los pasos y pruebas desde la plantilla y nunca presenta resultados de una version ejecutada.
+- `Versiones del reporte` abre el detalle de los datos capturados en la actividad programada actual.
 - Los preventivos completados pueden reabrirse a `En progreso` por Ingeniero de Mantenimiento, Coordinador o Administrador; Jefe queda en solo lectura.
 - Los preventivos cerrados solo pueden reabrirse a `En progreso` por Coordinador o Administrador.
-- `Reportes anteriores` navega desde cada historico a una vista previa PDF del reporte realizado en ese momento.
+- `Reportes anteriores` contiene ejecuciones previas que comparten plantilla y equipo grande; navega desde cada historico al detalle de su ultima version finalizada y a su PDF.
 - Los comentarios preventivos son reutilizables por tipo de mantenimiento y/o equipo grande para futuras ejecuciones.
 
 ---
@@ -269,10 +302,10 @@ App-visible mock labels:
 
 | Role | Hidden or Disabled Navigation |
 |------|-------------------------------|
-| Technician | Cannot close/reopen activities |
-| Coordinator | Can close/reopen activities |
+| Maintenance Engineer | Cannot close/reopen activities; PCON is read-only |
+| Coordinator | Can close/reopen activities and edit/confirm PCON |
 | Boss | Cannot create/edit/start/complete/close/reopen; read-only navigation only |
-| Administrator | No restrictions in mock |
+| Administrator | Can edit/confirm PCON and access all operational flows |
 
 ---
 

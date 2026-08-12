@@ -33,8 +33,8 @@ def user(
 
 
 USERS = [
-    user("user-diego", "Diego Vera", "technician", "diego@maintenance.local"),
-    user("user-joab", "Joab Apaza", "technician", "joab@maintenance.local", "person.crop.circle"),
+    user("user-diego", "Diego Vera", "maintenanceEngineer", "diego@maintenance.local"),
+    user("user-joab", "Joab Apaza", "maintenanceEngineer", "joab@maintenance.local", "person.crop.circle"),
     user("user-fredy", "Fredy Navarrete", "coordinator", "fredy@maintenance.local", "person.crop.square.fill"),
     user("user-jefe", "Jefe de mantenimiento", "boss", "jefe@maintenance.local", "person.crop.rectangle.fill"),
     user("user-admin", "Administrador", "administrator", "admin@maintenance.local", "person.badge.key.fill"),
@@ -131,7 +131,7 @@ def historical_report(
     key: str,
     equipment: str,
     activity: str,
-    technician: str,
+    engineer: str,
     days_ago: int,
     result: str,
     participants: list[dict],
@@ -140,7 +140,7 @@ def historical_report(
         "id": uuid(f"historical:{key}"),
         "equipmentName": equipment,
         "activityName": activity,
-        "technicianName": technician,
+        "engineerName": engineer,
         "performedAt": iso(offset_days=-days_ago),
         "result": result,
         "steps": historical_steps(key),

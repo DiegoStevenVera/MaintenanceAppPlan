@@ -30,7 +30,7 @@ This slice is UI-only and must use local mock data.
 - Report version list mock.
 - PDF preview placeholder.
 - Share Sheet mock using native iOS sharing.
-- Role-aware actions for Technician, Coordinator, Boss, and Administrator.
+- Role-aware actions for Maintenance Engineer, Coordinator, Boss, and Administrator.
 
 ### Not Included
 
@@ -149,7 +149,7 @@ Shows:
 
 Action matrix:
 
-| Status | Technician | Coordinator | Boss | Administrator |
+| Status | Maintenance Engineer | Coordinator | Boss | Administrator |
 |--------|------------|-------------|------|---------------|
 | Programado | Iniciar | Iniciar | View only | Iniciar |
 | En progreso | Editar reporte, Completar | Editar reporte, Completar | View only | Editar reporte, Completar |
@@ -183,7 +183,9 @@ Detalle preventivo:
 - El bloque `Acciones` aparece despues de la imagen referencial del equipo y antes de datos generales.
 - El mantenimiento preventivo ATS usa una imagen referencial de gabinete/rack en el mock para validar como se muestran fotografias reales del equipo.
 - Los botones de accion usan grilla adaptable con icono y ancho completo disponible.
-- `Reportes anteriores` lista historicos del mismo equipo grande y cada item navega a la vista previa PDF historica.
+- `Pasos y pruebas` presenta la guia definida por la plantilla del tipo de mantenimiento. No muestra checks, comentarios ni resultados capturados en una ejecucion.
+- `Versiones del reporte` pertenece solamente a la actividad programada seleccionada. Cada version abre el detalle inmutable de lo ejecutado.
+- `Reportes anteriores` lista la ultima version finalizada de cada ejecucion previa del mismo tipo de mantenimiento y del mismo equipo grande. Cada item navega al detalle/PDF historico.
 - La pantalla de `Preventivos` incluye filtros tipo botonera: `Hoy`, `Esta semana`, `Este Mes` y `Mes especifico` con selector de mes/anio.
 - Los filtros de `Preventivos` actuan sobre la fecha de programacion del mantenimiento e incluyen busqueda por nombre de mantenimiento.
 - La pantalla de `Correctivos` reutiliza la misma seccion de filtros, pero la fecha es opcional: sin filtro activo muestra correctivos abiertos, en progreso, completados y cerrados; con filtro activo usa la fecha de creacion de aviso.
@@ -244,7 +246,7 @@ Rules:
 - Finalizing a report creates or updates a mock report version.
 - `Completar` moves the activity to `Completado`.
 - `Cerrar` is visible only for Coordinator and Administrator.
-- `Reabrir` from `Completado` is visible for Technician, Coordinator, and Administrator and moves the maintenance back to `En progreso`.
+- `Reabrir` from `Completado` is visible for Maintenance Engineer, Coordinator, and Administrator and moves the maintenance back to `En progreso`.
 - `Reabrir` from `Cerrado` is visible only for Coordinator and Administrator and moves the maintenance back to `En progreso`.
 - Boss can navigate and view but cannot mutate state.
 
@@ -271,7 +273,7 @@ Rules:
 
 Use these questions after the first iPad mock is available:
 
-1. Is the first screen useful for a technician starting the shift?
+1. Is the first screen useful for a maintenance engineer starting the shift?
 2. Are the preventive activity statuses clear?
 3. Is the activity detail missing any critical field?
 4. Is the report form order natural compared with current work?

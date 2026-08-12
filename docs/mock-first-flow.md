@@ -33,7 +33,7 @@ This is not a database schema, API contract, or final UI design.
 - Avoid backend dependencies.
 - Use in-memory or static mock data.
 - Show real operational states and actions.
-- Validate the experience with technicians/coordinator before backend work.
+- Validate the experience with maintenance engineers/coordinator before backend work.
 - Use English documentation and technical labels.
 - App-visible labels, seed data, dropdown values, report content, and database business data must be in Spanish because end users are Spanish-speaking.
 - Code, code comments, technical identifiers, and project documentation remain in English.
@@ -44,8 +44,8 @@ This is not a database schema, API contract, or final UI design.
 
 | Role | Mock Behavior |
 |------|---------------|
-| Technician | Display label: Ingeniero de Mantenimiento. Can start maintenance, create/edit reports, complete activities, sign as participant |
-| Coordinator | Display label: Coordinador. Can do Technician actions, close and reopen activities |
+| Maintenance Engineer | Display label: Ingeniero de Mantenimiento. Can start maintenance, create/edit reports, complete activities, sign as participant |
+| Coordinator | Display label: Coordinador. Can do Maintenance Engineer actions, close and reopen activities |
 | Boss | Display label: Jefe. Read-only access to metrics, activity details, reports, PDFs, timelines |
 | Administrator | Display label: Administrador. Full access; admin screens can be mocked as placeholders |
 
@@ -83,7 +83,7 @@ Preventive and corrective activities share the same lifecycle.
 
 Rules:
 
-- Technician can start and complete activities.
+- Maintenance Engineer can start and complete activities.
 - Coordinator can close and reopen activities.
 - Boss can only view.
 - Administrator can do all actions.
@@ -191,7 +191,7 @@ Previous reports are historical report records for the same `Equipo` or maintena
 
 ### 7.3 Preventive Detail Actions
 
-| Status | Technician | Coordinator | Boss |
+| Status | Maintenance Engineer | Coordinator | Boss |
 |--------|------------|-------------|------|
 | Programado | Iniciar | Iniciar | Ver |
 | En progreso | Generar/Editar reporte, Completar when report exists | Generar/Editar reporte, Completar | Ver |
@@ -271,7 +271,7 @@ Enabled only after at least one report version exists.
 
 Flow:
 
-1. Technician taps Complete.
+1. Maintenance Engineer taps Complete.
 2. Optional notes.
 3. Status changes to Completado.
 4. Coordinator can close later.
@@ -305,7 +305,7 @@ Each row shows:
 
 Available to:
 
-- Technician in v1,
+- Maintenance Engineer in v1,
 - Coordinator,
 - Administrator.
 
@@ -341,7 +341,7 @@ Shows:
 
 ### 8.4 Corrective Event Actions
 
-| Status | Technician | Coordinator | Boss |
+| Status | Maintenance Engineer | Coordinator | Boss |
 |--------|------------|-------------|------|
 | Programado/Abierto | Iniciar | Iniciar | Ver |
 | En progreso | Crear/Editar reporte, Completar | Crear/Editar reporte, Completar | Ver |
@@ -435,7 +435,7 @@ Enabled when at least one report version exists.
 
 Flow:
 
-1. Technician taps Complete/Resolve.
+1. Maintenance Engineer taps Complete/Resolve.
 2. Adds optional resolution notes.
 3. Status changes to Completado.
 4. Coordinator closes later.
@@ -579,7 +579,7 @@ No delivery tracking in v1.
 
 The mock-first prototype is successful when the team can answer:
 
-- Can a technician understand what to do next?
+- Can a maintenance engineer understand what to do next?
 - Are preventive and corrective flows clear?
 - Are report versions understandable?
 - Does Stop Here behave as expected?

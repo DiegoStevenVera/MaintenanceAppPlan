@@ -2,16 +2,31 @@ import Foundation
 import SwiftUI
 
 enum UserRole: String, CaseIterable, Identifiable, Codable {
-    case technician
+    case maintenanceEngineer
     case coordinator
     case boss
     case administrator
 
     var id: String { rawValue }
 
+    init?(apiValue: String) {
+        switch apiValue {
+        case "MAINTENANCE_ENGINEER":
+            self = .maintenanceEngineer
+        case "COORDINATOR":
+            self = .coordinator
+        case "BOSS":
+            self = .boss
+        case "ADMINISTRATOR":
+            self = .administrator
+        default:
+            return nil
+        }
+    }
+
     var label: String {
         switch self {
-        case .technician:
+        case .maintenanceEngineer:
             return "Ingeniero de Mantenimiento"
         case .coordinator:
             return "Coordinador"
@@ -22,11 +37,28 @@ enum UserRole: String, CaseIterable, Identifiable, Codable {
         }
     }
 
+    var apiValue: String {
+        switch self {
+        case .maintenanceEngineer:
+            return "MAINTENANCE_ENGINEER"
+        case .coordinator:
+            return "COORDINATOR"
+        case .boss:
+            return "BOSS"
+        case .administrator:
+            return "ADMINISTRATOR"
+        }
+    }
+
     var canEditMaintenance: Bool {
         self != .boss
     }
 
     var canCloseMaintenance: Bool {
+        self == .coordinator || self == .administrator
+    }
+
+    var canEditPlanning: Bool {
         self == .coordinator || self == .administrator
     }
 }
@@ -115,7 +147,7 @@ struct HistoricalMaintenanceReport: Identifiable, Codable {
     let id: UUID
     let equipmentName: String
     let activityName: String
-    let technicianName: String
+    let engineerName: String
     let performedAt: Date
     let result: String
     let steps: [MaintenanceStep]
@@ -125,7 +157,7 @@ struct HistoricalMaintenanceReport: Identifiable, Codable {
         id: UUID,
         equipmentName: String,
         activityName: String,
-        technicianName: String,
+        engineerName: String,
         performedAt: Date,
         result: String,
         steps: [MaintenanceStep] = [],
@@ -134,7 +166,7 @@ struct HistoricalMaintenanceReport: Identifiable, Codable {
         self.id = id
         self.equipmentName = equipmentName
         self.activityName = activityName
-        self.technicianName = technicianName
+        self.engineerName = engineerName
         self.performedAt = performedAt
         self.result = result
         self.steps = steps

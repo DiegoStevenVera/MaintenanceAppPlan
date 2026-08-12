@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page { size: A4; margin: 11mm 13mm 13mm; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: #000;
+      background: #fff;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 7.4px;
+      line-height: 1.18;
+    }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td {
+      border: 0.7px solid #000;
+      padding: 2.2px 3px;
+      vertical-align: middle;
+      overflow-wrap: anywhere;
+    }
+    th { background: #d9dfe5; font-weight: 700; text-align: center; }
+    .form { page-break-inside: auto; }
+    .form thead { display: table-header-group; }
+    .logo-cell { height: 31px; padding: 2px 6px; text-align: center; }
+    .logo-cell img { display: block; width: 92px; height: 25px; margin: auto; object-fit: contain; }
+    .center { text-align: center; }
+    .right { text-align: right; }
+    .bold { font-weight: 700; }
+    .label { font-weight: 700; }
+    .top { vertical-align: top; }
+    .general-value { min-height: 20px; text-align: center; font-weight: 600; }
+    .section-label { padding: 3px; font-weight: 700; }
+    .activity-title { font-weight: 700; text-align: left; }
+    .approval {
+      background: #00c853;
+      color: #000;
+      font-weight: 700;
+      text-align: center;
+    }
+    .result-lines div + div, .comment-lines div + div { margin-top: 2px; }
+    .signature-cell { height: 27px; padding: 1px 3px; text-align: center; }
+    .signature-cell img { display: block; width: 100%; height: 24px; object-fit: contain; }
+    .muted { color: #555; }
+    .photo-page { page-break-before: always; }
+    .photo-title { margin: 8mm 0 7mm 1mm; font-size: 11px; font-weight: 400; }
+    .photo-grid { border-collapse: separate; border-spacing: 4mm 6mm; }
+    .photo-grid td { width: 50%; height: 91mm; border: 0; padding: 0; vertical-align: top; }
+    .photo-grid img { display: block; width: 100%; height: 80mm; object-fit: contain; }
+    .photo-caption { margin-top: 3px; font-size: 7px; }
+  </style>
+</head>
+<body>
+  <table class="form">
+    <colgroup>
+      <col style="width: 7%">
+      <col style="width: 8%">
+      <col style="width: 8%">
+      <col style="width: 17%">
+      <col style="width: 6%">
+      <col style="width: 7%">
+      <col style="width: 9%">
+      <col style="width: 9%">
+      <col style="width: 9%">
+      <col style="width: 8%">
+      <col style="width: 6%">
+      <col style="width: 6%">
+    </colgroup>
+    <tbody>
+      <tr>
+        <td class="logo-cell" colspan="2" rowspan="2">
+          <img src="{{ logo_data_uri }}" alt="Hitachi Rail STS">
+        </td>
+        <td class="center bold" colspan="6">Contrato N° 4500001949</td>
+        <td class="label" colspan="2">Formato:</td>
+        <td class="label">Revisión:</td>
+        <td class="center" rowspan="2">1 de 1</td>
+      </tr>
+      <tr>
+        <td class="center bold" colspan="6">STS Subcontratista:</td>
+        <td colspan="2">{{ report_code }}</td>
+        <td class="right">{{ revision }}</td>
+      </tr>
+      <tr>
+        <td class="label" colspan="3">Contratista:</td>
+        <td class="label" colspan="7">Contrato:</td>
+        <td class="label" colspan="2">Fecha:</td>
+      </tr>
+      <tr>
+        <td class="general-value" colspan="3" rowspan="2">Hitachi Rail STS</td>
+        <td class="general-value" colspan="7" rowspan="2">
+          Línea 2 y Ramal Av. Faucett - Av. Gambetta de la Red Básica del Metro de Lima y Callao
+        </td>
+        <td class="general-value" colspan="2">{{ activity_date }}</td>
+      </tr>
+      <tr>
+        <td colspan="2"><span class="label">Hora:</span> {{ activity_time }}</td>
+      </tr>
+      <tr>
+        <td class="label" colspan="2">Subcontratista:</td>
+        <td class="label">Etapa</td>
+        <td class="label" colspan="5">Tecnología:</td>
+        <td class="label" colspan="4">Área/Ubicación Sector Geográfico:</td>
+      </tr>
+      <tr>
+        <td class="general-value" colspan="2">-</td>
+        <td class="general-value">{{ activity.stage or "-" }}</td>
+        <td class="general-value" colspan="5">{{ activity.system or "Señalización" }} {{ activity.subsystem }}</td>
+        <td class="general-value" colspan="4">{{ activity.location_path or activity.site or "No registrada" }}</td>
+      </tr>
+      <tr>
+        <td class="label" colspan="2">Manual de Referencia:</td>
+        <td colspan="6">
+          {{ maintenance_template.manual_reference if maintenance_template and maintenance_template.manual_reference else "-" }}
+          {% if maintenance_template and maintenance_template.manual_start_page %}
+            (Pág. {{ maintenance_template.manual_start_page }}{% if maintenance_template.manual_end_page %}-{{ maintenance_template.manual_end_page }}{% endif %})
+          {% endif %}
+        </td>
+        <td class="label" colspan="2">Orden SAP:</td>
+        <td class="center" colspan="2">{{ activity.internal_code or "-" }}</td>
+      </tr>
+      <tr>
+        <td class="section-label" colspan="12">Tipo de Actividad y subsistema:</td>
+      </tr>
+      <tr>
+        <td class="center" colspan="12">
+          {% if maintenance_template %}
+            {{ maintenance_template.activity_n2 or maintenance_template.activity_n1 }} - {{ activity.subsystem }}
+          {% else %}
+            {{ activity.title }} - {{ activity.subsystem }}
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th colspan="4">Personal</th>
+        <th>N° Personas:</th>
+        <th>Horas Total:</th>
+        <th colspan="4">Equipos</th>
+        <th>Serie</th>
+        <th>Horas total:</th>
+      </tr>
+      {% set resource_rows = [personnel|length, tools|length, 1]|max %}
+      {% for index in range(resource_rows) %}
+      <tr>
+        <td class="center" colspan="4">
+          {% if index < personnel|length %}{{ personnel[index].personnel_role }}{% endif %}
+        </td>
+        <td class="center">
+          {% if index < personnel|length %}{{ personnel[index].quantity }}{% endif %}
+        </td>
+        <td class="center">
+          {% if index < personnel|length %}{{ "%.2f"|format(personnel[index].estimated_hours) if personnel[index].estimated_hours is not none else activity_duration }}{% endif %}
+        </td>
+        <td class="center" colspan="4">
+          {% if index < tools|length %}{{ tools[index].tool_name }}{% endif %}
+        </td>
+        <td class="center">-</td>
+        <td class="center">
+          {% if index < tools|length %}{{ tools[index].estimated_hours if tools[index].estimated_hours is not none else activity_duration }}{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      <tr>
+        <td class="label" colspan="3">Nombre de la actividad:</td>
+        <td class="activity-title" colspan="9">{{ activity.title }}</td>
+      </tr>
+      <tr>
+        <td class="label" colspan="3">Frecuencia de la actividad:</td>
+        <td colspan="9">
+          {{ maintenance_template.frequency if maintenance_template and maintenance_template.frequency else "-" }}
+        </td>
+      </tr>
+      <tr>
+        <th>Ítem</th>
+        <th colspan="6">Descripción</th>
+        <th>V°B°</th>
+        <th colspan="2">Resultado</th>
+        <th colspan="2">Comentarios</th>
+      </tr>
+      {% for step in report.steps %}
+      <tr>
+        <td class="center">{{ loop.index }}</td>
+        <td colspan="6">
+          <span class="bold">{{ step.title }}</span>
+          {% if step.manual_page %}<span class="muted"> (Manual pág. {{ step.manual_page }})</span>{% endif %}
+        </td>
+        <td class="{{ 'approval' if step.is_completed else 'center' }}">{{ "OK" if step.is_completed else "Pendiente" }}</td>
+        <td class="result-lines center" colspan="2">
+          {% if step.tests %}
+            {% for test in step.tests %}
+              <div><span class="bold">{{ test.name }}:</span> {{ test.selected_result }}{% if test.numeric_value %} · {{ test.numeric_value }}{% endif %}</div>
+            {% endfor %}
+          {% else %}-{% endif %}
+        </td>
+        <td class="comment-lines" colspan="2">
+          {% if step.comment %}{{ step.comment }}{% endif %}
+          {% for test in step.tests if test.notes %}<div>{{ test.notes }}</div>{% endfor %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td class="center" colspan="12">No se registraron pasos.</td></tr>
+      {% endfor %}
+      <tr>
+        <td class="label top" colspan="3">Comentarios adicionales:</td>
+        <td colspan="9">
+          <span class="bold">{{ report.final_result or "No registrado" }}</span>
+          {% if report.additional_comments %}<br>{{ report.additional_comments }}{% endif %}
+        </td>
+      </tr>
+      {% for participant in participants %}
+      <tr>
+        <td colspan="4">
+          <span class="label">{{ "Nombre del Líder de turno" if loop.first else "Nombre del Personal Técnico" }}</span><br>
+          <span class="bold">{{ participant.name }}</span>
+        </td>
+        <td colspan="4">
+          <span class="label">{{ "Rol del Líder de turno:" if loop.first else "Rol del Personal Técnico:" }}</span><br>
+          {{ participant.role }}
+        </td>
+        <td class="signature-cell" colspan="2">
+          <span class="label">Firma:</span>
+          {% for signature in signatures if signature.participant_id == participant.id %}
+            <img src="{{ signature.data_uri }}" alt="Firma de {{ participant.name }}">
+          {% else %}
+            <span class="muted">Sin firma</span>
+          {% endfor %}
+        </td>
+        <td colspan="2"><span class="label">Fecha:</span><br>{{ activity_date }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% for photo_page in photos|batch(4) %}
+  <section class="photo-page">
+    <h2 class="photo-title">Registro Fotográfico {{ loop.index }}</h2>
+    <table class="photo-grid">
+      {% for photo_row in photo_page|batch(2) %}
+      <tr>
+        {% for photo in photo_row %}
+        <td>
+          <img src="{{ photo.data_uri }}" alt="{{ photo.title }}">
+          {% if photo.title or photo.description %}
+          <div class="photo-caption"><strong>{{ photo.title }}</strong>{% if photo.description %}: {{ photo.description }}{% endif %}</div>
+          {% endif %}
+        </td>
+        {% endfor %}
+        {% if photo_row|length == 1 %}<td></td>{% endif %}
+      </tr>
+      {% endfor %}
+    </table>
+  </section>
+  {% endfor %}
+</body>
+</html>

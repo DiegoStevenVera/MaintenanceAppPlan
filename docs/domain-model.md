@@ -14,7 +14,7 @@ The following decisions supersede older draft sections in this document where th
 - v1 runs locally for demo/validation before any cloud or on-premise approval.
 - Preventive and corrective maintenance share this lifecycle: SCHEDULED, IN_PROGRESS, COMPLETED, CLOSED.
 - Reports are editable while the parent maintenance activity is not CLOSED.
-- Each finalized edit creates a new report version and generated PDF snapshot.
+- Each finalized edit creates a new immutable report version. A canonical PDF snapshot is generated from that version through the report-version action.
 - Stop Here is a corrective report/PDF visibility marker, not a SECTIONAL_DRAFT state machine.
 - Corrective reports use dynamic blocks following the real corrective format, not a fixed six-section structure.
 - Asset and Component are unified under one Asset model for v1. Component is an Asset category, not a separate primary entity.
@@ -112,7 +112,7 @@ This platform manages the lifecycle of railway maintenance operations, including
 | CorrectiveReport | The shift-level report within a corrective event. Records tasks, replacements, tools, participants, and signatures. |
 | CorrectiveTask | A single action or step performed during corrective maintenance. May trigger an AssetReplacement if the task type is "Component Replacement." |
 | TaskType | A configurable classification of corrective actions (e.g., Component Replacement, Inspection, Cleaning). Scoped per Subsystem. |
-| Participant | A technician who participated in a maintenance activity, linked to the report with their drawn signature. |
+| Participant | A maintenance engineer who participated in a maintenance activity, linked to the report with their drawn signature. |
 | Draft | A document-level status indicating the report is being created and not yet finalized. Independent of operational status. |
 | PCON | Annual preventive maintenance plan expressed as a collection of MaintenancePlanEntry instances. Originates as an external Excel file. |
 | SAP Code | An external reference identifier from the SAP system. Not used for system-internal identity. |
@@ -124,7 +124,7 @@ This platform manages the lifecycle of railway maintenance operations, including
 | Component | A serialized instance of a ComponentType. Tracked through its lifecycle: installed (at a SlotLocation within an Asset), in warehouse, removed, in repair, scrapped. Has full movement history. |
 | SlotLocation | A named position within an Asset's physical structure where a Component may be installed. Forms a recursive hierarchy independent from the Asset hierarchy. Defined per EquipmentKind. |
 | SlotType | Classification of SlotLocation entries (Car, Equipment, Cubicle, Rack, Component, CabinetPart). |
-| SlotImage | A reference image showing the physical location of a SlotLocation within equipment, used for technician guidance. |
+| SlotImage | A reference image showing the physical location of a SlotLocation within equipment, used for maintenance engineer guidance. |
 | ComponentMovement | A first-class record of a Component transitioning between locations, slot positions, or lifecycle states. Captures from/to, movement type, timestamp, and related corrective context. |
 | MovementType | A classification of component movements (Installed, Removed, Warehouse Entry, Warehouse Exit, Scrapped, Sent for Repair, Exchange). |
 | Location | A physical storage location for components. May be a warehouse, a specific Asset (train/cabinet), or a workstation. |
@@ -135,8 +135,10 @@ This platform manages the lifecycle of railway maintenance operations, including
 | SAPOrder | External SAP notification or order code manually entered for traceability. |
 | TestDefinition | A predefined test associated with a MaintenanceTemplate step. Defines the test name, result type (textual, numeric, boolean), possible result options, and optional threshold values. |
 | TestResultOption | A predefined possible value for a TestDefinition result (e.g., "Pass", "Fail", "Ventiladores operativos"). |
-| TestExecutionResult | The recorded result of a TestDefinition execution during a maintenance step. Captures the selected/entered value and optional technician notes. |
+| TestExecutionResult | The recorded result of a TestDefinition execution during a maintenance step. Captures the selected/entered value and optional maintenance engineer notes. |
 | GeneratedReport | The output artifact of the PDF generation pipeline, linked to its source report. Stored as a file with metadata. |
+| CalibrationReport | A companion logical report created only for preventive track-circuit maintenance. It stores circuit metadata and ordered transmitter/receiver measurements independently from the main preventive report. |
+| CalibrationMeasurement | One immutable measured value in a calibration report version. `assetRole` distinguishes the transmitter from each numbered receiver and `sequence` preserves display order. |
 | ToolCertification | A calibration or certification record for a maintenance tool, tracking validity periods and certificate documents. |
 | ConsumableType | A catalog entry for consumable items used during maintenance (filters, cleaning supplies) with unit of measure. |
 | PersonnelEntry | A value object capturing a personnel role participating in preventive maintenance, including count and total hours. |
@@ -630,7 +632,7 @@ SlotType classifies SlotLocation entries by their functional role in the equipme
 
 #### 4.14.1 Description
 
-SlotImage provides visual reference images showing the physical location of slots within equipment. These images assist technicians during component navigation and identification.
+SlotImage provides visual reference images showing the physical location of slots within equipment. These images assist maintenance engineers during component navigation and identification.
 
 #### 4.14.2 Attributes
 
@@ -648,7 +650,7 @@ SlotImage provides visual reference images showing the physical location of slot
 
 | Rule | Description |
 |------|-------------|
-| ASM-SIM-001 | SlotImages are optional reference material for technician guidance during component identification and replacement. |
+| ASM-SIM-001 | SlotImages are optional reference material for maintenance engineer guidance during component identification and replacement. |
 | ASM-SIM-002 | Multiple images may exist per EquipmentKind, showing different views or levels of detail. |
 
 ---
@@ -685,7 +687,7 @@ The authoritative definition of a preventive maintenance procedure. Created by t
 | manualPageStart | Integer (optional) | Starting page in the reference manual |
 | manualPageEnd | Integer (optional) | Ending page in the reference manual |
 | estimatedDuration | Duration | Expected time to complete |
-| requiredPersonnelCount | Integer | Minimum number of technicians required |
+| requiredPersonnelCount | Integer | Minimum number of maintenance engineers required |
 | version | String | Version identifier for this procedure definition |
 | isActive | Boolean | Whether this template is currently in use |
 | createdAt | Timestamp | Creation timestamp |
@@ -752,7 +754,7 @@ The authoritative definition of a preventive maintenance procedure. Created by t
 
 #### 5.3.1 Description
 
-A planning-level entity representing the annual PCON plan. It defines which activities should be performed in a given month, without specifying the exact date or personnel.
+A planning-level entity representing one required execution in the annual PCON plan. It defines which equipment maintenance must be performed in a given month, without specifying the exact date or personnel. The number shown in a PCON monthly cell is derived by counting entries with the same year, month, equipment scope, and maintenance template.
 
 #### 5.3.2 Attributes
 
@@ -763,17 +765,32 @@ A planning-level entity representing the annual PCON plan. It defines which acti
 | subsystem | Reference to Subsystem | Operational scope |
 | year | Integer | Planning year |
 | month | Integer | Planning month (1-12) |
-| plannedDate | Date (optional) | Specific day if known at planning time |
-| scope | Text | Which specific assets or locations this plan entry covers (free text, may reference specific asset serial numbers or location names) |
+| scope | Reference to MaintenanceTemplateScope | Equipment, category, and geographic location to which this occurrence applies |
 | source | Enum: PCON_IMPORT, MANUAL | How this entry was created |
+| planningStatus | Enum: PLANNED, CANCELLED | Whether the occurrence contributes to the active plan |
+| cancelledAt / cancelledBy / cancellationReason | Audit fields (optional) | Logical cancellation details retained for traceability |
 
 #### 5.3.3 Domain Rules
 
 | Rule | Description |
 |------|-------------|
 | PRV-PLN-001 | A MaintenancePlanEntry is derived from the external PCON Excel file or manually entered. |
-| PRV-PLN-002 | Multiple entries may reference the same template for different months or different asset scopes. |
-| PRV-PLN-003 | Plan entries are independent of scheduling; a plan entry may generate zero, one, or multiple MaintenanceSchedule instances. |
+| PRV-PLN-002 | Multiple entries may reference the same template and equipment scope in one month; their count is the monthly quantity displayed by PCON. |
+| PRV-PLN-003 | Each plan entry is an individually schedulable occurrence and links to one preventive maintenance activity. |
+| PRV-PLN-004 | Increasing a monthly quantity creates occurrences. Reducing it can delete only untouched occurrences without exact date, proposal, execution, or report. |
+| PRV-PLN-005 | Confirmed future occurrences are cancelled logically with a mandatory reason; cancelled entries do not contribute to operational lists or counts. |
+| PRV-PLN-006 | A year without a stored annual plan may be read from a virtual copy of the latest prior membership set, with all monthly quantities equal to zero. |
+| PRV-PLN-007 | Copying a plan carries maintenance memberships and monthly occurrence quantities, but never exact weekly schedule dates. Existing target cells are preserved. |
+
+### 5.3.4 PCONAnnualPlan, PCONAnnualPlanScope, and PCONPlanChange
+
+`PCONAnnualPlan` is the persisted annual planning header (`DRAFT`, `ACTIVE`, or
+`CLOSED`) and optionally identifies the source year used for a copy.
+`PCONAnnualPlanScope` is the membership that determines which
+equipment-maintenance rows belong to that year even when all twelve quantities
+are zero. `PCONPlanChange` is the immutable administrative audit trail for
+copies, row additions, quantity changes, occurrence moves, removals, and
+cancellations.
 
 ### 5.4 MaintenanceSchedule
 
@@ -790,7 +807,7 @@ A concrete scheduled occurrence of a preventive activity. Created during weekly 
 | template | Reference to MaintenanceTemplate | The activity to perform |
 | scheduledDate | Date | When the activity is scheduled |
 | scheduledShift | Enum: DAY, NIGHT | Which shift should perform it |
-| assignedTechnicians | List of Reference to User (optional) | Which technicians are assigned (informational for now) |
+| assignedEngineers | List of Reference to User (optional) | Which maintenance engineers are assigned (informational for now) |
 | status | Enum: SCHEDULED, IN_PROGRESS, COMPLETED, CANCELLED | Current scheduling status |
 | location | Reference to GeographicLocation (optional) | Where the activity will be performed |
 
@@ -799,10 +816,35 @@ A concrete scheduled occurrence of a preventive activity. Created during weekly 
 | Rule | Description |
 |------|-------------|
 | PRV-SCH-001 | A schedule is created by selecting activities from plan entries during weekly planning. |
-| PRV-SCH-002 | One plan entry may produce multiple schedule instances (e.g., monthly activity scheduled for each week). |
+| PRV-SCH-002 | One plan entry represents one planned execution. Repeated executions in a month require multiple plan entries. |
 | PRV-SCH-003 | A schedule may exist without a plan entry (ad-hoc preventive activity). |
-| PRV-SCH-004 | The schedule becomes IN_PROGRESS when a technician starts the associated report. |
+| PRV-SCH-004 | The schedule becomes IN_PROGRESS when a maintenance engineer starts the associated report. |
 | PRV-SCH-005 | Preventive activities are single-shift only. No schedule spans more than one shift. |
+| PRV-SCH-006 | A weekly planning proposal does not modify the activity's confirmed schedule. `scheduledStartAt` and `scheduledEndAt` change only when the complete weekly block is confirmed. |
+| PRV-SCH-007 | A confirmed activity may be reprogrammed only through a new weekly proposal with a mandatory reason. The prior confirmed revision remains in history as superseded. |
+| PRV-SCH-008 | Weekly confirmation is atomic: if any proposal is invalid or two proposals overlap on the same primary equipment, no proposal in that weekly session is published. |
+| PRV-SCH-009 | Coordinator and Administrator may edit and confirm PCON. Maintenance Engineer and Boss have read-only access. |
+
+### 5.4.4 WeeklyPlanningSession and ScheduleRevision
+
+`WeeklyPlanningSession` is the agreement reached for one Monday-Sunday planning
+window. It starts in `DRAFT`, contains one or more `ScheduleRevision` proposals,
+and becomes `CONFIRMED` through a single transaction.
+
+| Entity / Attribute | Type | Description |
+|--------------------|------|-------------|
+| WeeklyPlanningSession.weekStart | Date | Monday that identifies the planning week |
+| WeeklyPlanningSession.version | Integer | Sequential weekly agreement version |
+| WeeklyPlanningSession.status | DRAFT, CONFIRMED | Block lifecycle |
+| WeeklyPlanningSession.createdBy / confirmedBy | User references | Planning audit actors |
+| ScheduleRevision.activity | MaintenanceActivity reference | Preventive occurrence being scheduled |
+| ScheduleRevision.proposedStartAt / proposedEndAt | Timestamp | Proposed exact range |
+| ScheduleRevision.previousStartAt / previousEndAt | Timestamp optional | Snapshot of the prior confirmed range |
+| ScheduleRevision.reason | Text optional | Required when changing a confirmed range |
+| ScheduleRevision.status | PROPOSED, CONFIRMED, SUPERSEDED | Revision lifecycle |
+
+The imported monthly plan remains authoritative for broad planning. Exact dates
+are authoritative in `maintenance_activities` only after block confirmation.
 
 ### 5.5 PreventiveReport
 
@@ -822,16 +864,16 @@ The execution record of a preventive maintenance activity. Captures what was don
 | involvedAssets | List of Reference to Asset | The assets that received maintenance |
 | actualDate | Date | When the activity was performed |
 | activityStartedAt | Timestamp | Time when the maintenance activity moved to IN_PROGRESS |
-| activityEndedAt | Timestamp | End time entered by the technician/coordinator in the report form |
+| activityEndedAt | Timestamp | End time entered by the maintenance engineer/coordinator in the report form |
 | shift | Enum: DAY, NIGHT | Which shift performed it |
 | documentStatus | Enum: DRAFT, SUBMITTED | Document lifecycle status |
 | submittedAt | Timestamp (optional) | When the report was finalized |
 | stepResults | Collection of StepResult | Results for each step in the template |
 | toolsUsed | Collection of ToolUsage | Tools logged during the activity |
 | materialsConsumed | Text | Free-text description of spare parts or consumables used |
-| observations | Text | Free-text observations from the technicians |
+| observations | Text | Free-text observations from the maintenance engineers |
 | conclusions | Enum: OPERATIONAL, PARTIALLY_OPERATIONAL, NON_OPERATIONAL | Final equipment condition selected from a controlled list |
-| participants | Collection of Participant | Technicians who participated and signed |
+| participants | Collection of Participant | Maintenance Engineers who participated and signed |
 | attachments | Collection of Attachment | Images or documents captured during maintenance |
 | workOrder | String (optional) | Weekly maintenance work code |
 | sapOrder | String (optional) | SAP notification/order code |
@@ -897,6 +939,8 @@ The execution record of a preventive maintenance activity. Captures what was don
 | PRV-RPT-015 | All active maintainers assigned to the current day should be preselected as report participants; users may uncheck non-participants before finalizing. |
 | PRV-RPT-016 | UI must distinguish report versions of the current PreventiveReport from previous PreventiveReports executed on the same business anchor equipment. |
 | PRV-RPT-017 | Previous report history is a query over immutable historical PreventiveReports by business anchor asset/template, not a child collection owned by the active report. |
+| PRV-RPT-018 | Preventive detail reads instructional steps and tests from the linked MaintenanceTemplate. It must not expose StepResult or TestExecutionResult values until the user opens a specific report version. |
+| PRV-RPT-019 | A previous report appears in preventive history only when its activity matches both the current maintenanceTemplate and at least one current business-anchor Asset. The current activity is excluded and only its latest finalized version is shown. |
 
 ### 5.7 MaintenanceKnowledgeComment
 
@@ -978,7 +1022,7 @@ A CorrectiveEvent represents an unplanned incident or failure that requires corr
 | recordedSymptom | Text (optional) | Symptom as recorded in the SAP notification |
 | operationalImpact | Text (optional) | Description of operational impact |
 | failureType | Text (free text initially) | Type of failure. Will be standardized in the future. |
-| initiatingTechnician | Reference to User | The technician who created the event |
+| initiatingEngineer | Reference to User | The maintenance engineer who created the event |
 | lifecycleStatus | Enum: NOT_STARTED, IN_PROGRESS, RESOLVED, CLOSED | Operational lifecycle status |
 | resolvedAt | Timestamp (optional) | When the event was marked resolved |
 | resolvedBy | Reference to User (optional) | Who resolved the event |
@@ -1011,7 +1055,7 @@ A CorrectiveEvent represents an unplanned incident or failure that requires corr
 
 #### 6.3.1 Description
 
-A CorrectiveReport captures the maintenance work performed during a single shift within a corrective event. It follows the real corrective report format through dynamic blocks, not a fixed six-section workflow. The technician may activate **Stop Here** at a block boundary to generate or display the report only up to that point; later empty fields are hidden in the PDF. A later shift may continue the event and may edit earlier report content while the parent maintenance activity is not CLOSED.
+A CorrectiveReport captures the maintenance work performed during a single shift within a corrective event. It follows the real corrective report format through dynamic blocks, not a fixed six-section workflow. The maintenance engineer may activate **Stop Here** at a block boundary to generate or display the report only up to that point; later empty fields are hidden in the PDF. A later shift may continue the event and may edit earlier report content while the parent maintenance activity is not CLOSED.
 
 #### 6.3.2 Attributes
 
@@ -1031,7 +1075,7 @@ A CorrectiveReport captures the maintenance work performed during a single shift
 | tasks | Collection of CorrectiveTask | Actions performed during this shift |
 | toolsUsed | Collection of ToolUsage | Tools logged during this shift |
 | comments | Text | Free-text shift notes and observations |
-| participants | Collection of Participant | Technicians who participated and signed |
+| participants | Collection of Participant | Maintenance Engineers who participated and signed |
 | attachments | Collection of Attachment | Images captured during this shift |
 | finalResult | Enum: OPERATIONAL, PARTIALLY_OPERATIONAL, NON_OPERATIONAL (optional) | Technical equipment status after correction |
 | additionalComments | Text | Free-text final notes |
@@ -1132,6 +1176,12 @@ Each report contains dynamic blocks that follow the real corrective report forma
 | COR-RPT-010 | Content before Stop Here may be edited while the parent maintenance activity is not CLOSED. |
 | COR-RPT-011 | The activities performed block must have at least one activity before finalizing a report version. |
 | COR-RPT-012 | Conditional blocks, such as component replacement, appear only when the selected activity type requires them. |
+| COR-RPT-013 | Corrective event creation stores both the business-anchor equipment and the selected affected asset. The affected asset must be the anchor itself or one of its descendants. |
+| COR-RPT-014 | Creating a corrective event atomically creates its normalized MaintenanceActivity, activity-asset links, event bridge, and initial status history. |
+| COR-RPT-015 | Report participants with selected = false may remain in an editable draft, but immutable version detail and generated documents expose only selected participants. |
+| COR-RPT-016 | Finalizing a corrective report version freezes its document snapshot but does not mutate the live asset hierarchy or inventory. |
+| COR-RPT-017 | Component replacements from the latest finalized corrective version are applied atomically when the maintenance activity transitions to COMPLETED. Replacements already applied by the same maintenance activity are idempotently skipped. |
+| COR-RPT-018 | Missing normalized component metadata captured in the report may populate empty asset fields during the COMPLETED transition; existing master-data values are not overwritten. |
 
 ### 6.4 CorrectiveTask — Type Hierarchy
 
@@ -1231,7 +1281,7 @@ The Personnel domain manages user identities, roles, and participation tracking.
 | username | String | Login name |
 | passwordHash | String | Securely stored credential |
 | fullName | String | Display name |
-| role | Enum: TECHNICIAN, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER | System role |
+| role | Enum: MAINTENANCE_ENGINEER, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER | System role |
 | profileImage | Binary or Reference (optional) | Uploaded profile image selected from the user's device gallery |
 | defaultAvatarKey | String (optional) | Application-provided avatar identifier when no uploaded image exists |
 | project | Reference to Project (optional) | Default project scope. Initially tied to one project. |
@@ -1242,14 +1292,14 @@ The Personnel domain manages user identities, roles, and participation tracking.
 
 #### 7.3.1 Description
 
-A Participant records a technician's involvement in a specific maintenance report and captures their drawn signature.
+A Participant records a maintenance engineer's involvement in a specific maintenance report and captures their drawn signature.
 
 #### 7.3.2 Attributes
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | id | UUID | Internal identifier |
-| user | Reference to User | The participating technician |
+| user | Reference to User | The participating maintenance engineer |
 | reportId | UUID | Polymorphic reference to PreventiveReport or CorrectiveReport |
 | reportType | Enum: PREVENTIVE, CORRECTIVE | Discriminator for the report reference |
 | signedAt | Timestamp | When the signature was captured |
@@ -1577,6 +1627,7 @@ Attachments are images or documents captured during maintenance activities and p
 | ATT-001 | Attachments are permanently associated with the report they were uploaded to. |
 | ATT-002 | Attachments are preserved as part of the historical record even after asset changes. |
 | ATT-003 | When a report is submitted, all its attachments become immutable as part of the report. |
+| ATT-004 | A new report version may reuse immutable file bytes from its source version. It creates new attachment metadata owned by the new version and never points to a step/result row owned by an earlier version. |
 
 ---
 
@@ -1584,7 +1635,7 @@ Attachments are images or documents captured during maintenance activities and p
 
 ### 11.1 Description
 
-PDF Generation is an infrastructure concern that produces immutable PDF representations of submitted reports. Generation is triggered after report submission and produces a GeneratedReport artifact stored via the FileStorage abstraction.
+PDF Generation is an infrastructure concern that produces immutable PDF representations of submitted reports. In v1, generation is explicitly triggered from the read-only report-version screen with the `Generar PDF` action, then produces a GeneratedReport artifact stored via the FileStorage abstraction. This keeps submission and document rendering independently retryable.
 
 The PDF is not a domain entity — it is a derived artifact. However, the GeneratedReport record and its lifecycle are modeled here for traceability.
 
@@ -1610,17 +1661,21 @@ The PDF is not a domain entity — it is a derived artifact. However, the Genera
 
 | Rule | Description |
 |------|-------------|
-| PDF-001 | PDF generation is triggered automatically after a report transitions to SUBMITTED. |
+| PDF-001 | Preventive and corrective PDF generation is triggered by the `Generar PDF` action for a report version. |
 | PDF-002 | GeneratedReport is immutable once created. Regeneration creates a new record. |
-| PDF-003 | The source report must be in SUBMITTED state before PDF generation is allowed. |
+| PDF-003 | The source report version must be `FINALIZED` and contain a saved normalized snapshot before PDF generation is allowed. |
 | PDF-004 | The PDF contains a snapshot of the report data at generation time, not a live reference. |
+| PDF-005 | Corrective report numbers are assigned once per logical report as a concurrency-safe annual sequence and rendered as `NNNN/YY`; report versions do not consume a new number. |
+| PDF-006 | `Fecha` in the corrective document metadata is the PDF generation date. The preventive/corrective FOR code and revision are deployment configuration values so a future approved format can be introduced without changing template logic. |
 
 ### 11.3 PDF Composition
 
 The PDF composition is a rendering concern handled by the infrastructure layer using a template engine (Jinja2 HTML -> WeasyPrint PDF). Two template variants exist:
 
-- **Preventive PDF**: Page 1 (header with company logo, contract info, report code, revision; personnel table; tools table; activity info; maintenance steps table with test results; conclusion; signature table) + Pages 2..N (maintenance images/attachments).
-- **Corrective PDF**: Title page, creation date, report code, general data, signaling asset, failure description, analysis, corrective activities table, replaced components table, operational validation, timing metrics, final results, maintainers table, signatures, creator metadata.
+- **Preventive PDF**: A compact A4 form faithful to the approved Excel/PDF reference: black bordered header with company logo, contract, format and revision; general context; personnel/tools; activity and frequency; gray-header step/result table with green approval cells; conclusion and selected-participant signatures. Pages 2..N use the original photographic-register structure with up to four maintenance images per page.
+- **Corrective PDF**: Letter-sized `ML2-STS-FOR-041-ES` form with the Hitachi header, report metadata, sections 1 through 9, corrective activities, removed/installed component snapshots, operational validation, timing metrics, final results, selected maintainers, signatures, creator metadata, and photographic pages with up to six images each.
+
+Component-replacement blocks preserve snapshots of the parent, removed asset, and installed stock asset when the report version is saved. Historical version detail and PDF rendering must use those snapshots rather than mutable current asset data.
 
 ---
 
@@ -1647,7 +1702,7 @@ The backend is designed so that a future notification service can subscribe to R
 | Aspect | Approach |
 |--------|----------|
 | **Delivery mechanism** | Backend async job (Celery/Dramatiq) |
-| **Trigger** | Domain event: PDFGenerated |
+| **Trigger** | User action on a report version, followed by the `PDFGenerated` integration event |
 | **Recipients** | Configurable: all report participants, specific user, or defined distribution list |
 | **Email composition** | Backend service using template + generated PDF attachment |
 | **Infrastructure** | SMTP relay, job queue, email tracking |
@@ -1722,7 +1777,7 @@ MaintenanceTemplate ─── * ──── Subsystem
      │ 1
      │ *
      │ ▼
-     MaintenanceSchedule ─── * ──── User (assignedTechnicians)
+     MaintenanceSchedule ─── * ──── User (assignedEngineers)
      │
      │ 0..1
      │ ▼
@@ -1739,7 +1794,7 @@ MaintenanceTemplate ─── * ──── Subsystem
 CorrectiveEvent ─── * ──── Subsystem
      │                    GeographicLocation (locationSnapshot)
      │                    Asset (affectedAsset)
-     │                    User (initiatingTechnician)
+     │                    User (initiatingEngineer)
      │
      │ 1
      │ *
@@ -1765,7 +1820,7 @@ CorrectiveEvent ─── * ──── Subsystem
 User ─── * ──── Participant ─── * ──── PreventiveReport / CorrectiveReport
      │                              Signature
      │
-     └── * ──── MaintenanceSchedule (assignedTechnicians)
+     └── * ──── MaintenanceSchedule (assignedEngineers)
 
 Tool ─── * ──── ToolUsage ─── * ──── PreventiveReport / CorrectiveReport
 
@@ -2095,7 +2150,7 @@ Stop Here:
 
 Transitions:
   DRAFT     -> DRAFT     : save() (auto-save every 30s)
-  DRAFT     -> FINALIZED : finalizeVersion() (creates immutable version and PDF snapshot)
+  DRAFT     -> FINALIZED : finalizeVersion() (creates immutable version; PDF is generated from its read-only version screen)
   FINALIZED -> DRAFT     : createNextVersion() while parent maintenance activity is not CLOSED
 `
 
@@ -2107,7 +2162,7 @@ Transitions:
 
 The system prioritizes:
 
-- **Field operability** — maintenance technicians work in tunnels, stations, and technical rooms with shared iPad devices. The domain model must support quick data entry, minimal typing, and reliable capture.
+- **Field operability** — maintenance engineers work in tunnels, stations, and technical rooms with shared iPad devices. The domain model must support quick data entry, minimal typing, and reliable capture.
 - **Auditability** — every maintenance action, asset change, and report submission must be traceable to an authenticated user and timestamp.
 - **Transactional consistency** — critical operations (replacements, report submissions, hierarchy changes) must maintain strong consistency within the v1 modular monolith.
 - **Traceability** — historical records are append-only and immutable once finalized.
@@ -2139,7 +2194,7 @@ The recursive Asset model represents **operational install relationships**, not 
 This distinction is important because:
 
 - Some real-world subcomponents are intentionally not modeled as Assets.
-- Hierarchy depth is operationally driven (how deep do technicians actually maintain?).
+- Hierarchy depth is operationally driven (how deep do maintenance engineers actually maintain?).
 - Replacement granularity depends on maintenance practices, not engineering blueprints.
 - The model must remain flexible enough to include or exclude components as operational needs evolve.
 
@@ -2159,7 +2214,7 @@ The platform must preserve the following as first-class architectural concerns:
 AssetReplacement is a **business event**, not merely a hierarchy mutation. It exists independently because it captures:
 
 - Operational intent — why was this replacement necessary?
-- Technician action — who performed it and under which corrective context?
+- Maintenance Engineer action — who performed it and under which corrective context?
 - Maintenance context — which report, event, or shift does it belong to?
 - Lifecycle transition — the removed asset changes state, the installed asset changes state.
 - Historical traceability — the replacement is recorded permanently, enabling lineage queries.
@@ -2265,7 +2320,7 @@ Integration events (for future SAP, warehouse sync, analytics, etc.) are archite
 | `AssetHierarchyModified` | assetId, oldParentId, newParentId, positionChanged, timestamp | Replacement, reinstall, direct assignment | AssetAssignment (close previous, create new), Closure table updater |
 | `AssetLifecycleStatusChanged` | assetId, oldStatus, newStatus, reason, timestamp | Replacement, scrapping, warehouse transfer | WarehouseStock, Dashboard projections |
 | `AssetReplacementCompleted` | replacementId, removedAssetId, installedAssetId, parentAssetId, timestamp, correctiveEventId (optional) | Replacement execution | AssetAssignment (close + create), Hierarchy updater, Report linker, Analytics |
-| `CorrectiveEventCreated` | eventId, eventCode, sapCode, subsystemId, affectedAssetId, timestamp | First technician starts maintenance | Timeline service, Dashboard |
+| `CorrectiveEventCreated` | eventId, eventCode, sapCode, subsystemId, affectedAssetId, timestamp | First maintenance engineer starts maintenance | Timeline service, Dashboard |
 | `CorrectiveEventStatusChanged` | eventId, oldStatus, newStatus, userId, reason, timestamp | Start, resolve, close, reopen | Dashboard, Analytics, Notification |
 | `CorrectiveReportSubmitted` | reportId, eventId, shift, timestamp, participantIds, assetReplacementIds | Report finalization | CorrectiveEvent lifecycle check (auto-resolve if all reports submitted), Asset history, Next-shift notification |
 | `PreventiveReportSubmitted` | reportId, templateId, scheduleId, timestamp, participantIds | Report finalization | MaintenanceSchedule status update, Asset history, Dashboard |
@@ -2322,7 +2377,7 @@ Integration events (for future SAP, warehouse sync, analytics, etc.) are archite
 
 ### 20.3 Role Model Evolution
 
-The current User.role is an enum (TECHNICIAN, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER). These are coarse-grained operational roles for the initial implementation. Future role evolution may introduce:
+The current User.role is an enum (MAINTENANCE_ENGINEER, COORDINATOR, MAINTENANCE_MANAGER, PROJECT_MANAGER). These are coarse-grained operational roles for the initial implementation. Future role evolution may introduce:
 
 | Concept | Description | When |
 |---------|-------------|------|

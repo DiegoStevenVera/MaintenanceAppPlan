@@ -1,8 +1,10 @@
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    DateTime,
     Float,
     ForeignKey,
     Integer,
@@ -213,3 +215,15 @@ class MaintenancePlanEntryRecord(OperationalRecordMixin, Base):
     planned_hours: Mapped[float | None] = mapped_column(Float)
     required_workers: Mapped[int | None] = mapped_column(Integer)
     source_reference: Mapped[str | None] = mapped_column(String(160))
+    planning_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="PLANNED",
+        index=True,
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancelled_by_user_id: Mapped[str | None] = mapped_column(
+        String(80),
+        ForeignKey("users.id"),
+    )
+    cancellation_reason: Mapped[str | None] = mapped_column(Text)

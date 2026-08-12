@@ -1,5 +1,6 @@
 import re
 from collections import Counter
+from collections.abc import Mapping
 from datetime import UTC, date, datetime
 from typing import Any
 from uuid import UUID
@@ -74,6 +75,46 @@ def technical_code(value: Any) -> str:
     return re.sub(r"[^A-Z0-9]+", "_", normalized).strip("_") or "UNSPECIFIED"
 
 
+def nearest_ancestor_component(
+    component: SourceRow,
+    *,
+    slots_by_key: Mapping[str, SourceRow],
+    components_by_location_and_slot: Mapping[tuple[str, str], SourceRow],
+) -> SourceRow | None:
+    location_source = component.values.get("FK_CurrentLocation")
+    slot_source = component.values.get("FK_SlotLocation")
+    if location_source is None or slot_source is None:
+        return None
+
+    location_key = identifier(location_source)
+    current_slot_key = identifier(slot_source)
+    visited: set[str] = set()
+
+    while current_slot_key not in visited:
+        visited.add(current_slot_key)
+        current_slot = slots_by_key.get(current_slot_key)
+        if current_slot is None:
+            raise RowImportError(
+                f"Component {component.key} references missing slot {current_slot_key}"
+            )
+
+        parent_slot_source = current_slot.values.get("FK_FatherSlotLocation")
+        if parent_slot_source is None:
+            return None
+
+        parent_slot_key = identifier(parent_slot_source)
+        parent_component = components_by_location_and_slot.get(
+            (location_key, parent_slot_key)
+        )
+        if parent_component is not None:
+            return parent_component
+        current_slot_key = parent_slot_key
+
+    raise RowImportError(
+        f"Slot hierarchy cycle detected while resolving component {component.key}"
+    )
+
+
 class WBSImporter:
     def __init__(self, workbook: LegacyWorkbook, context: ImportContext) -> None:
         self.workbook = workbook
@@ -105,6 +146,28 @@ class WBSImporter:
         self.duplicate_component_serials = {
             serial for serial, count in serial_counts.items() if count > 1
         }
+        self.components_by_location_and_slot: dict[tuple[str, str], SourceRow] = {}
+        for component in self.rows["tbl_Component"]:
+            location_source = component.values.get("FK_CurrentLocation")
+            slot_source = component.values.get("FK_SlotLocation")
+            if location_source is None or slot_source is None:
+                continue
+            occupancy_key = (
+                identifier(location_source),
+                identifier(slot_source),
+            )
+            previous = self.components_by_location_and_slot.get(occupancy_key)
+            if previous is not None:
+                raise RowImportError(
+                    "Components "
+                    f"{previous.key} and {component.key} occupy the same "
+                    f"location/slot {occupancy_key}"
+                )
+            self.components_by_location_and_slot[occupancy_key] = component
+        self.component_rows_in_hierarchy_order = sorted(
+            self.rows["tbl_Component"],
+            key=self._component_hierarchy_sort_key,
+        )
 
     async def run(self, selected_table: str | None = None) -> None:
         steps = [
@@ -146,7 +209,12 @@ class WBSImporter:
         for sheet, handler in steps:
             if selected_table and sheet != selected_table:
                 continue
-            await self.context.process_rows(sheet, self.rows[sheet], handler)
+            source_rows = (
+                self.component_rows_in_hierarchy_order
+                if sheet == "tbl_Component"
+                else self.rows[sheet]
+            )
+            await self.context.process_rows(sheet, source_rows, handler)
 
         if selected_table is None or selected_table in {"tbl_Equipment", "tbl_Component"}:
             await self._rebuild_asset_closure()
@@ -650,10 +718,20 @@ class WBSImporter:
             "inventory_locations",
         )
         parent_equipment_key = location_row.values.get("FK_Equipment")
-        parent_asset_id = (
+        equipment_asset_id = (
             wbs_string_id("tbl_Equipment", parent_equipment_key, "assets")
             if parent_equipment_key is not None
             else None
+        )
+        parent_component = nearest_ancestor_component(
+            row,
+            slots_by_key=self.by_key["tbl_SlotLocation"],
+            components_by_location_and_slot=self.components_by_location_and_slot,
+        )
+        parent_asset_id = (
+            wbs_string_id("tbl_Component", parent_component.key, "assets")
+            if parent_component is not None
+            else equipment_asset_id
         )
         component_type_source = values.get("FK_ComponentType")
         if component_type_source is not None:
@@ -1221,6 +1299,30 @@ class WBSImporter:
                 """
             )
         )
+        await self.context.session.execute(
+            sql_text(
+                """
+                UPDATE assets AS parent
+                SET children = COALESCE(
+                    (
+                        SELECT jsonb_agg(child.name ORDER BY child.name)
+                        FROM assets AS child
+                        WHERE child.parent_id = parent.id
+                    ),
+                    '[]'::jsonb
+                )
+                """
+            )
+        )
+
+    def _component_hierarchy_sort_key(self, row: SourceRow) -> tuple[int, int]:
+        slot_source = row.values.get("FK_SlotLocation")
+        if slot_source is None:
+            return (10_000, row.row_number)
+        slot = self.by_key["tbl_SlotLocation"].get(identifier(slot_source))
+        if slot is None:
+            return (10_000, row.row_number)
+        return (integer(slot.values.get("Level")) or 10_000, row.row_number)
 
     def _source_row(self, sheet: str, source_key: Any) -> SourceRow:
         key = identifier(source_key)

@@ -22,9 +22,11 @@
 	<string>public.app-category.productivity</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoadsInLocalNetworking</key>
+		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Maintenance App necesita conectarse al servidor local de mantenimiento durante las pruebas.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

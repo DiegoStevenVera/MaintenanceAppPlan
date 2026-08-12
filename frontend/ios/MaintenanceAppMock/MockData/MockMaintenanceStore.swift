@@ -6,7 +6,7 @@ final class MockMaintenanceStore: ObservableObject {
     @Published var currentUser = MockUser(
         id: "",
         name: "",
-        role: .technician,
+        role: .maintenanceEngineer,
         email: ""
     )
     @Published var isAuthenticated = false
@@ -400,10 +400,10 @@ final class MockMaintenanceStore: ObservableObject {
 
     func toggleRole() {
         switch currentUser.role {
-        case .technician: currentUser.role = .coordinator
+        case .maintenanceEngineer: currentUser.role = .coordinator
         case .coordinator: currentUser.role = .boss
         case .boss: currentUser.role = .administrator
-        case .administrator: currentUser.role = .technician
+        case .administrator: currentUser.role = .maintenanceEngineer
         }
     }
 
@@ -436,7 +436,7 @@ final class MockMaintenanceStore: ObservableObject {
         Reporte preventivo historico
         \(report.activityName)
         Equipo: \(report.equipmentName)
-        Ingeniero de Mantenimiento: \(report.technicianName)
+        Ingeniero de Mantenimiento: \(report.engineerName)
         Resultado: \(report.result)
         """
     }

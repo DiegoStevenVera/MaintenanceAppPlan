@@ -1,16 +1,16 @@
 # Database Schema
 
-**Version:** 0.3  
-**Migration head:** `20260724_0005`  
-**Status:** Schema and legacy importer implemented; production import not executed
+**Version:** 0.5
+**Migration head:** `20260730_0010`
+**Status:** Normalized schema, legacy importer, PCON annual administration, and audit implemented; local import executed
 
 ## 1. Language and Scope
 
 Schema names, code, and technical documentation use English. User-visible values and imported
 business data remain in Spanish.
 
-The database currently contains 72 application tables plus `alembic_version`. The second schema
-round adds 52 tables. Consumable inventory remains deferred by product decision.
+The database currently contains 73 application tables plus `alembic_version`. Consumable
+inventory remains deferred by product decision.
 
 The existing `assets`, `preventive_schedules`, `corrective_events`, `users`, and
 `app_state_snapshots` structures remain compatible with the current Swift mock. New normalized
@@ -24,7 +24,17 @@ columns and tables will support the gradual replacement of the snapshot endpoint
 - `geographic_locations`: recursive physical location tree, with levels N1 through N4.
 - `asset_stage_assignments`, `location_stage_assignments`: time-bounded rollout-stage scope.
 
-Stage is planning metadata. It does not restrict technician visibility within a project.
+Stage is planning metadata. It does not restrict maintenance engineer visibility within a project.
+
+### Identity and Access
+
+- `users`: account identity, role, active state, profile metadata, and Argon2 password hash.
+- `auth_refresh_sessions`: hashed refresh-token identity, expiration, rotation usage, and
+  revocation state.
+
+Access tokens are short-lived signed JWTs and are not persisted. Refresh tokens are also signed,
+but their SHA-256 digest is stored so logout, password changes, and token rotation can revoke the
+corresponding session without storing the bearer token itself.
 
 ### Asset Catalog and Hierarchy
 
@@ -42,6 +52,9 @@ Stage is planning metadata. It does not restrict technician visibility within a 
 - `manufacturers`, `documentation_resources`
 
 An `Equipo` is an `assets` row with `is_business_anchor = true`; it is not a separate table.
+During WBS import, nested component parentage is derived from occupied ancestor slots. For example,
+a board installed under `/Cubículo/PCSG 1/...` has the PCSG component as its immediate asset parent,
+while the PCSG component has the business anchor equipment as its parent.
 
 ### Preventive Definitions and Planning
 
@@ -53,8 +66,29 @@ An `Equipo` is an `assets` row with `is_business_anchor = true`; it is not a sep
 - `maintenance_template_conclusions`
 - `maintenance_template_personnel`
 - `maintenance_template_tools`
-- `maintenance_plan_entries`
+- `maintenance_plan_entries`: each row is one required monthly execution. The
+  annual PCON cell quantity is derived by counting rows for the same year,
+  month, template scope, and equipment maintenance. `planning_status` supports
+  logical cancellation without losing traceability.
+- `pcon_annual_plans`: persisted year header and optional copied-from year.
+- `pcon_annual_plan_scopes`: explicit annual row membership, including rows
+  whose twelve monthly quantities are zero.
+- `pcon_plan_changes`: immutable audit of annual copies, row additions,
+  quantity edits, moves, removals, and cancellations.
 - `preventive_schedules`: transitional schedule read model used by the current frontend.
+- `weekly_planning_sessions`: versioned Monday-Sunday PCON agreement blocks.
+- `maintenance_schedule_revisions`: proposed, confirmed, and superseded exact
+  date ranges for preventive activities. Proposals preserve previous times and
+  the rescheduling reason.
+
+PCON keeps annual quantity, monthly occurrence, and exact-date concerns
+separate. Increasing a quantity creates individually schedulable plan entries;
+reducing it can remove only untouched entries. Changing a proposal does
+not update `maintenance_activities.scheduled_start_at` or
+`scheduled_end_at`. Confirming a weekly session updates all of its activities
+and the transitional `preventive_schedules` rows in one database transaction.
+Weekly planning was introduced by `20260730_0009`; annual administration,
+membership, logical cancellation, and audit were added by `20260730_0010`.
 
 ### Maintenance Execution
 
@@ -71,6 +105,9 @@ The four operational states remain `SCHEDULED`, `IN_PROGRESS`, `COMPLETED`, and 
 ### Reports and Versions
 
 - `maintenance_reports`: a logical report within an activity.
+  Corrective rows store `report_year` and an annual `report_number`; the partial
+  unique index `uq_corrective_reports_year_number` prevents two corrective
+  reports from receiving the same `NNNN/YY` identifier.
 - `report_versions`: corrections/versions of the same logical report.
 - `report_version_assets`: immutable asset-scope snapshots for each version.
 - `preventive_report_details`, `preventive_step_results`, `preventive_test_results`
@@ -88,7 +125,12 @@ shift. `stop_after_block_order` controls PDF visibility and does not create a ne
 - `calibration_measurements`: ordered measurements linked to an asset and an `asset_role`.
 
 One transmitter and one or many receivers are represented as separate measurement rows within the
-same report version.
+same report version. New reports use `TRANSMITTER` and `RECEIVER_N` roles; imported
+`TRANSMISOR` and `RECEPTOR` values remain readable for source traceability. A track-circuit
+preventive finalization writes the main preventive version and its companion `CALIBRATION`
+version in the same transaction. The companion copies the selected participants and signatures.
+Historical imported calibration versions without their own participant rows fall back to the
+matching main preventive version when read; imported source rows are not rewritten.
 
 ### Tools
 
@@ -173,6 +215,10 @@ traceable through `legacy_record_mappings` and row-level results.
 
 See `docs/legacy-data-import.md` for validation, dry-run, initial import, incremental refresh, and
 audit commands.
+
+For the meaning and provenance of every normalized table, see
+`docs/data-dictionary.md`. Reusable operational queries are in
+`docs/sql-query-cookbook.sql`.
 
 ## 4. Windows Commands
 

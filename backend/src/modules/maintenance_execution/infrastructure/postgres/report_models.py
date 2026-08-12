@@ -184,6 +184,7 @@ class MaintenanceReportRecord(OperationalRecordMixin, Base):
         index=True,
     )
     report_kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    report_year: Mapped[int | None] = mapped_column(Integer, index=True)
     report_number: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     shift_label: Mapped[str | None] = mapped_column(String(80))
     status: Mapped[str] = mapped_column(String(30), nullable=False)

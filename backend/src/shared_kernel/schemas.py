@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 
 class UserRole(StrEnum):
-    TECHNICIAN = "TECHNICIAN"
+    MAINTENANCE_ENGINEER = "MAINTENANCE_ENGINEER"
     COORDINATOR = "COORDINATOR"
     BOSS = "BOSS"
     ADMINISTRATOR = "ADMINISTRATOR"

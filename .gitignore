@@ -1,5 +1,6 @@
 # macOS
 .DS_Store
+backend/storage/
 
 # Xcode / Swift
 DerivedData/
@@ -57,3 +58,4 @@ temp/
 # Databases
 docs/OldVersionApp/Database/*
 docs/OldVersionApp/Formats/*
+*.sql

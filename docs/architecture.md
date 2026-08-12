@@ -14,7 +14,7 @@
 - Business anchor assets are modeled explicitly with asset category/flags and query support through hierarchy closure.
 - Maintenance activities and report versions link to assets through role-based scope records, not through a single ambiguous asset field.
 - Stage is a rollout/planning scope. Asset and location assignment to stages is many-to-many over time.
-- The role model is Technician, Coordinator, Boss, Administrator. Boss is read-only.
+- The role model is Maintenance Engineer, Coordinator, Boss, Administrator. Boss is read-only.
 - Maintenance activities use the lifecycle SCHEDULED, IN_PROGRESS, COMPLETED, CLOSED.
 - Reports are versioned while their parent maintenance activity is editable. Closing the activity freezes report editing until a Coordinator reopens it.
 - Corrective reports use dynamic blocks and real-format sections, not a fixed six-section architecture.
@@ -226,10 +226,10 @@ src/
 | Aspect | Approach |
 |--------|----------|
 | **Authentication** | JWT bearer tokens. Token contains: userId, username, role, projectId. Short-lived access token (15 min) + long-lived refresh token (7 days). |
-| **Role model** | Enum-based for v1: TECHNICIAN, COORDINATOR, BOSS, ADMINISTRATOR. Boss is read-only. Future RBAC can evolve later. |
+| **Role model** | Enum-based for v1: MAINTENANCE_ENGINEER, COORDINATOR, BOSS, ADMINISTRATOR. Boss is read-only. Future RBAC can evolve later. |
 | **Resource scoping** | All data is scoped to a project. The JWT contains the user's projectId. All queries filter by this scope. Cross-project access is prohibited. |
 | **Permission checks** | Authorization logic lives in the Application layer. Each use case checks: (a) is the user authenticated? (b) does the user's role permit this action? (c) does the user's project scope match the resource? |
-| **Report ownership** | Technicians can edit reports while the parent maintenance activity is not CLOSED. Coordinators and Administrators can reopen CLOSED activities. Boss is read-only. Each finalized edit creates a version. |
+| **Report ownership** | Maintenance Engineers can edit reports while the parent maintenance activity is not CLOSED. Coordinators and Administrators can reopen CLOSED activities. Boss is read-only. Each finalized edit creates a version. |
 | **Boss access** | Boss has read-only access to all reports and dashboards. Boss cannot create or modify operational data. |
 
 ### 1.13 File Storage Strategy
@@ -387,7 +387,7 @@ asset_management ◄────────────────────
 
 | Event | When | Payload |
 |-------|------|---------|
-| CorrectiveEventCreated | First technician starts event | eventId, eventCode, sapCode, subsystemId, affectedAssetId, timestamp |
+| CorrectiveEventCreated | First maintenance engineer starts event | eventId, eventCode, sapCode, subsystemId, affectedAssetId, timestamp |
 | CorrectiveEventStatusChanged | Event transitions state | eventId, oldStatus, newStatus, userId, reason, timestamp |
 | CorrectiveReportSubmitted | Report finalized | reportId, eventId, shift, timestamp, participantIds, assetReplacementIds |
 | CorrectiveReportStopHereMarked | Stop Here marker changed | reportId, eventId, markerBlockId, note, timestamp |
@@ -492,7 +492,7 @@ The earlier draft separated `Component` from `Asset`. For v1, component-like ite
 |---------------|---------------------------|---------------------|
 | MaintenanceTemplate | MaintenanceTemplate (shared with Maintenance Execution? — clarify below) | MaintenanceTemplateRepository |
 | MaintenancePlanEntry | MaintenancePlanEntry | MaintenancePlanEntryRepository: findByMonth, findByYear, findByTemplate |
-| MaintenanceSchedule | MaintenanceSchedule | MaintenanceScheduleRepository: findByDate, findByTechnician, findByPlan |
+| MaintenanceSchedule | MaintenanceSchedule | MaintenanceScheduleRepository: findByDate, findByMaintenance Engineer, findByPlan |
 
 **Note on MaintenanceTemplate ownership:** The domain model v0.3 places MaintenanceTemplate in the Preventive Maintenance context, which maps to Maintenance Execution in this architecture. However, Planning & Scheduling also needs read access to templates. For v1, MaintenanceTemplate is owned by **Maintenance Execution** and exposed to Planning & Scheduling via a read-only repository interface. If the Planning module is later extracted, it would either: (a) reference the template via the monolith's shared kernel API, or (b) cache its own copy via domain events.
 
@@ -560,7 +560,7 @@ Each use case below defines:
 |--------|--------|
 | **Module** | Maintenance Execution |
 | **Application Service** | StartCorrectiveMaintenanceService |
-| **Input DTO** | { subsystemId, affectedAssetId, sapCode?, occurrenceTimestamp, locationSnapshotId, description, failureType, initiatingTechnicianId } |
+| **Input DTO** | { subsystemId, affectedAssetId, sapCode?, occurrenceTimestamp, locationSnapshotId, description, failureType, initiatingEngineerId } |
 | **Orchestration** | 1. Load Asset (affectedAssetId) — verify exists and is ACTIVE. 2. Check no open IN_PROGRESS event exists for this (subsystem, asset) — reject if conflict. 3. Create CorrectiveEvent with status = NOT_STARTED. 4. Transition to IN_PROGRESS via startMaintenance(). 5. Set maintenanceStartTimestamp. 6. Save event. 7. Publish CorrectiveEventCreated. |
 | **Aggregates involved** | CorrectiveEvent (create + transition) |
 | **Transaction scope** | Single transaction: create event + status transition |
@@ -575,7 +575,7 @@ Each use case below defines:
 | **Module** | Maintenance Execution |
 | **Application Service** | SubmitCorrectiveReportService |
 | **Input DTO** | { correctiveEventId, shift, startTimestamp, endTimestamp?, sapCode?, affectedAssetId, locationSnapshotId, failureDescription, faultType, dynamicBlocks[], tasks[], toolUsages[], participantSignatures[], attachmentIds[], stopHereMarker? } |
-| **Orchestration** | 1. Load CorrectiveEvent — verify status is IN_PROGRESS or COMPLETED, not CLOSED. 2. Load all referenced Assets, Tools, Participants. 3. Create or update the editable CorrectiveReport version for this event and shift. 4. For each task: if taskType = ReplacementTask, invoke AssetReplacementService and stock movement services. 5. Link each AssetReplacement to the task. 6. If stopHereMarker exists, store it as a PDF/report visibility marker. 7. Add all participant signatures. 8. Finalize the current version, generate PDF, save report version. 9. Publish CorrectiveReportVersionFinalized. |
+| **Orchestration** | 1. Load CorrectiveEvent — verify status is IN_PROGRESS or COMPLETED, not CLOSED. 2. Load all referenced Assets, Tools, Participants. 3. Create or update the editable CorrectiveReport version for this event and shift. 4. For each task: if taskType = ReplacementTask, invoke AssetReplacementService and stock movement services. 5. Link each AssetReplacement to the task. 6. If stopHereMarker exists, store it as a PDF/report visibility marker. 7. Add all participant signatures. 8. Finalize the current version. 9. From the read-only version screen, generate the PDF and persist the artifact. 10. Publish CorrectiveReportVersionFinalized. |
 | **Aggregates involved** | CorrectiveEvent (read), CorrectiveReport (create/update version), CorrectiveTask (create × N — polymorphic), AssetReplacement (create × N via Asset Management), Asset (update × N), AssetAssignment (close + create × N) |
 | **Transaction scope** | Single transaction: report version + tasks + replacements + hierarchy updates. PDF generation may run after commit but must be traceably linked to the finalized version. |
 | **Events emitted** | CorrectiveReportVersionFinalized, CorrectiveReportStopHereMarked (if marker), AssetReplacementCompleted (×N), AssetHierarchyModified (×N), ToolUsed (×N) |
@@ -638,19 +638,19 @@ Each use case below defines:
 | **Validations** | Asset is in valid state for reinstall (REMOVED or IN_WAREHOUSE). New parent is ACTIVE. Position is unique within new parent. |
 | **Failure scenarios** | Asset not found → 404. Asset is already ACTIVE → 422. |
 
-### 3.7 Use Case: Assign Technicians to Schedule
+### 3.7 Use Case: Assign Maintenance Engineers to Schedule
 
 | Aspect | Detail |
 |--------|--------|
 | **Module** | Planning & Scheduling |
-| **Application Service** | AssignTechniciansToScheduleService |
-| **Input DTO** | { scheduleId, technicianUserIds[] } |
-| **Orchestration** | 1. Load MaintenanceSchedule. 2. Load all Users (verify role = TECHNICIAN or COORDINATOR). 3. Assign technicians to schedule. 4. Save. 5. (Optional future: publish notification event). |
-| **Aggregates involved** | MaintenanceSchedule (update assignedTechnicians) |
+| **Application Service** | AssignMaintenance EngineersToScheduleService |
+| **Input DTO** | { scheduleId, maintenance engineerUserIds[] } |
+| **Orchestration** | 1. Load MaintenanceSchedule. 2. Load all Users (verify role = MAINTENANCE_ENGINEER or COORDINATOR). 3. Assign maintenance engineers to schedule. 4. Save. 5. (Optional future: publish notification event). |
+| **Aggregates involved** | MaintenanceSchedule (update assignedEngineers) |
 | **Transaction scope** | Single transaction |
-| **Events emitted** | None currently (future: TechniciansAssigned) |
+| **Events emitted** | None currently (future: Maintenance EngineersAssigned) |
 | **Validations** | Schedule exists and is not COMPLETED or CANCELLED. All referenced users exist and have appropriate roles. |
-| **Failure scenarios** | Schedule not found → 404. User not found → 404. User not a technician → 422. |
+| **Failure scenarios** | Schedule not found → 404. User not found → 404. User not a maintenance engineer → 422. |
 
 ### 3.8 Use Case: Capture Participant Signatures
 
@@ -989,7 +989,7 @@ user_id             UUID?       The user who triggered the operation (from appli
 
 | Principle | Description |
 |-----------|-------------|
-| RPT-VER-001 | Reports are versioned. Each finalized edit creates a new immutable report version snapshot and generated PDF. |
+| RPT-VER-001 | Reports are versioned. Each finalized edit creates a new immutable report version snapshot, from which an authorized user can generate a PDF. |
 | RPT-VER-002 | Latest editable report data may be updated while the parent activity/event is not CLOSED. |
 | RPT-VER-003 | Once the parent activity/event is CLOSED, the application layer rejects edits until a Coordinator or Administrator reopens it. |
 | RPT-VER-004 | Report data is stored in normalized form where the structure is stable; dynamic corrective blocks may use structured JSON payloads if the block schema varies by task type. |
@@ -1071,12 +1071,14 @@ In addition to the closure table (which is the primary read projection), the arc
 | POST | /api/v1/auth/refresh | Refresh access token |
 | POST | /api/v1/auth/logout | Invalidate refresh token |
 | GET | /api/v1/auth/me | Current user profile |
+| POST | /api/v1/auth/change-password | Change password and revoke all refresh sessions |
 
 ### 5.3 Asset Management Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | /api/v1/assets | Search assets (query params: q, serial_number, part_number, type_id, subsystem_id, page, limit) |
+| GET | /api/v1/assets/stock | List Assets whose current inventory location is set, with server-side search and pagination |
 | GET | /api/v1/assets/{id} | Get asset detail with breadcrumb path |
 | GET | /api/v1/assets/{id}/children | Get immediate children (query: page, limit, type_id?) |
 | GET | /api/v1/assets/{id}/subtree | Get full subtree (uses closure table) |
@@ -1091,13 +1093,41 @@ In addition to the closure table (which is the primary read projection), the arc
 | GET | /api/v1/asset-types | List all asset types |
 | GET | /api/v1/geographic-locations | List geographic locations (hierarchical) |
 
+The equipment maintenance-history projection returns the finalized report
+version identifier when one exists. iOS reuses the shared immutable
+`PDFPreviewView` for that version, preserving one rendering and PDF-generation
+flow across preventive, corrective, and equipment entry points. A completed
+activity without a finalized version falls back to its activity detail.
+
+Administrator role preview is a non-production authentication aid, not a
+client-side permission override. `GET /api/v1/auth/impersonation-roles` exposes
+only roles backed by active users. `POST /api/v1/auth/impersonate-role` issues a
+normal token pair for the selected representative user. iOS protects the
+original Administrator refresh token in Keychain and can restore it by normal
+token rotation. Both endpoints reject production environments.
+
 ### 5.4 Corrective Maintenance Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | /api/v1/maintenance-activities | Unified normalized preventive/corrective activity list (query: activity_type, status, subsystem, q, date_from, date_to, planned_year, planned_month, limit, offset) |
+| GET | /api/v1/maintenance-dashboard | Operational Home counts and today's exact-date preventive activities |
+| GET | /api/v1/maintenance-activities/{id} | Normalized activity detail with assets, report versions, and latest report results |
+| GET | /api/v1/maintenance-activities/{id}/reports | Report versions for a normalized maintenance activity |
+| POST | /api/v1/maintenance-activities/{id}/start | Transition SCHEDULED to IN_PROGRESS; Maintenance Engineer, Coordinator, or Administrator |
+| POST | /api/v1/maintenance-activities/{id}/complete | Transition IN_PROGRESS to COMPLETED; Maintenance Engineer, Coordinator, or Administrator |
+| POST | /api/v1/maintenance-activities/{id}/close | Transition COMPLETED to CLOSED; Coordinator or Administrator only |
+| POST | /api/v1/maintenance-activities/{id}/reopen | Transition COMPLETED or CLOSED to IN_PROGRESS with a required reason; CLOSED requires Coordinator or Administrator |
+| GET | /api/v1/maintenance-activities/{id}/report-editor | Load report draft, preventive template, participants, equipment tree, stock, comments, and evidence |
+| GET | /api/v1/maintenance-activities/{id}/preventive-guide | Load the reusable preventive template guide and finalized history for the same template and business-anchor equipment |
+| PUT | /api/v1/maintenance-activities/{id}/report-draft | Create or replace the mutable draft version while the activity is IN_PROGRESS |
+| POST | /api/v1/maintenance-activities/{id}/report-finalize | Validate signatures and required fields, finalize the immutable version, and execute component replacements atomically |
+| GET/POST | /api/v1/maintenance-activities/{id}/comments | Read or append reusable preventive knowledge comments or event-local corrective comments |
+| GET | /api/v1/attachments/{id}/content | Authenticated evidence download |
 | GET | /api/v1/corrective-events | List events (query: status, subsystem, date_from, date_to, page, limit) |
+| GET | /api/v1/corrective-events/creation-context | Resolve read-only site/project/stage/system/subsystem/location context from a business-anchor asset |
 | GET | /api/v1/corrective-events/{id} | Get event detail with timeline |
-| POST | /api/v1/corrective-events | Start corrective maintenance (create event) |
+| POST | /api/v1/corrective-events | Atomically create the corrective event, normalized maintenance activity, asset links, and initial status history |
 | POST | /api/v1/corrective-events/{id}/resolve | Mark event as resolved |
 | POST | /api/v1/corrective-events/{id}/close | Close event |
 | POST | /api/v1/corrective-events/{id}/reopen | Reopen event |
@@ -1120,12 +1150,29 @@ In addition to the closure table (which is the primary read projection), the arc
 |--------|------|-------------|
 | GET | /api/v1/templates | List maintenance templates |
 | GET | /api/v1/templates/{id} | Get template detail with steps |
-| GET | /api/v1/schedules | List schedules (query: date, status, technician_id, subsystem_id) |
+| GET | /api/v1/schedules | List schedules (query: date, status, engineer_id, subsystem_id) |
 | POST | /api/v1/schedules | Create schedule (coordinator) |
 | PATCH | /api/v1/schedules/{id} | Update schedule |
-| POST | /api/v1/schedules/{id}/assign | Assign technicians |
-| GET | /api/v1/plan-entries | List PCON plan entries (query: year, month, subsystem) |
-| POST | /api/v1/plan-entries/import | Import PCON Excel (future) |
+| POST | /api/v1/schedules/{id}/assign | Assign maintenance engineers |
+| GET | /api/v1/pcon/plan | List monthly PCON entries with exact/proposed state |
+| PUT | /api/v1/pcon/plan/month | Batch-reassign unconfirmed entries to a month |
+| GET | /api/v1/pcon/annual-plan | Read the annual hierarchy and twelve monthly occurrence counts |
+| PUT | /api/v1/pcon/annual-plan/count | Adjust one maintenance scope's monthly occurrence quantity |
+| POST | /api/v1/pcon/annual-plan/copy | Copy prior-year memberships and quantities into empty target cells |
+| GET | /api/v1/pcon/catalog | Read eligible equipment and maintenance definitions for plan administration |
+| POST | /api/v1/pcon/plan-scopes | Add an equipment-maintenance row and its initial occurrences |
+| POST | /api/v1/pcon/occurrences | Create additional monthly occurrences |
+| PATCH | /api/v1/pcon/occurrences/{planEntryId} | Move an eligible occurrence to another month |
+| DELETE | /api/v1/pcon/occurrences/{planEntryId} | Remove an untouched occurrence |
+| POST | /api/v1/pcon/occurrences/{planEntryId}/cancel | Logically cancel a confirmed future occurrence |
+| GET | /api/v1/pcon/change-history | Read the annual plan administrative audit trail |
+| GET | /api/v1/pcon/weeks/{weekStart}/current | Read the current weekly draft or confirmation |
+| POST | /api/v1/pcon/weeks/{weekStart}/sessions | Create/resume a weekly draft |
+| PUT | /api/v1/pcon/sessions/{id}/proposals/{activityId} | Upsert an exact-date proposal |
+| DELETE | /api/v1/pcon/sessions/{id}/proposals/{activityId} | Remove a draft proposal |
+| POST | /api/v1/pcon/sessions/{id}/confirm | Atomically confirm the complete weekly block |
+| GET | /api/v1/pcon/history | Read confirmed/superseded schedule revisions |
+| POST | /api/v1/plan-entries/import | Import PCON Excel (future replacement for the existing legacy importer) |
 | GET | /api/v1/preventive-reports/{id} | Get report detail |
 | POST | /api/v1/preventive-reports | Create preventive report (draft) from schedule or ad-hoc |
 | PATCH | /api/v1/preventive-reports/{id} | Update report (only when DRAFT) |
@@ -1141,7 +1188,16 @@ In addition to the closure table (which is the primary read projection), the arc
 | GET | /api/v1/attachments/{id} | Download attachment file |
 | DELETE | /api/v1/attachments/{id} | Delete attachment (only when report is DRAFT) |
 
-Where {type} = preventive or corrective.
+Preventive and corrective versions use the same version-oriented contract:
+
+| POST | `/api/v1/report-versions/{version_id}/generate-pdf` | Select the template by report kind, render, and persist the finalized PDF. |
+| GET | `/api/v1/report-versions/{version_id}` | Read-only version detail for the iPad. |
+| GET | `/api/v1/report-versions/{version_id}/pdf` | Download the latest generated PDF. |
+
+Calibration uses the same version-oriented contract. For an eligible track-circuit preventive
+activity, saving or finalizing the preventive editor also persists a companion `CALIBRATION`
+version. `POST /api/v1/report-versions/{version_id}/generate-pdf` selects the dedicated calibration
+HTML template, and the common download endpoint supplies the file to the PDF viewer and Share Sheet.
 
 ### 5.7 Component Inventory Endpoints
 
@@ -1254,7 +1310,7 @@ Standard HTTP status codes:
 - SwiftUI Observable patterns for reactive state management
 - NavigationStack with programmatic navigation
 - SwiftData or NSFetchRequest for local draft caching
-- PhotosPicker for image selection
+- PhotosPicker with multi-selection for preventive evidence
 - PencilKit for signature capture
 - SwiftUI-Shimmer or custom transitions for loading states
 - MatchedGeometryEffect for smooth hierarchy navigation transitions
@@ -1337,9 +1393,9 @@ Tab 6: Profile / Settings
 | Concern | Approach |
 |---------|----------|
 | **Server data** | Fetched on demand, cached in memory via ViewModel @Observable classes |
-| **Draft reports** | SwiftData or JSON persistence to local app sandbox for offline resilience |
-| **Auth token** | Stored in Keychain via SwiftKeychainWrapper or similar |
-| **User session** | In-memory @Environment object passed through view hierarchy |
+| **Draft reports** | Atomic JSON persistence in Application Support, managed by `OfflineReportStore` |
+| **Auth token** | Access and refresh tokens stored in iOS Keychain |
+| **User session** | Environment object plus non-sensitive cached profile for temporary offline restoration |
 | **Navigation state** | Managed by NavigationStack path binding |
 | **Loading states** | AsyncImage for thumbnails, custom LoadingState enum in ViewModels |
 | **Error handling** | Alert and .alert() modifier for user-facing errors |
@@ -1372,7 +1428,7 @@ Endpoint enum (per module):
 | Feature | iOS API | Integration |
 |---------|---------|-------------|
 | **Camera capture** | AVCaptureSession via CameraView (UIViewRepresentable wrapping AVCam) OR .sheet with PHPicker | Captured image → resize to max 1920px → upload via multipart to attachment endpoint |
-| **Photo library** | PhotosPicker (iOS 16+) | Select multiple → batch upload |
+| **Photo library** | PhotosPicker (iOS 16+) | Select multiple, normalize to JPEG, then batch with the report write |
 | **Signature capture** | PencilKit PKCanvasView wrapped in SignaturePadView | Capture as PNG image → upload as attachment with type "signature" → link to Participant |
 | **Image picker** | UIImagePickerController via representable | Fallback for older patterns |
 
@@ -1389,14 +1445,37 @@ Endpoint enum (per module):
 8. Update report's participant list in UI
 `
 
-### 6.8 Offline Tolerance (Future)
+### 6.8 Offline Report Drafts
+
+The iOS client persists preventive and corrective report drafts as one JSON document
+per activity under the app's Application Support directory. Writes are atomic and use
+`completeUntilFirstUserAuthentication` file protection. The local record includes the
+form payload, cached editor context, cached activity detail, evidence data, owner,
+server environment, retry metadata, and the report version used as its editing base.
+
+`NWPathMonitor` starts synchronization as soon as connectivity returns. Foreground
+activation and a bounded periodic retry also cover the case where Wi-Fi is available
+but the FastAPI process is down. Retry delay grows from 5 to 60 seconds.
+
+Draft synchronization uses optimistic concurrency. The client sends
+`base_report_version_id` and `enforce_base_version`; if another device has created a
+newer report version, the API responds with `409` and the draft becomes
+`needsAttention`. The client never silently overwrites that server state.
+
+Authentication tokens remain in Keychain. A non-sensitive cached user profile permits
+session restoration during a temporary outage after at least one successful online
+sign-in.
+
+The scope is intentionally limited to report drafts. Report finalization, maintenance
+lifecycle transitions, corrective creation, and inventory mutations require an online
+server transaction.
 
 | Feature | Implementation |
 |---------|----------------|
-| **Draft caching** | Local SwiftData store for in-progress reports |
-| **Asset cache** | Hierarchy snapshots cached locally, refreshed on connectivity |
-| **Queue submissions** | Background task queues report submissions; sends when online |
-| **Conflict resolution** | Server timestamp comparison; last-write-wins for drafts, reject for submitted |
+| **Draft caching** | Atomic JSON files for in-progress preventive and corrective reports |
+| **Editor cache** | Activity detail and editor context stored with each local draft |
+| **Queue submissions** | Automatic retry on network recovery, foreground activation, and periodic availability checks |
+| **Conflict resolution** | Optimistic base-version validation; conflicting drafts require explicit user review |
 
 ### 6.9 UI Component Guidelines
 
@@ -1615,14 +1694,14 @@ The following architectural decisions were made during the creation of this docu
 | ADR-004 | **In-Process Domain Events (No Message Broker)** | Monolith deployment, 11 users, no need for distributed messaging. Events are synchronous in transaction boundary. | Future extraction to message broker requires event schema compatibility. |
 | ADR-005 | **Local Filesystem Storage with Abstraction Layer** | Simplest v1 storage; `FileStorageService` abstraction enables future blob migration. | Backup complexity; must plan for migration path early. |
 | ADR-006 | **CQRS-Lite (No Separate Read/Write Models)** | Single model serves both purposes. Optimized projections (closure table, event store) exist within same database. | Read model tuning is per-use-case rather than architectural split. |
-| ADR-007 | **Enum User Roles (Not RBAC)** | Four roles (Technician, Coordinator, Boss, Administrator). No requirement for custom role creation. | Future RBAC would require refactoring; document extensibility path. |
+| ADR-007 | **Enum User Roles (Not RBAC)** | Four roles (Maintenance Engineer, Coordinator, Boss, Administrator). No requirement for custom role creation. | Future RBAC would require refactoring; document extensibility path. |
 | ADR-008 | **Polymorphic Report References** | `Report` base with `CorrectiveReport` and `PreventiveReport` subtypes. Shared core fields, distinct behavior. | ORM mapping complexity; future evolution path to fully separate entities if divergence grows. |
 | ADR-009 | **iPadOS/iOS 26.5 Native SwiftUI (Not React/Flutter)** | Enterprise Apple-platform deployment on current team devices. Premium animations, PencilKit, native camera API, adaptive TabView, and Liquid Glass-capable SwiftUI surfaces. | Single-platform only; future web frontend is a separate project. Requires Xcode/SDK support compatible with iOS 26.x; current local Xcode 26.2 accepts deployment target 26.5 with a warning until an SDK 26.5 toolchain is installed. |
 | ADR-010 | **REST API over GraphQL** | Simple CRUD patterns, well-known ecosystem, easy to secure and cache. | Future GraphQL wrapper possible for complex hierarchy queries. |
-| ADR-011 | **JWT Bearer Tokens (Short-Lived Access + Refresh)** | Stateless auth, no server-side session storage. Refresh token rotation. | Token revocation requires blacklist or short expiry. |
+| ADR-011 | **JWT Bearer Tokens (Short-Lived Access + Rotating Refresh)** | Access tokens remain stateless and short-lived. Refresh-token digests are persisted to support rotation and revocation. | Requires cleanup of expired `auth_refresh_sessions`; logout and password changes can revoke sessions immediately. |
 | ADR-012 | **Event Store in Same PostgreSQL Instance** | Single database for transactional data and event store (separate schema). No operational complexity. | Migration path to dedicated event store if event volume grows significantly. |
 | ADR-013 | **Optimistic Locking via `version` Column** | Concurrent modification detection for assets and reports. No pessimistic locks needed at current scale. | Retry logic required in application layer on `version` conflict. |
 | ADR-014 | **Unified Asset Model for Equipment and Components** | The same traceability, hierarchy, replacement, stock, and history rules apply to large equipment and smaller replaceable components. | Reduces duplication in v1. Component Inventory may be split later if inventory complexity grows. |
-| ADR-015 | **Jinja2 + WeasyPrint for PDF Generation** | PDF is a pure infrastructure concern. Jinja2 HTML templates + WeasyPrint rendering is the simplest Python PDF pipeline. No expensive report designer tooling. | Two templates (preventive/corrective). GeneratedReport entity for traceability only. Generation triggered at report submission. |
+| ADR-015 | **Jinja2 + WeasyPrint for PDF Generation** | PDF is a pure infrastructure concern. Jinja2 HTML templates + WeasyPrint rendering is the simplest Python PDF pipeline. No expensive report designer tooling. | Two templates (preventive/corrective). GeneratedReport entity for traceability only. In v1, generation is explicitly triggered from the read-only report-version screen. |
 | ADR-016 | **Dynamic Corrective Report Blocks** | Corrective reports must follow the real report format and show specialized blocks only when needed, such as component replacement inside activities performed. | Avoids forcing a rigid six-section workflow. Requires block schemas and validation per task type. |
 | ADR-017 | **Client-Side Share Sheet for v1 Email** | iOS native UIActivityViewController (Share Sheet) for PDF sharing — zero backend complexity. Backend async notification (email/SMS) is v2. Email is a presentation concern, not a domain concern. | PDF must be downloaded to device first. No delivery tracking, no scheduled notifications in v1. |

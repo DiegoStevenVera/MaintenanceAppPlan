@@ -1,411 +1,602 @@
 import SwiftUI
 
 struct PreventiveDetailView: View {
-    @EnvironmentObject private var store: MockMaintenanceStore
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var activityStore: MaintenanceActivityStore
     let activityID: String
-    @State private var newComment = ""
 
-    private var activity: PreventiveActivity? {
-        store.activities.first { $0.id == activityID }
-    }
+    @State private var comments: [APIMaintenanceComment] = []
+    @State private var commentText = ""
+    @State private var isSendingComment = false
+    @State private var commentError: String?
+    @State private var guide: APIPreventiveGuide?
+    @State private var isLoadingGuide = false
+    @State private var guideError: String?
+    @State private var isLoadingMoreHistory = false
+    @State private var historyLoadError: String?
+
+    private let previousReportsPageSize = 10
 
     var body: some View {
         Group {
-            if let activity {
+            if let detail = activityStore.details[activityID] {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                        header(activity)
-                        EquipmentPhotoPanel(activity: activity)
-                        actions(activity)
-                        locationDetails(activity)
-                        tools(activity)
-                        currentReportVersions(activity)
-                        previousReports(activity)
-                        reusableComments(activity)
+                        header(detail)
+                        photoPanel(detail)
+                        lifecycleActions(detail)
+                        reportActions(detail)
+                        statusPanel(detail)
+                        generalData(detail)
+                        preventiveGuide
+                        commentsPanel
+                        reportVersions(detail)
+                        previousReports
                     }
                     .padding(AppSpacing.lg)
                     .frame(maxWidth: 900, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
-                .background(MaintenanceScreenBackground())
-                .navigationTitle("Detalle")
+                .refreshable {
+                    await activityStore.loadDetail(id: activityID, session: session, force: true)
+                    async let commentsTask: Void = loadComments()
+                    async let guideTask: Void = loadGuide()
+                    _ = await (commentsTask, guideTask)
+                }
+            } else if activityStore.loadingDetailIDs.contains(activityID) {
+                ProgressView("Cargando detalle")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = activityStore.detailErrors[activityID] {
+                ContentUnavailableView {
+                    Label("No se pudo cargar el preventivo", systemImage: "wifi.exclamationmark")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Reintentar") {
+                        Task { await activityStore.loadDetail(id: activityID, session: session, force: true) }
+                    }
+                }
             } else {
-                ContentUnavailableView("Actividad no encontrada", systemImage: "exclamationmark.triangle")
+                ProgressView()
+            }
+        }
+        .background(MaintenanceScreenBackground())
+        .navigationTitle("Detalle preventivo")
+        .task {
+            await activityStore.loadDetail(id: activityID, session: session)
+            async let commentsTask: Void = loadComments()
+            async let guideTask: Void = loadGuide()
+            _ = await (commentsTask, guideTask)
+        }
+    }
+
+    private var commentsPanel: some View {
+        MaintenanceCommentsPanel(
+            comments: comments,
+            message: $commentText,
+            isSending: isSendingComment,
+            errorMessage: commentError,
+            title: "Comentarios para futuras ejecuciones",
+            subtitle: "Reutilizables por mantenimiento y equipo",
+            onSend: { Task { await addComment() } }
+        )
+    }
+
+    @MainActor
+    private func loadComments() async {
+        do {
+            comments = try await session.withValidAccessToken { token in
+                try await reportService.comments(activityID: activityID, accessToken: token)
+            }
+        } catch {
+            commentError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func loadGuide() async {
+        guard !isLoadingGuide else { return }
+        isLoadingGuide = true
+        guideError = nil
+        historyLoadError = nil
+        defer { isLoadingGuide = false }
+        do {
+            guide = try await session.withValidAccessToken { token in
+                try await reportService.preventiveGuide(
+                    activityID: activityID,
+                    accessToken: token,
+                    previousReportsLimit: previousReportsPageSize,
+                    previousReportsOffset: 0
+                )
+            }
+        } catch {
+            guideError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func loadMorePreviousReports() async {
+        guard let guide, guide.previousReportsHasMore, !isLoadingMoreHistory else {
+            return
+        }
+
+        isLoadingMoreHistory = true
+        historyLoadError = nil
+        defer { isLoadingMoreHistory = false }
+
+        do {
+            let nextPage = try await session.withValidAccessToken { token in
+                try await reportService.preventiveGuide(
+                    activityID: activityID,
+                    accessToken: token,
+                    previousReportsLimit: previousReportsPageSize,
+                    previousReportsOffset: guide.previousReports.count
+                )
+            }
+
+            let existingIDs = Set(guide.previousReports.map(\.id))
+            let newReports = nextPage.previousReports.filter {
+                !existingIDs.contains($0.id)
+            }
+            self.guide = APIPreventiveGuide(
+                activityID: guide.activityID,
+                templateName: guide.templateName,
+                templateSteps: guide.templateSteps,
+                previousReports: guide.previousReports + newReports,
+                previousReportsHasMore: nextPage.previousReportsHasMore,
+                previousReportsOffset: nextPage.previousReportsOffset
+            )
+        } catch {
+            historyLoadError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func addComment() async {
+        let message = commentText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !message.isEmpty, !isSendingComment else { return }
+
+        isSendingComment = true
+        commentError = nil
+        defer { isSendingComment = false }
+        do {
+            let comment = try await session.withValidAccessToken { token in
+                try await reportService.addComment(
+                    activityID: activityID,
+                    message: message,
+                    accessToken: token
+                )
+            }
+            comments.append(comment)
+            commentText = ""
+        } catch {
+            commentError = error.localizedDescription
+        }
+    }
+
+    private var reportService: ReportAPIService {
+        ReportAPIService(
+            baseURLString: UserDefaults.standard.string(forKey: "apiBaseURL") ?? ""
+        )
+    }
+
+    @ViewBuilder
+    private func reportActions(_ detail: APIActivityDetail) -> some View {
+        let latestReport = detail.reports.first {
+            $0.reportKind != "CALIBRATION"
+        }
+
+        if detail.status == "IN_PROGRESS", session.currentUser?.role != .boss {
+            GlassPanel {
+                ActionButtonGrid {
+                    NavigationLink {
+                        PreventiveReportFormView(activityID: activityID)
+                    } label: {
+                        Label(
+                            detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte",
+                            systemImage: "doc.text.fill"
+                        )
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+
+                    if let latestReport,
+                       latestReport.documentStatus == "FINALIZED" {
+                        NavigationLink {
+                            PDFPreviewView(versionID: latestReport.id)
+                        } label: {
+                            Label("Generar PDF", systemImage: "doc.badge.plus")
+                        }
+                        .buttonStyle(ActionTileButtonStyle())
+                    }
+                }
+            }
+        } else if let latestReport,
+                  latestReport.documentStatus == "FINALIZED" {
+            GlassPanel {
+                ActionButtonGrid {
+                    NavigationLink {
+                        PDFPreviewView(versionID: latestReport.id)
+                    } label: {
+                        Label("Generar PDF", systemImage: "doc.badge.plus")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+                }
             }
         }
     }
 
-    private func header(_ activity: PreventiveActivity) -> some View {
+    private func header(_ detail: APIActivityDetail) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text("ID: \(activity.id.uppercased())")
+            Text(detail.internalCode)
                 .font(.caption.weight(.bold))
                 .foregroundStyle(BrandColor.red)
-            Text(activity.name)
+            Text(detail.title)
                 .font(.system(.largeTitle, design: .rounded).weight(.black))
                 .lineLimit(3)
             HStack(spacing: AppSpacing.sm) {
-                StatusBadge(status: activity.status)
-                Text(activity.subsystem)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-                Text("·")
-                    .foregroundStyle(.secondary)
-                Text(activity.frequency)
+                APIStatusBadge(status: detail.status)
+                Text(detail.subsystem)
                     .font(.headline)
                     .foregroundStyle(.secondary)
             }
         }
     }
 
-    private func locationDetails(_ activity: PreventiveActivity) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                HStack(spacing: AppSpacing.sm) {
-                    Image(systemName: "location.circle")
-                        .font(.title2)
-                        .foregroundStyle(BrandColor.red)
-                    Text("Datos generales")
-                        .font(.title3.weight(.bold))
-                }
-
-                DetailTile(title: "Equipos", value: activity.assets.joined(separator: ", "))
-                DetailTile(title: "Ubicacion", value: activity.locationPath)
-                DetailTile(title: "Duracion estimada", value: "\(activity.estimatedMinutes) min")
-                DetailTile(title: "Personal requerido", value: "\(activity.requiredPersonnel)")
-                DetailTile(title: "Manual", value: activity.manualReference)
-            }
+    private func photoPanel(_ detail: APIActivityDetail) -> some View {
+        ZStack(alignment: .bottomLeading) {
+            SignalMapLines()
+                .stroke(BrandColor.red.opacity(0.28), lineWidth: 2)
+                .padding(AppSpacing.lg)
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.system(size: 104, weight: .bold))
+                .foregroundStyle(BrandColor.red.opacity(0.72))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Label(detail.assets.first?.name ?? detail.subsystem, systemImage: "square.stack.3d.up.fill")
+                .font(.headline)
+                .foregroundStyle(BrandColor.signalInk)
+                .padding(AppSpacing.sm)
+                .background(Color.white.opacity(0.92), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .padding(AppSpacing.md)
         }
+        .frame(height: 250)
+        .frame(maxWidth: .infinity)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityLabel("Imagen referencial del equipo del mantenimiento")
     }
 
-    private func tools(_ activity: PreventiveActivity) -> some View {
+    private func statusPanel(_ detail: APIActivityDetail) -> some View {
         GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Herramientas", subtitle: "Requeridas para este mantenimiento")
-                ForEach(activity.requiredTools, id: \.self) { tool in
-                    Label(tool, systemImage: "wrench.adjustable")
+            HStack(spacing: AppSpacing.md) {
+                Image(systemName: "clock.badge.checkmark")
+                    .font(.title)
+                    .foregroundStyle(BrandColor.red)
+                    .frame(width: 52, height: 52)
+                    .background(BrandColor.red.opacity(0.12), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Estado del mantenimiento")
                         .font(.headline)
+                    Text("\(statusDescription(detail.status)) · \(detail.reportVersionCount) versión(es) de reporte")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func lifecycleActions(_ detail: APIActivityDetail) -> some View {
+        if let role = session.currentUser?.role,
+           MaintenanceLifecycleActionPanel.hasActions(
+               status: detail.status,
+               role: role
+           ) {
+            MaintenanceLifecycleActionPanel(
+                status: detail.status,
+                role: role,
+                isWorking: activityStore.transitioningIDs.contains(activityID),
+                errorMessage: activityStore.transitionErrors[activityID],
+                onClearError: {
+                    activityStore.clearTransitionError(id: activityID)
+                },
+                onPerform: { command, reason in
+                    Task {
+                        await activityStore.performLifecycle(
+                            id: activityID,
+                            command: command,
+                            reason: reason,
+                            session: session
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    private func generalData(_ detail: APIActivityDetail) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(title: "Datos generales", subtitle: "Contexto normalizado del mantenimiento")
+                DetailTile(title: "Equipos", value: detail.assets.map(\.name).joined(separator: ", ").orFallback("Sin equipo relacionado"))
+                DetailTile(title: "Sede", value: detail.site.orFallback("No registrada"))
+                DetailTile(title: "Proyecto", value: detail.project.orFallback("No registrado"))
+                DetailTile(title: "Etapa", value: detail.stage.orFallback("No registrada"))
+                DetailTile(title: "Sistema", value: detail.system.orFallback("No registrado"))
+                DetailTile(title: "Subsistema", value: detail.subsystem)
+                DetailTile(title: "Ubicacion fisica", value: detail.locationPath.orFallback("No registrada"))
+                if let scheduledAt = detail.scheduledAt {
+                    DetailTile(title: "Programado", value: Self.dateTimeFormatter.string(from: scheduledAt))
+                }
+                if let startedAt = detail.actualStartAt {
+                    DetailTile(title: "Inicio real", value: Self.dateTimeFormatter.string(from: startedAt))
+                }
+                if let endedAt = detail.actualEndAt {
+                    DetailTile(title: "Fin real", value: Self.dateTimeFormatter.string(from: endedAt))
                 }
             }
         }
     }
 
-    private func currentReportVersions(_ activity: PreventiveActivity) -> some View {
+    private func reportVersions(_ detail: APIActivityDetail) -> some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Versiones del reporte", subtitle: "Versiones del reporte actual")
-                if activity.reportVersions.isEmpty {
-                    Text("Aun no hay versiones generadas.")
-                        .foregroundStyle(.secondary)
+                SectionHeaderText(
+                    title: "Versiones del reporte",
+                    subtitle: "Versiones vinculadas a esta actividad programada"
+                )
+                if detail.reports.isEmpty {
+                    Text("Aun no hay versiones generadas.").foregroundStyle(.secondary)
                 } else {
-                    ForEach(activity.reportVersions) { version in
+                    ForEach(detail.reports) { report in
                         NavigationLink {
-                            PDFPreviewView(activityID: activity.id, version: version)
+                            PDFPreviewView(versionID: report.id)
                         } label: {
-                            ReportVersionRow(version: version)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    private func previousReports(_ activity: PreventiveActivity) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Reportes anteriores", subtitle: "Historico de mantenimientos del equipo grande")
-                let reports = store.previousReports(for: activity)
-                if reports.isEmpty {
-                    Text("Aun no hay reportes anteriores para este equipo.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(reports) { report in
-                        NavigationLink {
-                            HistoricalPDFPreviewView(report: report)
-                        } label: {
-                            HistoricalReportRow(report: report)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-            }
-        }
-    }
-
-    private func reusableComments(_ activity: PreventiveActivity) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Comentarios para futuras ejecuciones", subtitle: "Notas reutilizables por mantenimiento o equipo")
-                let comments = store.comments(for: activity)
-                if comments.isEmpty {
-                    Text("Aun no hay comentarios reutilizables para este mantenimiento o equipo.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(comments) { comment in
-                        MaintenanceCommentBubble(comment: comment)
-                    }
-                }
-
-                if store.currentUser.role.canEditMaintenance {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        TextField("Escribir comentario para futuros mantenimientos", text: $newComment, axis: .vertical)
-                            .lineLimit(2, reservesSpace: true)
-                            .padding(AppSpacing.sm)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        ActionButtonGrid {
-                            Button {
-                                store.addComment(to: activity, message: newComment)
-                                newComment = ""
-                            } label: {
-                                Label("Guardar comentario", systemImage: "text.bubble.fill")
+                            HStack(spacing: AppSpacing.md) {
+                                Image(systemName: "doc.text.magnifyingglass")
+                                    .foregroundStyle(BrandColor.red)
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(
+                                        report.reportKind == "CALIBRATION"
+                                            ? "Calibración · Versión \(report.versionNumber)"
+                                            : "Preventivo · Versión \(report.versionNumber)"
+                                    )
+                                    .font(.headline)
+                                    Text(report.summary.orFallback("Reporte \(report.reportKind)"))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text(report.documentStatus)
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(BrandColor.green)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(ActionTileButtonStyle())
-                            .disabled(newComment.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                         }
+                        .buttonStyle(.plain)
+                        .padding(.vertical, AppSpacing.xs)
                     }
-                }
-            }
-        }
-    }
-
-    private func actions(_ activity: PreventiveActivity) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Acciones")
-                ActionButtonGrid {
-                    actionButtons(activity)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func actionButtons(_ activity: PreventiveActivity) -> some View {
-        let role = store.currentUser.role
+    private var preventiveGuide: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Pasos y pruebas",
+                    subtitle: guide?.templateName
+                        ?? "Guia del procedimiento antes de iniciar el mantenimiento"
+                )
 
-        if activity.status == .scheduled, role.canEditMaintenance {
-            Button {
-                store.start(activity)
-            } label: {
-                Label("Iniciar", systemImage: "play.fill")
-            }
-            .buttonStyle(ActionTileButtonStyle(prominent: true))
-        }
-
-        if activity.status == .inProgress, role.canEditMaintenance {
-            NavigationLink {
-                PreventiveReportFormView(activityID: activity.id)
-            } label: {
-                Label("Editar reporte", systemImage: "square.and.pencil")
-            }
-            .buttonStyle(ActionTileButtonStyle(prominent: true))
-            Button {
-                store.complete(activity)
-            } label: {
-                Label("Completar", systemImage: "checkmark.circle.fill")
-            }
-            .buttonStyle(ActionTileButtonStyle())
-        }
-
-        if activity.status == .completed {
-            if role.canEditMaintenance {
-                Button {
-                    store.reopen(activity)
-                } label: {
-                    Label("Reabrir", systemImage: "arrow.uturn.backward.circle.fill")
-                }
-                .buttonStyle(ActionTileButtonStyle(prominent: true))
-            }
-            if let version = activity.reportVersions.first {
-                NavigationLink {
-                    PDFPreviewView(activityID: activity.id, version: version)
-                } label: {
-                    Label("Compartir PDF", systemImage: "square.and.arrow.up")
-                }
-                .buttonStyle(ActionTileButtonStyle())
-            }
-            if role.canCloseMaintenance {
-                Button {
-                    store.close(activity)
-                } label: {
-                    Label("Cerrar", systemImage: "lock.fill")
-                }
-                .buttonStyle(ActionTileButtonStyle())
-            }
-        }
-
-        if activity.status == .closed, role.canCloseMaintenance {
-            Button {
-                store.reopen(activity)
-            } label: {
-                Label("Reabrir", systemImage: "lock.open.fill")
-            }
-            .buttonStyle(ActionTileButtonStyle(prominent: true))
-        }
-
-        if !role.canEditMaintenance {
-            Text("Vista de solo lectura para Jefe.")
-                .foregroundStyle(.secondary)
-        }
-    }
-}
-
-private struct ReportVersionRow: View {
-    let version: ReportVersion
-
-    var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Version \(version.versionNumber)")
-                    .font(.headline)
-                Text("Creado por \(version.createdBy)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            Image(systemName: "doc.richtext")
-                .foregroundStyle(BrandColor.red)
-        }
-        .padding(.vertical, AppSpacing.xs)
-    }
-}
-
-private struct HistoricalReportRow: View {
-    let report: HistoricalMaintenanceReport
-
-    var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(report.activityName)
-                    .font(.headline)
-                Text("Ingeniero de Mantenimiento: \(report.technicianName)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                Text(report.result)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(BrandColor.red)
-            }
-            Spacer()
-            Text(Self.dateFormatter.string(from: report.performedAt))
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-        }
-        .padding(AppSpacing.md)
-        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }()
-}
-
-private struct MaintenanceCommentBubble: View {
-    let comment: MaintenanceComment
-
-    var body: some View {
-        HStack(alignment: .top, spacing: AppSpacing.sm) {
-            Image(systemName: comment.author.avatarSystemImage)
-                .font(.title2)
-                .foregroundStyle(BrandColor.red)
-                .frame(width: 36, height: 36)
-                .background(BrandColor.red.opacity(0.10))
-                .clipShape(Circle())
-
-            VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text(comment.author.name)
-                        .font(.subheadline.weight(.semibold))
-                    Text(comment.author.role.label)
-                        .font(.caption)
+                if isLoadingGuide, guide == nil {
+                    ProgressView("Cargando guia")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else if let guideError {
+                    Label(guideError, systemImage: "exclamationmark.triangle")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Button("Reintentar") {
+                        Task { await loadGuide() }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                } else if let steps = guide?.templateSteps, !steps.isEmpty {
+                    ForEach(Array(steps.enumerated()), id: \.element.id) { index, step in
+                        guideStep(step, number: index + 1)
+                    }
+                } else {
+                    Text("Este tipo de mantenimiento aun no tiene pasos configurados.")
                         .foregroundStyle(.secondary)
                 }
-                Text(comment.message)
-                    .font(.body)
-                Text(comment.scopeDescription)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
-            .padding(AppSpacing.sm)
-            .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(.vertical, 4)
     }
-}
 
-struct HistoricalPDFPreviewView: View {
-    @EnvironmentObject private var store: MockMaintenanceStore
-    let report: HistoricalMaintenanceReport
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.lg) {
-                Text("Vista previa PDF")
-                    .font(.system(.largeTitle, design: .rounded).weight(.bold))
-
-                GlassPanel {
-                    VStack(alignment: .leading, spacing: AppSpacing.md) {
-                        SectionHeaderText(title: report.activityName, subtitle: "Reporte anterior")
-                        DetailTile(title: "Equipo", value: report.equipmentName)
-                        DetailTile(title: "Ingeniero de Mantenimiento", value: report.technicianName)
-                        DetailTile(title: "Fecha", value: Self.dateFormatter.string(from: report.performedAt))
-                        DetailTile(title: "Resultado", value: report.result)
+    private func guideStep(_ step: APITemplateStep, number: Int) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack(alignment: .top, spacing: AppSpacing.sm) {
+                Text("\(number)")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(BrandColor.red, in: Circle())
+                    .accessibilityLabel("Paso \(number)")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(step.title)
+                        .font(.headline)
+                    if let page = step.manualPage {
+                        Label("Manual, pagina \(page)", systemImage: "book.closed")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
+                Spacer()
+            }
 
-                GlassPanel {
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text("Pasos, pruebas y resultados")
-                            .font(.headline)
-                        ForEach(report.steps) { step in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Label(step.title, systemImage: step.isCompleted ? "checkmark.circle.fill" : "circle")
-                                if !step.comment.isEmpty {
-                                    Text(step.comment)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+            if let instruction = step.defaultComment, !instruction.isEmpty {
+                Text(instruction)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(step.tests) { test in
+                VStack(alignment: .leading, spacing: 4) {
+                    Label(test.name, systemImage: "checklist")
+                        .font(.subheadline.weight(.semibold))
+                    if !test.resultOptions.isEmpty {
+                        Text("Resultados posibles: \(test.resultOptions.joined(separator: " / "))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(AppSpacing.sm)
+                .background(
+                    .background.opacity(0.72),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+            }
+        }
+        .padding(AppSpacing.md)
+        .background(
+            .background.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+    }
+
+    private var previousReports: some View {
+        ContentGlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Reportes anteriores",
+                    subtitle: "Historico del mismo mantenimiento y equipo grande"
+                )
+
+                if isLoadingGuide, guide == nil {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, alignment: .center)
+                } else if let reports = guide?.previousReports, !reports.isEmpty {
+                    GlassEffectContainer(spacing: AppSpacing.sm) {
+                        LazyVStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            ForEach(reports) { report in
+                                NavigationLink {
+                                    PDFPreviewView(versionID: report.versionID)
+                                } label: {
+                                    previousReportRow(report)
                                 }
-                                ForEach(step.tests) { test in
-                                    Text("- \(test.name): \(test.selectedResult)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
+                                .buttonStyle(.plain)
                             }
                         }
                     }
-                }
 
-                GlassPanel {
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Text("Firmas")
-                            .font(.headline)
-                        ReportSignaturesPreview(signatures: report.participants)
+                    if let historyLoadError {
+                        Label(historyLoadError, systemImage: "exclamationmark.triangle")
+                            .font(.caption)
+                            .foregroundStyle(BrandColor.red)
                     }
-                }
 
-                GlassPanel {
-                    ActionButtonGrid {
-                        ShareLink(item: store.historicalPDFShareText(report: report)) {
-                            Label("Compartir PDF", systemImage: "square.and.arrow.up")
+                    if guide?.previousReportsHasMore == true {
+                        Button {
+                            Task { await loadMorePreviousReports() }
+                        } label: {
+                            if isLoadingMoreHistory {
+                                ProgressView()
+                                    .frame(maxWidth: .infinity)
+                            } else {
+                                Label("Mostrar más reportes", systemImage: "ellipsis.circle")
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
-                        .buttonStyle(ActionTileButtonStyle(prominent: true))
+                        .buttonStyle(ActionTileButtonStyle())
+                        .disabled(isLoadingMoreHistory)
                     }
+                } else {
+                    Text("Aun no hay reportes anteriores para este mantenimiento y equipo.")
+                        .foregroundStyle(.secondary)
                 }
             }
-            .padding(AppSpacing.lg)
-            .frame(maxWidth: 900, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
-        .background(MaintenanceScreenBackground())
-        .navigationTitle("PDF anterior")
     }
 
-    private static let dateFormatter: DateFormatter = {
+    private func previousReportRow(_ report: APIPreventiveHistoryReport) -> some View {
+        HStack(spacing: AppSpacing.md) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.headline)
+                .foregroundStyle(BrandColor.red)
+                .frame(width: 42, height: 42)
+                .background(
+                    BrandColor.red.opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                )
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(report.title)
+                    .font(.headline)
+                    .lineLimit(2)
+                Text(report.equipmentNames.joined(separator: ", ").orFallback("Equipo no registrado"))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let result = report.finalResult, !result.isEmpty {
+                    Text(result)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(BrandColor.green)
+                }
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(Self.historyDateFormatter.string(from: report.performedAt))
+                    .font(.caption.weight(.bold))
+                    .foregroundStyle(.secondary)
+                Text("Version \(report.versionNumber)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(AppSpacing.md)
+        .background(
+            .background.opacity(0.60),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+        .glassEffect(
+            .regular.tint(BrandColor.red.opacity(0.025)).interactive(),
+            in: .rect(cornerRadius: 12)
+        )
+        .contentShape(Rectangle())
+    }
+
+    private func statusDescription(_ status: String) -> String {
+        switch status {
+        case "SCHEDULED": return "Programado"
+        case "IN_PROGRESS": return "En progreso"
+        case "COMPLETED": return "Completado"
+        case "CLOSED": return "Cerrado"
+        default: return status
+        }
+    }
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "es_PE")
+        return formatter
+    }()
+
+    private static let historyDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateStyle = .medium
         formatter.timeStyle = .none
+        formatter.locale = Locale(identifier: "es_PE")
         return formatter
     }()
 }
@@ -413,8 +604,22 @@ struct HistoricalPDFPreviewView: View {
 struct PreventiveDetailView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationStack {
-            PreventiveDetailView(activityID: "prv-001")
-                .environmentObject(MockMaintenanceStore())
+            PreventiveDetailView(activityID: "activity")
+                .environmentObject(SessionStore())
+                .environmentObject(MaintenanceActivityStore())
         }
+    }
+}
+
+private extension Optional where Wrapped == String {
+    func orFallback(_ fallback: String) -> String {
+        guard let value = self, !value.isEmpty else { return fallback }
+        return value
+    }
+}
+
+private extension String {
+    func orFallback(_ fallback: String) -> String {
+        isEmpty ? fallback : self
     }
 }
