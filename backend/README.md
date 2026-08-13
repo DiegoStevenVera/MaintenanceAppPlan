@@ -80,6 +80,54 @@ Use the root `.env` as the main local configuration file. Docker Compose reads
 the root `.env`, and the FastAPI backend also reads it. `backend/.env` is only a
 module-local override for exceptional cases and should normally be omitted.
 
+## Run FastAPI And PostgreSQL In Docker
+
+The root `docker-compose.yml` runs both services in one Compose project:
+
+- `maintenance_postgres`: PostgreSQL 16 with the persistent
+  `maintenance_postgres_data` volume.
+- `maintenance_backend`: FastAPI, WeasyPrint and the API dependencies built from
+  `backend/Dockerfile`.
+
+The backend connects to PostgreSQL using the Compose service name
+`POSTGRES_HOST=postgres`, not `localhost`. Evidence and generated PDFs use the
+host bind mount `./backend/storage:/app/storage`, so recreating the backend
+container does not remove them. PostgreSQL stores only portable keys relative
+to the configured storage root, for example `report.pdf` or `evidence.jpg`.
+
+First setup or after changing the Dockerfile:
+
+```bash
+docker compose up -d --build
+docker compose exec backend alembic upgrade head
+docker compose ps
+curl http://127.0.0.1:8000/health
+curl http://127.0.0.1:8000/health/db
+```
+
+Daily usage normally only needs:
+
+```bash
+docker compose up -d
+```
+
+Rebuild after changing Python dependencies or the Docker image definition:
+
+```bash
+docker compose up -d --build backend
+```
+
+View logs or stop the stack:
+
+```bash
+docker compose logs -f backend postgres
+docker compose stop
+```
+
+`docker compose down` removes containers and the network but keeps named
+volumes. `docker compose down -v` also deletes the PostgreSQL volume and must
+only be used when the local database is intentionally disposable.
+
 PostgreSQL applies `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` only
 when its Docker volume is initialized for the first time. If credentials change
 after the volume already exists, recreate the local volume with
@@ -107,6 +155,9 @@ WeasyPrint. The logo comes from
 `docs/OldVersionApp/Formats/img/Hitachi-Logo.png`. Generated files are stored
 under `REPORT_STORAGE_PATH` and registered in `generated_reports`; existing
 versions can therefore be opened from the same read-only version screen.
+`generated_reports.file_reference` and `generated_reports.path` contain keys
+relative to the report storage root, not paths from a developer laptop or
+container.
 
 On macOS, `make backend-dev-postgres` adds the Homebrew library paths needed by
 WeasyPrint. If the backend is started manually, install `pango`, `cairo` and
@@ -201,9 +252,11 @@ recorded in the report draft and update assignments, statuses, closure links,
 and `asset_replacements` atomically only when the version is finalized.
 
 Evidence bytes are stored outside PostgreSQL under
-`ATTACHMENT_STORAGE_PATH`; PostgreSQL stores ownership, media metadata, size,
-and SHA-256 checksum. The default maximum file size is configured through
-`ATTACHMENT_MAX_BYTES`.
+`ATTACHMENT_STORAGE_PATH`; PostgreSQL stores a relative file key, ownership,
+media metadata, size, and SHA-256 checksum. The default maximum file size is
+configured through `ATTACHMENT_MAX_BYTES`. Migration `20260812_0011`
+converted existing local attachment and generated-report references while
+leaving imported external URLs unchanged.
 
 Generated PDF persistence, offline report draft retry, equipment history
 navigation, and the normalized stock read screen are connected. The old

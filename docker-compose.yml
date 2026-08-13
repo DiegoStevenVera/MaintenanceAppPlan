@@ -17,5 +17,41 @@ services:
       timeout: 5s
       retries: 5
 
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: maintenance_backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      REPOSITORY_BACKEND: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      ATTACHMENT_STORAGE_PATH: /app/storage/attachments
+      REPORT_STORAGE_PATH: /app/storage/reports
+      REPORT_LOGO_PATH: /app/docs/OldVersionApp/Formats/img/Hitachi-Logo.png
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    volumes:
+      # Persistent host storage for evidence and generated PDF artifacts.
+      - ./backend/storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   maintenance_postgres_data:

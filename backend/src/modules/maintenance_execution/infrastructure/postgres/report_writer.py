@@ -84,6 +84,11 @@ from modules.organizational_context.infrastructure.postgres.models import (
     SubsystemRecord,
 )
 from shared_kernel.schemas import MaintenanceStatus
+from shared_kernel.storage import (
+    portable_storage_reference,
+    resolve_storage_reference,
+    storage_key,
+)
 
 SIGNALING_MAINTENANCE_WORK_AREA_ID = UUID(
     "006a0fb0-8fae-5ec6-88cb-4231d96d172a"
@@ -143,15 +148,14 @@ class PostgresReportWriter:
         generated_path = None
         report_root = settings.resolved_report_root.resolve()
         if generated is not None:
-            generated_path = Path(generated.path or generated.file_reference)
-            if not generated_path.is_absolute():
-                generated_path = PROJECT_ROOT / generated_path
-            generated_path = generated_path.resolve()
+            generated_path = resolve_storage_reference(
+                generated.path or generated.file_reference,
+                report_root,
+                legacy_roots=(PROJECT_ROOT,),
+            )
         if (
             generated is not None
             and generated_path is not None
-            and report_root in generated_path.parents
-            and generated_path.is_file()
         ):
             generated_dto = GeneratedReportDTO(
                 id=str(generated.id),
@@ -587,11 +591,12 @@ class PostgresReportWriter:
         attachment = await self._session.get(AttachmentRecord, attachment_id)
         if attachment is None:
             return None
-        path = Path(attachment.file_reference).resolve()
         root = settings.resolved_attachment_root.resolve()
-        if root not in path.parents or not path.is_file():
-            return None
-        return path
+        return resolve_storage_reference(
+            attachment.file_reference,
+            root,
+            legacy_roots=(PROJECT_ROOT,),
+        )
 
     @staticmethod
     def _validate_base_version(
@@ -1578,13 +1583,18 @@ class PostgresReportWriter:
                 else None
             )
             if existing is not None and item.content_base64 is None:
+                existing_reference = portable_storage_reference(
+                    existing.file_reference,
+                    root,
+                    legacy_roots=(PROJECT_ROOT,),
+                )
                 self._session.add(
                     AttachmentRecord(
                         report_version_id=version.id,
                         preventive_step_result_id=preventive_step_result_id,
                         corrective_activity_id=corrective_activity_id,
                         attachment_type=existing.attachment_type,
-                        file_reference=existing.file_reference,
+                        file_reference=existing_reference,
                         original_file_name=existing.original_file_name,
                         media_type=existing.media_type,
                         title=item.title or existing.title,
@@ -1616,7 +1626,7 @@ class PostgresReportWriter:
                     attachment_type=(
                         "IMAGE" if item.media_type.startswith("image/") else "DOCUMENT"
                     ),
-                    file_reference=str(target),
+                    file_reference=storage_key(target, root),
                     original_file_name=Path(item.original_file_name).name,
                     media_type=item.media_type,
                     title=item.title,

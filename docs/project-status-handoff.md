@@ -806,6 +806,10 @@ Completed:
 - Preventive evidence supports native multi-image gallery selection. A new report version reuses
   immutable files from its source version while creating attachment rows owned by the new version.
 - Preventive test results use the option catalog configured for each template test.
+- Local attachment and generated-report references are portable keys relative to their configured
+  storage roots. `20260812_0011` migrated existing local references and preserves imported external
+  URLs. The Docker Compose stack now includes both PostgreSQL and FastAPI, with `backend/storage`
+  mounted as persistent host storage for evidence and generated PDFs.
 
 Remaining:
 
@@ -1000,7 +1004,7 @@ is one complete backend-to-iPad vertical slice at a time.
 
 Latest completed checks:
 
-- Alembic code head and local database: `20260729_0008`
+- Alembic code head and local database: `20260812_0011`
 - Authentication and normalized Equipment PostgreSQL smoke checks: passed
 - Backend tests: 57 passed
 - Preventive guide PostgreSQL smoke: passed against migrated data, including template steps and
@@ -1016,6 +1020,9 @@ Latest completed checks:
   completing the KVM corrective reached COMPLETED with the same 2/2 count and rolled back.
 - Corrective report participant catalogs are restricted to 10 active users in Signaling Maintenance
   work area `006a0fb0-8fae-5ec6-88cb-4231d96d172a`.
+- Containerized backend smoke: PostgreSQL and FastAPI Compose services healthy; `/health` and
+  `/health/db` passed; the official report logo and a migrated relative PDF reference resolved
+  inside `/app/storage`.
 - Preventive and corrective forms share the collapsed `No seleccionados (N)` participant UI.
 - Corrective report version detail now includes immutable replacement snapshots; iOS report-version rows
   open the normalized read-only detail instead of the legacy mock preview.

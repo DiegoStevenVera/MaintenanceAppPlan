@@ -35,6 +35,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     GeneratedReportDTO,
     MaintenanceReportVersionDetailDTO,
 )
+from shared_kernel.storage import resolve_storage_reference, storage_key
 
 
 class PreventivePDFService:
@@ -170,10 +171,7 @@ class PreventivePDFService:
         report_root.mkdir(parents=True, exist_ok=True)
         output_path = report_root / file_name
         output_path.write_bytes(pdf_bytes)
-        try:
-            stored_path = output_path.relative_to(PROJECT_ROOT).as_posix()
-        except ValueError:
-            stored_path = output_path.resolve().as_posix()
+        stored_path = storage_key(output_path, report_root)
 
         previous = await self._session.scalar(
             select(GeneratedReportRecord)
@@ -205,12 +203,13 @@ class PreventivePDFService:
         )
         if generated is None:
             return None
-        candidate = Path(generated.path or generated.file_reference)
-        if not candidate.is_absolute():
-            candidate = PROJECT_ROOT / candidate
-        candidate = candidate.resolve()
         root = settings.resolved_report_root.resolve()
-        if root not in candidate.parents or not candidate.is_file():
+        candidate = resolve_storage_reference(
+            generated.path or generated.file_reference,
+            root,
+            legacy_roots=(PROJECT_ROOT,),
+        )
+        if candidate is None:
             return None
         return candidate, generated.file_name
 
