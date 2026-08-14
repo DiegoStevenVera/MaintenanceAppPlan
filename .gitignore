@@ -1,6 +1,8 @@
 # macOS
 .DS_Store
 backend/storage/
+backend/runtime/
+backend/.env
 
 # Xcode / Swift
 DerivedData/

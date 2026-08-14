@@ -324,37 +324,41 @@ test -f docs/OldVersionApp/Database/BD_Storage.xlsx
 
 ## 6. Create The Python Environment
 
-The root `Makefile` expects the virtual environment at `<project-root>/app_mant`.
+The backend `Makefile` contains the backend and Compose commands. It uses the
+currently active Python environment by default; override it with `PYTHON=/path/to/python`
+when needed.
 
-From the project root:
+From the backend directory:
 
 ```bash
-python3.12 -m venv app_mant
-source app_mant/bin/activate
+cd backend
+python3.12 -m venv .venv
+source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e "./backend[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 Verify:
 
 ```bash
 python -c "import fastapi, sqlalchemy, asyncpg, alembic, openpyxl"
-python -m pytest backend/tests -q
+python -m pytest tests -q
 ```
 
 Expected current test result:
 
 ```text
-19 passed
+66 passed
 ```
 
 A Starlette/httpx deprecation warning may still appear. It does not currently fail the suite.
 
 ## 7. Configure The Local Environment
 
-From the project root:
+From the backend directory:
 
 ```bash
+cd backend
 cp .env.example .env
 ```
 
@@ -373,7 +377,8 @@ POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 ```
 
-The root `.env` is used by Docker Compose and is also read by the backend. Never commit it.
+Environment files are selected from `backend/environments/<name>/.env`; they
+are never committed. See `docs/environment-setup.md` for LOCAL, DEV and QA.
 
 PostgreSQL applies its database/user/password environment values only when the Docker volume is
 first initialized. Changing `.env` later does not change credentials inside an existing volume.
@@ -382,33 +387,32 @@ first initialized. Changing `.env` later does not change credentials inside an e
 
 ### Fresh Mac Database
 
-Start PostgreSQL:
+Start PostgreSQL and FastAPI:
 
 ```bash
-docker compose up -d postgres
-docker compose ps
+cd backend
+make ENV=local build
+make ENV=local status
 ```
 
 Wait for `maintenance_postgres` to become healthy:
 
 ```bash
-docker compose logs postgres
+make ENV=local logs
 ```
 
 Create the complete schema with Alembic:
 
 ```bash
-cd backend
-../app_mant/bin/alembic upgrade head
-../app_mant/bin/alembic current
-../app_mant/bin/alembic check
-cd ..
+make ENV=local migrate
+make ENV=local current
+docker compose --env-file environments/local/.env exec backend alembic check
 ```
 
 Expected head:
 
 ```text
-20260727_0006 (head)
+20260812_0011 (head)
 ```
 
 Expected Alembic check:
@@ -420,7 +424,8 @@ No new upgrade operations detected.
 Verify directly:
 
 ```bash
-docker compose exec postgres psql -U maintenance_user -d maintenance_app
+docker compose --env-file environments/local/.env exec postgres \
+  psql -U maintenance_user -d maintenance_app
 ```
 
 Inside `psql`:
@@ -455,11 +460,10 @@ If custom PostgreSQL credentials are used, substitute them in every `psql` comma
 Only when the local Mac database is disposable:
 
 ```bash
-docker compose down -v
-docker compose up -d postgres
 cd backend
-../app_mant/bin/alembic upgrade head
-cd ..
+docker compose --env-file environments/local/.env down -v
+make ENV=local build
+make ENV=local migrate
 ```
 
 `docker compose down -v` permanently deletes the local PostgreSQL volume. Never run it against data
@@ -477,11 +481,11 @@ Run all importer commands from `backend`.
 ```bash
 cd backend
 
-../app_mant/bin/python -m legacy_import validate \
+./.venv/bin/python -m legacy_import validate \
   --kind wbs \
   --file ../docs/OldVersionApp/Database/WBS_V2.xlsx
 
-../app_mant/bin/python -m legacy_import validate \
+./.venv/bin/python -m legacy_import validate \
   --kind storage \
   --file ../docs/OldVersionApp/Database/BD_Storage.xlsx
 ```
@@ -492,7 +496,7 @@ with the same source key are rejected.
 ### Step 2: Mandatory Strict Dry Run
 
 ```bash
-../app_mant/bin/python -m legacy_import import-all \
+./.venv/bin/python -m legacy_import import-all \
   --wbs-file ../docs/OldVersionApp/Database/WBS_V2.xlsx \
   --storage-file ../docs/OldVersionApp/Database/BD_Storage.xlsx \
   --dry-run \
@@ -514,7 +518,7 @@ per-sheet counts.
 For a fresh empty database this backup is not essential, but it is good practice:
 
 ```bash
-docker compose exec -T postgres pg_dump \
+docker compose --env-file environments/local/.env exec -T postgres pg_dump \
   -U maintenance_user \
   -d maintenance_app \
   -Fc > maintenance_before_import.dump
@@ -527,7 +531,7 @@ The dump file contains database data and must be protected appropriately.
 Run the same command without `--dry-run`:
 
 ```bash
-../app_mant/bin/python -m legacy_import import-all \
+./.venv/bin/python -m legacy_import import-all \
   --wbs-file ../docs/OldVersionApp/Database/WBS_V2.xlsx \
   --storage-file ../docs/OldVersionApp/Database/BD_Storage.xlsx \
   --strict
@@ -544,8 +548,9 @@ Required result:
 Open PostgreSQL:
 
 ```bash
-cd ..
-docker compose exec postgres psql -U maintenance_user -d maintenance_app
+cd backend
+docker compose --env-file environments/local/.env exec postgres \
+  psql -U maintenance_user -d maintenance_app
 ```
 
 Audit SQL:
@@ -601,7 +606,7 @@ Run another strict dry run after the committed import:
 
 ```bash
 cd backend
-../app_mant/bin/python -m legacy_import import-all \
+./.venv/bin/python -m legacy_import import-all \
   --wbs-file ../docs/OldVersionApp/Database/WBS_V2.xlsx \
   --storage-file ../docs/OldVersionApp/Database/BD_Storage.xlsx \
   --dry-run \
@@ -619,13 +624,13 @@ For a new `BD_Storage.xlsx` snapshot:
 ```bash
 cd backend
 
-../app_mant/bin/python -m legacy_import import-storage \
+./.venv/bin/python -m legacy_import import-storage \
   --file ../docs/OldVersionApp/Database/BD_Storage.xlsx \
   --all \
   --dry-run \
   --strict
 
-../app_mant/bin/python -m legacy_import import-storage \
+./.venv/bin/python -m legacy_import import-storage \
   --file ../docs/OldVersionApp/Database/BD_Storage.xlsx \
   --all \
   --strict
@@ -646,17 +651,22 @@ tool.
 
 ## 11. Run The Backend On The Mac
 
-From the project root:
+From the backend directory:
 
 ```bash
-make backend-dev-postgres
+cd backend
+REPOSITORY_BACKEND=postgres ./.venv/bin/uvicorn \
+  app.main:app \
+  --app-dir src \
+  --reload \
+  --host 0.0.0.0
 ```
 
 Equivalent direct command:
 
 ```bash
 cd backend
-REPOSITORY_BACKEND=postgres ../app_mant/bin/uvicorn \
+REPOSITORY_BACKEND=postgres ./.venv/bin/uvicorn \
   app.main:app \
   --app-dir src \
   --reload \
@@ -673,7 +683,7 @@ open http://127.0.0.1:8000/docs
 
 An imported user with `mock:123456` can log in once and is upgraded automatically to Argon2.
 Users still marked `!legacy-import-disabled!` must receive a temporary password through
-`make user-set-password EMAIL=<email>` or `make user-bootstrap-disabled`. The iOS login does not
+`cd backend && make user-set-password EMAIL=<email>` or `cd backend && make user-bootstrap-disabled`. The iOS login does not
 require an `app_state_snapshots` compatibility payload.
 
 If the old mock UI must be demonstrated temporarily, use `app.seed` only in a separate disposable

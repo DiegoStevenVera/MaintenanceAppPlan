@@ -31,8 +31,8 @@ maintenance-app/
 │   └── workflows/
 ├── .gitignore
 ├── .pre-commit-config.yaml
-├── docker-compose.yml          # Local development stack
-├── Makefile                    # Common dev commands
+├── backend/docker-compose.yml  # Local development stack
+├── backend/Makefile            # Backend dev and Compose commands
 ├── pyproject.toml              # Root-level Python tooling config
 └── README.md
 ```
@@ -700,9 +700,9 @@ docs/adr/
 ```makefile
 .PHONY: dev test lint typecheck migrate format clean
 
-# Backend
+# Backend (run these commands from the repository root unless noted)
 dev:
-	docker compose up -d
+	cd backend && docker compose up -d
 	cd backend && uvicorn src.app.main:app --reload
 
 test:
@@ -721,7 +721,7 @@ format:
 	cd backend && ruff format src tests
 
 clean:
-	docker compose down -v
+	cd backend && docker compose down -v
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 # Infrastructure
