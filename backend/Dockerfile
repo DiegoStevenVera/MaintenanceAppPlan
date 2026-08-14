@@ -16,21 +16,17 @@ RUN apt-get update \
         fonts-dejavu \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/backend
 
-COPY backend/pyproject.toml /app/backend/pyproject.toml
-COPY backend/src /app/backend/src
-COPY backend/migrations /app/backend/migrations
-COPY backend/alembic.ini /app/backend/alembic.ini
+COPY pyproject.toml /app/backend/pyproject.toml
+COPY src /app/backend/src
+COPY migrations /app/backend/migrations
+COPY alembic.ini /app/backend/alembic.ini
+COPY assets /app/backend/assets
 
-RUN pip install ./backend
+RUN pip install .
 
-# The official report logo is outside the backend package but is needed by
-# the HTML/PDF renderer in the container.
-COPY docs/OldVersionApp/Formats/img/Hitachi-Logo.png \
-    /app/docs/OldVersionApp/Formats/img/Hitachi-Logo.png
-
-RUN mkdir -p /app/storage/attachments /app/storage/reports
+RUN mkdir -p /app/backend/storage/attachments /app/backend/storage/reports
 
 WORKDIR /app/backend
 EXPOSE 8000

@@ -10,7 +10,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import PROJECT_ROOT, settings
+from app.config import settings
 from modules.identity_access.infrastructure.postgres.models import UserRecord
 from modules.maintenance_execution.infrastructure.postgres.report_models import (
     GeneratedReportRecord,
@@ -207,7 +207,6 @@ class PreventivePDFService:
         candidate = resolve_storage_reference(
             generated.path or generated.file_reference,
             root,
-            legacy_roots=(PROJECT_ROOT,),
         )
         if candidate is None:
             return None

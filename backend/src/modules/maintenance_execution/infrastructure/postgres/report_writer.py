@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import PROJECT_ROOT, settings
+from app.config import settings
 from modules.asset_management.infrastructure.postgres.catalog_models import (
     AssetStatusRecord,
     ManufacturerRecord,
@@ -151,7 +151,6 @@ class PostgresReportWriter:
             generated_path = resolve_storage_reference(
                 generated.path or generated.file_reference,
                 report_root,
-                legacy_roots=(PROJECT_ROOT,),
             )
         if (
             generated is not None
@@ -595,7 +594,6 @@ class PostgresReportWriter:
         return resolve_storage_reference(
             attachment.file_reference,
             root,
-            legacy_roots=(PROJECT_ROOT,),
         )
 
     @staticmethod
@@ -1586,7 +1584,6 @@ class PostgresReportWriter:
                 existing_reference = portable_storage_reference(
                     existing.file_reference,
                     root,
-                    legacy_roots=(PROJECT_ROOT,),
                 )
                 self._session.add(
                     AttachmentRecord(

@@ -65,24 +65,24 @@ Then open:
 The local v1 backend can run against PostgreSQL in Docker while keeping the seed
 repositories available for tests.
 
-From the project root:
+From the backend directory, use the selected environment through the Makefile:
 
 ```bash
-docker compose up -d postgres
-cp .env.example .env
-make db-up
-make db-migrate
-make db-seed
-make backend-dev-postgres
+cd backend
+make ENV=local up
+make ENV=local migrate
 ```
 
-Use the root `.env` as the main local configuration file. Docker Compose reads
-the root `.env`, and the FastAPI backend also reads it. `backend/.env` is only a
-module-local override for exceptional cases and should normally be omitted.
+Environment-specific configuration is stored outside Git under
+`environments/<name>/.env`. Versioned templates are available beside each file
+as `.env.example`. LOCAL preserves the existing local PostgreSQL volume;
+DEV and QA use independent ports, volumes, and storage directories. See
+[`docs/environment-setup.md`](../docs/environment-setup.md) for initial setup.
 
 ## Run FastAPI And PostgreSQL In Docker
 
-The root `docker-compose.yml` runs both services in one Compose project:
+`backend/docker-compose.yml` runs both services in one Compose project for the
+environment selected with `ENV=local`, `ENV=dev`, or `ENV=qa`:
 
 - `maintenance_postgres`: PostgreSQL 16 with the persistent
   `maintenance_postgres_data` volume.
@@ -91,37 +91,36 @@ The root `docker-compose.yml` runs both services in one Compose project:
 
 The backend connects to PostgreSQL using the Compose service name
 `POSTGRES_HOST=postgres`, not `localhost`. Evidence and generated PDFs use the
-host bind mount `./backend/storage:/app/storage`, so recreating the backend
+host bind mount `./storage:/app/backend/storage`, so recreating the backend
 container does not remove them. PostgreSQL stores only portable keys relative
 to the configured storage root, for example `report.pdf` or `evidence.jpg`.
 
 First setup or after changing the Dockerfile:
 
 ```bash
-docker compose up -d --build
-docker compose exec backend alembic upgrade head
-docker compose ps
-curl http://127.0.0.1:8000/health
-curl http://127.0.0.1:8000/health/db
+make ENV=local build
+make ENV=local migrate
+make ENV=local current
+make ENV=local health
 ```
 
 Daily usage normally only needs:
 
 ```bash
-docker compose up -d
+make ENV=local up
 ```
 
 Rebuild after changing Python dependencies or the Docker image definition:
 
 ```bash
-docker compose up -d --build backend
+make ENV=local build
 ```
 
 View logs or stop the stack:
 
 ```bash
-docker compose logs -f backend postgres
-docker compose stop
+make ENV=local logs
+make ENV=local down
 ```
 
 `docker compose down` removes containers and the network but keeps named
@@ -133,7 +132,8 @@ when its Docker volume is initialized for the first time. If credentials change
 after the volume already exists, recreate the local volume with
 `docker compose down -v` or update the password inside PostgreSQL manually.
 
-Add a private signing key to the root `.env` before starting FastAPI:
+Add a private signing key to the selected `environments/<name>/.env` before
+starting FastAPI:
 
 ```env
 JWT_SECRET_KEY=replace-with-at-least-32-random-characters
@@ -151,15 +151,14 @@ openssl rand -hex 32
 ## Preventive PDF
 
 The first PDF implementation uses the normalized report version, Jinja2 and
-WeasyPrint. The logo comes from
-`docs/OldVersionApp/Formats/img/Hitachi-Logo.png`. Generated files are stored
+WeasyPrint. The logo comes from `backend/assets/Hitachi-Logo.png`. Generated files are stored
 under `REPORT_STORAGE_PATH` and registered in `generated_reports`; existing
 versions can therefore be opened from the same read-only version screen.
 `generated_reports.file_reference` and `generated_reports.path` contain keys
 relative to the report storage root, not paths from a developer laptop or
 container.
 
-On macOS, `make backend-dev-postgres` adds the Homebrew library paths needed by
+On macOS, `make dev-postgres` adds the Homebrew library paths needed by
 WeasyPrint. If the backend is started manually, install `pango`, `cairo` and
 `gdk-pixbuf` with Homebrew and export `DYLD_LIBRARY_PATH` with their `lib`
 directories before running Uvicorn.

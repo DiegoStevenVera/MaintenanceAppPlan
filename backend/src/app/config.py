@@ -1,10 +1,21 @@
+import os
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _environment_file() -> Path:
+    configured_path = Path(
+        os.environ.get("APP_ENV_FILE", "environments/local/.env")
+    )
+    return (
+        configured_path
+        if configured_path.is_absolute()
+        else BACKEND_ROOT / configured_path
+    )
 
 
 class Settings(BaseSettings):
@@ -22,10 +33,10 @@ class Settings(BaseSettings):
     jwt_issuer: str = "maintenance-app"
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
-    attachment_storage_path: str = "backend/storage/attachments"
+    attachment_storage_path: str = "storage/attachments"
     attachment_max_bytes: int = 10_000_000
-    report_storage_path: str = "backend/storage/reports"
-    report_logo_path: str = "docs/OldVersionApp/Formats/img/Hitachi-Logo.png"
+    report_storage_path: str = "storage/reports"
+    report_logo_path: str = "assets/Hitachi-Logo.png"
     preventive_report_format_code: str = "ML2-STS-FOR-040-ES"
     preventive_report_revision: str = "0"
     corrective_report_format_code: str = "ML2-STS-FOR-041-ES"
@@ -43,20 +54,20 @@ class Settings(BaseSettings):
     @property
     def resolved_attachment_root(self) -> Path:
         path = Path(self.attachment_storage_path)
-        return path if path.is_absolute() else PROJECT_ROOT / path
+        return path if path.is_absolute() else BACKEND_ROOT / path
 
     @property
     def resolved_report_root(self) -> Path:
         path = Path(self.report_storage_path)
-        return path if path.is_absolute() else PROJECT_ROOT / path
+        return path if path.is_absolute() else BACKEND_ROOT / path
 
     @property
     def resolved_report_logo(self) -> Path:
         path = Path(self.report_logo_path)
-        return path if path.is_absolute() else PROJECT_ROOT / path
+        return path if path.is_absolute() else BACKEND_ROOT / path
 
     model_config = SettingsConfigDict(
-        env_file=(BACKEND_ROOT / ".env", PROJECT_ROOT / ".env"),
+        env_file=_environment_file(),
         env_file_encoding="utf-8",
         extra="ignore",
     )

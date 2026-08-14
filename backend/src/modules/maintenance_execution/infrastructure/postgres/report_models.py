@@ -7,12 +7,14 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     LargeBinary,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -173,6 +175,15 @@ class MaintenanceReportRecord(OperationalRecordMixin, Base):
             "report_kind",
             "report_number",
             name="uq_maintenance_reports_activity_kind_number",
+        ),
+        Index(
+            "uq_corrective_reports_year_number",
+            "report_year",
+            "report_number",
+            unique=True,
+            postgresql_where=text(
+                "report_kind = 'CORRECTIVE' AND report_year IS NOT NULL"
+            ),
         ),
     )
 

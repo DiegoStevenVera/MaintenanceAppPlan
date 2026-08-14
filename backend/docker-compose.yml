@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-maintenance_app}
+      POSTGRES_USER: ${POSTGRES_USER:-maintenance_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-maintenance_password}
+    ports:
+      - "${POSTGRES_HOST_PORT:?Set POSTGRES_HOST_PORT in the selected environment}:5432"
+    volumes:
+      - maintenance_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-maintenance_user} -d ${POSTGRES_DB:-maintenance_app}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ${ENV_FILE_PATH:?Set ENV_FILE_PATH in the selected environment}
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-local}
+      REPOSITORY_BACKEND: postgres
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      ATTACHMENT_STORAGE_PATH: /app/backend/storage/attachments
+      REPORT_STORAGE_PATH: /app/backend/storage/reports
+      REPORT_LOGO_PATH: /app/backend/assets/Hitachi-Logo.png
+    ports:
+      - "${BACKEND_PORT:?Set BACKEND_PORT in the selected environment}:8000"
+    volumes:
+      # Persistent host storage for evidence and generated PDF artifacts.
+      - ${STORAGE_HOST_PATH:?Set STORAGE_HOST_PATH in the selected environment}:/app/backend/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  # Each environment receives an explicit and independent PostgreSQL volume.
+  maintenance_postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:?Set POSTGRES_VOLUME_NAME in the selected environment}
+    external: ${POSTGRES_VOLUME_EXTERNAL:-false}
