@@ -24,14 +24,12 @@ struct MainTabView: View {
                 Label("Correctivos", systemImage: "wrench.and.screwdriver")
             }
             
-            /* TODO: PCON PLANIFICATION
             NavigationStack {
                 PCONPlanningView()
             }
             .tabItem {
                 Label("PCON", systemImage: "calendar.badge.clock")
             }
-             */
 
             NavigationStack {
                 AssetSearchView()
