@@ -96,26 +96,41 @@ make ENV=dev health
 La importación de `WBS_V2.xlsx` y `BD_Storage.xlsx` se realizará después, desde
 DEV, mediante un dry run y luego `legacy_import import-all`.
 
-## Uso Del iPad
+## Aplicación iPad Y Entorno Git
 
-Con Mac e iPad en la misma red Wi-Fi, el servidor a escribir en la pantalla de
-login es:
+El proyecto Xcode tiene un solo esquema: `MaintenanceApp`. La URL de API y el
+nombre del entorno se incluyen en la compilación desde este archivo versionado:
 
 ```text
-LOCAL: http://IP-DE-LA-MAC:8000
-DEV:   http://IP-DE-LA-MAC:8001
-QA:    http://IP-DE-LA-MAC:8002
+frontend/ios/MaintenanceAppMock/Config/Environment.xcconfig
 ```
+
+La rama `develop` conserva los valores DEV (`:8001`). Un commit de release
+cambia ese archivo a QA (`:8002`) y el tag se crea sobre ese commit. Al abrir
+el tag y compilar, el iPad se conecta automáticamente a QA; el login no permite
+editar la URL.
+
+Con Mac e iPad en la misma red Wi-Fi, actualiza la IP del archivo si la
+dirección LAN de la Mac cambia. Comprueba la IP actual con:
+
+```bash
+ipconfig getifaddr en0
+```
+
+DEV y QA usan deliberadamente el mismo Bundle ID (`com.maintenanceapp.mock`),
+por lo que instalar QA reemplaza DEV en el iPad. Cierra sesión antes de cambiar
+de entorno para no conservar un token o borrador asociado al servidor anterior.
 
 ## Ramas Y Tag De QA
 
 No guardes archivos `.env` en ramas. Un flujo inicial simple es:
 
 ```text
-main       versión estable
-develop    código desplegable en DEV
-feature/*  trabajo aislado
-tag qa-*   versión inmóvil que QA demuestra
+main                 versión estable
+develop              código desplegable en DEV
+feature/*            trabajo aislado
+release/qa-*         configuración temporal para QA
+tag qa-*             versión inmóvil que QA demuestra
 ```
 
 Cuando decidas iniciar el flujo:
@@ -134,16 +149,46 @@ git switch develop
 git switch -c feature/nombre-corto
 ```
 
-Tras validar y fusionar el trabajo en `develop`, crea el tag que QA usará:
+Tras validar el trabajo en `develop`, prepara una rama de release para QA:
 
 ```bash
 git switch develop
 git pull --ff-only
+git switch -c release/qa-demo-YYYY-MM-DD
+```
+
+Edita `frontend/ios/MaintenanceAppMock/Config/Environment.xcconfig`:
+
+```text
+API_BASE_URL = http:/$()/IP-DE-LA-MAC:8002
+APP_ENVIRONMENT = QA
+```
+
+Luego confirma y etiqueta ese commit:
+
+```bash
+git add frontend/ios/MaintenanceAppMock/Config/Environment.xcconfig
+git commit -m "Configure iPad build for QA"
 git tag -a qa-demo-YYYY-MM-DD -m "Versión para demostración QA"
+git push -u origin release/qa-demo-YYYY-MM-DD
 git push origin qa-demo-YYYY-MM-DD
 ```
 
-QA ejecuta ese commit fijo. Si usas una sola carpeta de trabajo, puedes revisar
-el tag con `git switch --detach qa-demo-YYYY-MM-DD`; si quieres mantener DEV y
-QA activos con código distinto a la vez, usa una segunda copia del repositorio
-o un `git worktree`.
+La rama/tag QA ejecuta un commit fijo. `develop` no se modifica y conserva la
+configuración DEV. Si usas una sola carpeta de trabajo, puedes revisar el tag
+con `git switch --detach qa-demo-YYYY-MM-DD`; si quieres mantener DEV y QA
+activos con código distinto a la vez, usa una segunda copia del repositorio o
+un `git worktree`.
+
+Para compilar ese tag sin abandonar tu carpeta de trabajo `develop`:
+
+```bash
+cd ..
+git -C MaintenanceAppPlan fetch --tags
+git -C MaintenanceAppPlan worktree add MaintenanceAppPlan-QA qa-demo-YYYY-MM-DD
+```
+
+Abre `MaintenanceAppPlan-QA/frontend/ios/MaintenanceAppMock.xcodeproj` en
+Xcode, selecciona el único esquema `MaintenanceApp` y ejecuta la app en el
+iPad. Después de la prueba, vuelve a la carpeta principal en `develop`; esa
+rama ya conserva los valores DEV.

@@ -5,8 +5,6 @@ struct LoginView: View {
     @EnvironmentObject private var session: SessionStore
     @State private var email = ""
     @State private var password = ""
-    @State private var apiBaseURL =
-        UserDefaults.standard.string(forKey: "apiBaseURL") ?? "http://127.0.0.1:8000"
     @State private var errorMessage: String?
     @State private var isSigningIn = false
 
@@ -56,16 +54,16 @@ struct LoginView: View {
                     subtitle: "La sesion se almacena de forma segura en este dispositivo"
                 )
 
-                fieldLabel("URL API") {
-                    TextField("http://127.0.0.1:8000", text: $apiBaseURL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
+                fieldLabel("Entorno") {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text(AppEnvironment.name)
+                            .font(.body.weight(.bold))
+                        Text(AppEnvironment.apiBaseURL)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                    }
                 }
-
-                Text("En un iPad fisico usa la IP de tu Mac, por ejemplo http://192.168.1.20:8000")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 fieldLabel("Correo") {
                     TextField("correo@empresa.com", text: $email)
@@ -128,9 +126,9 @@ struct LoginView: View {
                 let user = try await session.signIn(
                     email: email,
                     password: password,
-                    baseURL: apiBaseURL
+                    baseURL: AppEnvironment.apiBaseURL
                 )
-                store.apiBaseURL = apiBaseURL
+                store.apiBaseURL = AppEnvironment.apiBaseURL
                 store.completeAPISignIn(user: user)
                 isSigningIn = false
             } catch {

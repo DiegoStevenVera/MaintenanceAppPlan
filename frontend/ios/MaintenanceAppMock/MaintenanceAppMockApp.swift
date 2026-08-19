@@ -1,5 +1,23 @@
 import SwiftUI
 
+enum AppEnvironment {
+    static let apiBaseURL: String = requiredInfoValue(for: "API_BASE_URL")
+    static let name: String = requiredInfoValue(for: "APP_ENVIRONMENT")
+
+    static func configure() {
+        UserDefaults.standard.set(apiBaseURL, forKey: "apiBaseURL")
+    }
+
+    private static func requiredInfoValue(for key: String) -> String {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: key) as? String,
+              !value.isEmpty,
+              !value.contains("$(") else {
+            fatalError("Missing build setting: \(key)")
+        }
+        return value
+    }
+}
+
 @main
 struct MaintenanceAppMockApp: App {
     @Environment(\.scenePhase) private var scenePhase
@@ -8,6 +26,10 @@ struct MaintenanceAppMockApp: App {
     @StateObject private var assetStore = AssetStore()
     @StateObject private var activityStore = MaintenanceActivityStore()
     @StateObject private var offlineStore = OfflineReportStore()
+
+    init() {
+        AppEnvironment.configure()
+    }
 
     var body: some Scene {
         WindowGroup {

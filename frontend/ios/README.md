@@ -99,8 +99,10 @@ On a physical iPad, disabling Wi-Fi after step 1 additionally validates immediat
 `NWPathMonitor` detection. Stopping FastAPI is the better Simulator test because it
 does not disturb Docker data and also exercises timeout/retry behavior.
 
-Use `http://127.0.0.1:8000` in the simulator. On a physical iPad, enter the Mac's LAN address,
-for example `http://192.168.1.20:8000`, and run FastAPI with `--host 0.0.0.0`.
+The app has one compile-time scheme, `MaintenanceApp`. Its API URL and
+environment label come from `MaintenanceAppMock/Config/Environment.xcconfig`.
+The checked-out Git revision determines its values: `develop` uses DEV and a
+QA release tag uses QA. The login view does not expose an editable server URL.
 
 ## Xcode Project
 
