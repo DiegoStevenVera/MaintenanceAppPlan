@@ -1,4 +1,4 @@
-﻿# Maintenance App
+﻿# Maintenance App - QA
 
 Monorepo for the maintenance team application.
 
