@@ -32,6 +32,7 @@ struct PreventiveReportFormView: View {
     ]
     @State private var signingParticipantID: String?
     @State private var selectedPhotos: [PhotosPickerItem] = []
+    @State private var isShowingCamera = false
     @State private var isLoading = true
     @State private var isSaving = false
     @State private var errorMessage: String?
@@ -162,6 +163,12 @@ struct PreventiveReportFormView: View {
                 }
             }
         }
+        .sheet(isPresented: $isShowingCamera) {
+            CameraPhotoPicker { image in
+                Task { await addEvidence(from: image) }
+            }
+            .ignoresSafeArea()
+        }
     }
 
     private func header(_ detail: APIActivityDetail) -> some View {
@@ -262,9 +269,21 @@ struct PreventiveReportFormView: View {
                     Label("Agregar desde galería", systemImage: "photo.badge.plus")
                 }
                 .buttonStyle(ActionTileButtonStyle(prominent: true))
+                Button {
+                    isShowingCamera = true
+                } label: {
+                    Label("Tomar foto", systemImage: "camera.fill")
+                }
+                .buttonStyle(ActionTileButtonStyle(prominent: true))
+                .disabled(!isCameraAvailable)
+                .opacity(isCameraAvailable ? 1 : 0.55)
                 EditableReportEvidenceGrid(evidence: $evidence)
             }
         }
+    }
+
+    private var isCameraAvailable: Bool {
+        UIImagePickerController.isSourceTypeAvailable(.camera)
     }
 
     private var calibrationPanel: some View {
@@ -647,29 +666,37 @@ struct PreventiveReportFormView: View {
         for item in items {
             do {
                 guard let sourceData = try await item.loadTransferable(type: Data.self),
-                      let image = UIImage(data: sourceData),
-                      let jpegData = normalizedJPEGData(for: image) else {
+                      let image = UIImage(data: sourceData) else {
                     throw EvidenceImportError.invalidImage
                 }
-                evidence.append(
-                    APIReportEvidenceWrite(
-                        clientID: UUID().uuidString,
-                        attachmentID: nil,
-                        originalFileName: "evidencia-\(evidence.count + 1).jpg",
-                        mediaType: "image/jpeg",
-                        title: "Evidencia de mantenimiento",
-                        description: nil,
-                        capturedAt: Date(),
-                        contentBase64: jpegData.base64EncodedString(),
-                        preventiveStepID: nil,
-                        correctiveActivityClientID: nil
-                    )
-                )
+                await addEvidence(from: image)
             } catch {
                 errorMessage = error.localizedDescription
             }
         }
         selectedPhotos = []
+    }
+
+    @MainActor
+    private func addEvidence(from image: UIImage) async {
+        guard let jpegData = normalizedJPEGData(for: image) else {
+            errorMessage = EvidenceImportError.invalidImage.localizedDescription
+            return
+        }
+        evidence.append(
+            APIReportEvidenceWrite(
+                clientID: UUID().uuidString,
+                attachmentID: nil,
+                originalFileName: "evidencia-\(evidence.count + 1).jpg",
+                mediaType: "image/jpeg",
+                title: "Evidencia de mantenimiento",
+                description: nil,
+                capturedAt: Date(),
+                contentBase64: jpegData.base64EncodedString(),
+                preventiveStepID: nil,
+                correctiveActivityClientID: nil
+            )
+        )
     }
 
     private func normalizedJPEGData(for image: UIImage) -> Data? {
