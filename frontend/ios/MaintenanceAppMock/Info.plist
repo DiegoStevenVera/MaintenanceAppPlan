@@ -31,6 +31,8 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Maintenance App necesita conectarse al servidor local de mantenimiento durante las pruebas.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Maintenance App necesita usar la cámara para registrar evidencias fotográficas de mantenimiento.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>
