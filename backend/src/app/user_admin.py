@@ -4,6 +4,8 @@ from getpass import getpass
 
 from sqlalchemy import select
 
+# Register every ORM model before SQLAlchemy resolves UserRecord foreign keys.
+import app.models as _models  # noqa: F401
 from app.database import async_session_factory
 from modules.identity_access.application.security import hash_password
 from modules.identity_access.infrastructure.postgres.models import UserRecord
