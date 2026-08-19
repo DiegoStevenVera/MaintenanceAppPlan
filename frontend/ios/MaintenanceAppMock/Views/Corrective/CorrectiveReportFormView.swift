@@ -632,7 +632,7 @@ struct CorrectiveReportFormView: View {
                 id: user.id,
                 name: user.name,
                 role: user.role,
-                isSelected: participant?.selected ?? true,
+                isSelected: participant?.selected ?? false,
                 strokes: participant?.signatureStrokes.map(\.cgPoints) ?? []
             )
         }

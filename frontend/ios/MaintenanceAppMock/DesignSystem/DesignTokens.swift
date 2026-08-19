@@ -183,6 +183,7 @@ struct ActionButtonGrid<Content: View>: View {
 
 struct ActionTileButtonStyle: ButtonStyle {
     var prominent = false
+    var prominentColor = BrandColor.red
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -193,7 +194,7 @@ struct ActionTileButtonStyle: ButtonStyle {
             .padding(.horizontal, AppSpacing.md)
             .foregroundStyle(prominent ? Color.white : BrandColor.red)
             .background(
-                prominent ? BrandColor.red : BrandColor.red.opacity(configuration.isPressed ? 0.16 : 0.10),
+                prominent ? prominentColor : BrandColor.red.opacity(configuration.isPressed ? 0.16 : 0.10),
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
@@ -235,7 +236,10 @@ struct MaintenanceLifecycleActionPanel: View {
                         }
                         .buttonStyle(
                             ActionTileButtonStyle(
-                                prominent: command == .start || command == .complete
+                                prominent: command == .start || command == .complete,
+                                prominentColor: command == .start
+                                    ? BrandColor.green
+                                    : BrandColor.red
                             )
                         )
                         .disabled(isWorking)

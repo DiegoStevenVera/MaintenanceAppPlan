@@ -303,8 +303,8 @@ enum MaintenanceLifecycleCommand: String, Identifiable {
 
     var label: String {
         switch self {
-        case .start: return "Iniciar"
-        case .complete: return "Completar"
+        case .start: return "Iniciar Mantenimiento"
+        case .complete: return "Finalizar"
         case .close: return "Cerrar"
         case .reopen: return "Reabrir"
         }
