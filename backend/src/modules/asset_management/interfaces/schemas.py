@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -63,3 +65,23 @@ class AssetHistoryEntryDTO(BaseModel):
     activity_status: str | None = None
     report_kind: str | None = None
     version_number: int | None = None
+
+
+class AssetComponentOperationDTO(BaseModel):
+    """One staged component change applied atomically within an equipment tree."""
+
+    action: Literal["CREATE", "UPDATE", "MOVE", "DELETE"]
+    component_id: str | None = None
+    parent_id: str | None = None
+    name: str | None = Field(default=None, max_length=240)
+    category: str | None = Field(default=None, max_length=120)
+    asset_type: str | None = Field(default=None, max_length=120)
+    status: str | None = Field(default=None, max_length=80)
+    serial_number: str | None = Field(default=None, max_length=120)
+    part_number: str | None = Field(default=None, max_length=120)
+    model: str | None = Field(default=None, max_length=120)
+    current_position: str | None = Field(default=None, max_length=200)
+
+
+class AssetComponentChangesRequest(BaseModel):
+    operations: list[AssetComponentOperationDTO] = Field(min_length=1, max_length=100)

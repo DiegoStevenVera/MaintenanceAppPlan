@@ -1,17 +1,19 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session, uses_postgres
 from modules.asset_management.infrastructure.seed_repository import asset_repository
 from modules.asset_management.infrastructure.postgres.repository import PostgresAssetRepository
 from modules.asset_management.interfaces.schemas import (
+    AssetComponentChangesRequest,
     AssetDTO,
     AssetHistoryEntryDTO,
     AssetTreeNodeDTO,
     StockAssetDTO,
 )
-from modules.identity_access.interfaces.dependencies import get_current_user
-from shared_kernel.schemas import Page
+from modules.identity_access.interfaces.dependencies import get_current_user, require_roles
+from shared_kernel.schemas import Page, UserRole
 
 router = APIRouter(
     prefix="/assets",
@@ -114,6 +116,34 @@ async def get_asset_tree(
         )
         for index, name in enumerate(asset.children)
     ]
+
+
+@router.patch(
+    "/{asset_id}/components",
+    response_model=list[AssetTreeNodeDTO],
+)
+async def apply_component_changes(
+    asset_id: str,
+    payload: AssetComponentChangesRequest,
+    session: AsyncSession = Depends(get_session),
+    _user=Depends(require_roles(UserRole.ADMINISTRATOR)),
+) -> list[AssetTreeNodeDTO]:
+    if not uses_postgres():
+        raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
+    repository = PostgresAssetRepository(session)
+    try:
+        tree = await repository.apply_component_changes(asset_id, payload.operations)
+        await session.commit()
+        return tree
+    except ValueError as error:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except IntegrityError as error:
+        await session.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="No se puede eliminar el componente porque tiene historial o referencias operativas.",
+        ) from error
 
 
 @router.get("/{asset_id}/history", response_model=list[AssetHistoryEntryDTO])

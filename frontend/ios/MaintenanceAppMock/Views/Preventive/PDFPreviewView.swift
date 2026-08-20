@@ -100,6 +100,10 @@ struct PDFPreviewView: View {
                 DetailTile(title: "Equipos", value: detail.activity.assets.map(\.name).joined(separator: ", ").orFallback("No registrados"))
                 DetailTile(title: "Ubicación física", value: detail.activity.locationPath.orFallback("No registrada"))
                 if let report = detail.preventiveReport {
+                    DetailTile(
+                        title: "Orden SAP",
+                        value: detail.activity.sapOrder.orFallback("No registrada")
+                    )
                     DetailTile(title: "Fecha de actividad", value: report.actualDate)
                     DetailTile(title: "Inicio de actividad", value: Self.dateTimeFormatter.string(from: report.activityStartedAt))
                     if let endedAt = report.activityEndedAt {
@@ -203,7 +207,7 @@ struct PDFPreviewView: View {
                     value: report.sapNotification.orFallback("No registrada")
                 )
                 DetailTile(
-                    title: "Asset afectado",
+                    title: "Equipo afectado",
                     value: report.affectedAssetPath.orFallback("No registrado")
                 )
                 DetailTile(

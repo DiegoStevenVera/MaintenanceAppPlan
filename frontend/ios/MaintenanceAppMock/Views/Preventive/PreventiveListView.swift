@@ -193,6 +193,7 @@ struct APIActivity: Identifiable, Codable {
     let status: String
     let title: String
     let internalCode: String
+    let sapOrder: String?
     let project: String?
     let stage: String?
     let system: String?
@@ -214,6 +215,7 @@ struct APIActivity: Identifiable, Codable {
         case id, status, title, project, stage, system, subsystem, site, assets, severity
         case activityType = "activity_type"
         case internalCode = "internal_code"
+        case sapOrder = "sap_order"
         case locationPath = "location_path"
         case scheduledAt = "scheduled_at"
         case plannedYear = "planned_year"
@@ -232,6 +234,7 @@ struct APIActivityDetail: Identifiable, Codable {
     let status: String
     let title: String
     let internalCode: String
+    let sapOrder: String?
     let project: String?
     let stage: String?
     let system: String?
@@ -248,14 +251,21 @@ struct APIActivityDetail: Identifiable, Codable {
     let eventID: String?
     let eventCode: String?
     let severity: String?
+    let isCritical: Bool
     let reports: [APIReportVersion]
     let preventiveReport: APIPreventiveReport?
     let correctiveReport: APICorrectiveReport?
+    let sapEventName: String?
+    let sapNotification: String?
+    let noticeCreatedAt: Date?
+    let responseAt: Date?
+    let affectedAssets: [APICorrectiveAffectedAsset]
 
     enum CodingKeys: String, CodingKey {
         case id, status, title, project, stage, system, subsystem, site, assets, severity, reports
         case activityType = "activity_type"
         case internalCode = "internal_code"
+        case sapOrder = "sap_order"
         case locationPath = "location_path"
         case scheduledAt = "scheduled_at"
         case plannedYear = "planned_year"
@@ -267,6 +277,27 @@ struct APIActivityDetail: Identifiable, Codable {
         case eventCode = "event_code"
         case preventiveReport = "preventive_report"
         case correctiveReport = "corrective_report"
+        case sapEventName = "sap_event_name"
+        case sapNotification = "sap_notification"
+        case noticeCreatedAt = "notice_created_at"
+        case responseAt = "response_at"
+        case affectedAssets = "affected_assets"
+        case isCritical = "is_critical"
+    }
+}
+
+struct APICorrectiveAffectedAsset: Codable, Identifiable {
+    let assetID: String
+    let isCritical: Bool
+    let name: String
+    let path: String
+
+    var id: String { assetID }
+
+    enum CodingKeys: String, CodingKey {
+        case name, path
+        case assetID = "asset_id"
+        case isCritical = "is_critical"
     }
 }
 
@@ -303,8 +334,8 @@ enum MaintenanceLifecycleCommand: String, Identifiable {
 
     var label: String {
         switch self {
-        case .start: return "Iniciar"
-        case .complete: return "Completar"
+        case .start: return "Iniciar Mantenimiento"
+        case .complete: return "Finalizar"
         case .close: return "Cerrar"
         case .reopen: return "Reabrir"
         }
@@ -592,6 +623,7 @@ final class MaintenanceActivityStore: ObservableObject {
             status: detail.status,
             title: detail.title,
             internalCode: detail.internalCode,
+            sapOrder: detail.sapOrder,
             project: detail.project,
             stage: detail.stage,
             system: detail.system,

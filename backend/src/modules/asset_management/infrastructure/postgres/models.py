@@ -115,6 +115,33 @@ class AssetRecord(Base):
     )
 
 
+class AssetGroupRecord(Base):
+    """Operational grouping for preventive maintenance; never a physical asset."""
+
+    __tablename__ = "asset_groups"
+    __table_args__ = (UniqueConstraint("code", name="uq_asset_groups_code"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    code: Mapped[str] = mapped_column(String(160), nullable=False)
+    name: Mapped[str] = mapped_column(String(240), nullable=False, index=True)
+    subsystem_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("subsystems.id"), index=True)
+    geographic_location_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("geographic_locations.id"), index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
+class AssetGroupMemberRecord(Base):
+    __tablename__ = "asset_group_members"
+    __table_args__ = (UniqueConstraint("asset_group_id", "asset_id", name="uq_asset_group_member"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    asset_group_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("asset_groups.id", ondelete="CASCADE"), nullable=False, index=True)
+    asset_id: Mapped[str] = mapped_column(String(80), ForeignKey("assets.id"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+
 class AssetHistoryRecord(Base):
     __tablename__ = "asset_history"
 

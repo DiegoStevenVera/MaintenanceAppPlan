@@ -13,7 +13,12 @@ from modules.asset_management.infrastructure.postgres.catalog_models import (
     MovementTypeRecord,
     SlotTypeRecord,
 )
-from modules.asset_management.infrastructure.postgres.models import AssetHistoryRecord, AssetRecord
+from modules.asset_management.infrastructure.postgres.models import (
+    AssetGroupMemberRecord,
+    AssetGroupRecord,
+    AssetHistoryRecord,
+    AssetRecord,
+)
 from modules.identity_access.infrastructure.postgres.models import RefreshSessionRecord, UserRecord
 from modules.maintenance_execution.infrastructure.postgres import (
     report_models as _report_models,  # noqa: F401
@@ -49,6 +54,8 @@ from modules.organizational_context.infrastructure.postgres.models import (
 __all__ = [
     "AppStateSnapshotRecord",
     "AssetHistoryRecord",
+    "AssetGroupMemberRecord",
+    "AssetGroupRecord",
     "AssetRecord",
     "AssetStatusRecord",
     "CorrectiveEventRecord",

@@ -49,11 +49,11 @@
     .signature { display: block; width: 42mm; height: 9mm; margin: 0 auto; object-fit: contain; }
     .avoid-break { break-inside: avoid; page-break-inside: avoid; }
     .photo-page { page: photos; break-before: page; page-break-before: always; }
-    .photo-page h2 { margin: 0 0 8mm; font-size: 11pt; font-weight: normal; }
-    .photo-grid { width: 100%; border-collapse: separate; border-spacing: 7mm 5mm; table-layout: fixed; }
-    .photo-grid td { width: 50%; height: 67mm; border: 0; padding: 0; vertical-align: top; }
-    .photo-title { min-height: 6mm; margin-bottom: 2mm; font-size: 9pt; }
-    .photo-grid img { display: block; width: 100%; height: 56mm; object-fit: contain; object-position: top center; }
+    .photo-page h2 { margin: 0 0 4mm; font-size: 11pt; font-weight: normal; }
+    .photo-grid { width: 100%; border-collapse: separate; border-spacing: 0 2mm; table-layout: fixed; }
+    .photo-grid td { width: 100%; height: 100mm; border: 0; padding: 0; vertical-align: top; }
+    .photo-title { min-height: 5mm; margin-bottom: 1mm; font-size: 9pt; }
+    .photo-grid img { display: block; width: 100%; height: 92mm; object-fit: contain; object-position: top center; }
   </style>
 </head>
 <body>
@@ -209,16 +209,15 @@ Fecha y hora fin: {{ format_datetime(item.ended_at) }}
     </table>
   </section>
 
-  {% for photo_page in photos|batch(6) %}
+  {% for photo_page in photos|batch(2) %}
   <section class="photo-page">
     <h2>Registro Fotográfico {{ loop.index }}</h2>
     <table class="photo-grid">
-      {% for photo_row in photo_page|batch(2) %}
+      {% for photo_row in photo_page|batch(1) %}
       <tr>
         {% for photo in photo_row %}
         <td><div class="photo-title">{{ photo.title }}{% if photo.description %}: {{ photo.description }}{% endif %}</div><img src="{{ photo.data_uri }}" alt="{{ photo.title }}"></td>
         {% endfor %}
-        {% if photo_row|length == 1 %}<td></td>{% endif %}
       </tr>
       {% endfor %}
     </table>

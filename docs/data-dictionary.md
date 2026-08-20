@@ -158,6 +158,15 @@ Estados PCON importantes:
 | `calibration_report_details` | Cabecera del reporte de calibración de circuito de vía | `tbl_Calibration` |
 | `calibration_measurements` | Mediciones ordenadas por activo/rol: transmisor y receptores | `tbl_Calibration` |
 | `report_tool_usages` | Herramientas efectivamente utilizadas en una versión | `Tools_Activity` |
+| `corrective_equipment_groups` | Grupos lógicos permitidos como objetivo inicial de un correctivo; no son activos físicos | `APP` / regla operativa ATS |
+| `corrective_equipment_group_members` | Equipos grandes físicos pertenecientes a un grupo lógico correctivo | `APP` / `assets` |
+| `corrective_event_affected_assets` | Uno o más activos afectados por evento y su ruta al crear el aviso; la criticidad vive en el evento | `APP` / correctivos existentes |
+| `asset_groups` | Alcance operativo de preventivos, siempre usado incluso para relaciones 1:1 | `APP` / normalización de equipos legacy |
+| `asset_group_members` | Relación 1:N entre un grupo preventivo y sus activos físicos | `APP` / `assets` |
+
+`report_tool_usages` también conserva los campos snapshot `tool_name_snapshot`,
+`tool_serial_snapshot`, `certification_number_snapshot` y
+`certification_valid_until_snapshot` para que una versión histórica sea auditable.
 
 ## Herramientas
 
