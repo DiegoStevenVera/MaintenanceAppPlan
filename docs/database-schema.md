@@ -250,6 +250,20 @@ Useful `psql` commands:
 \d data_import_batches
 ```
 
+## 5. Migración 20260819_0012
+
+La migración `20260819_0012_corrective_targets_tools_sap` agrega selección de
+varios activos afectados y criticidad individual para correctivos, grupos lógicos
+de equipos ATS y snapshots de herramientas usadas en reportes. Se aplica con
+`alembic upgrade head` en cada entorno, antes de desplegar la app iOS que consume
+estos campos.
+
+La migración `20260819_0013_asset_groups_and_event_criticality` introduce
+`asset_groups` y `asset_group_members` para que todos los preventivos usen un
+alcance 1:N uniforme. Además separa los gabinetes físicos CRK/ERK de los grupos
+históricos y establece `corrective_events.is_critical` como el único indicador
+crítico del evento.
+
 List tables with SQL:
 
 ```sql

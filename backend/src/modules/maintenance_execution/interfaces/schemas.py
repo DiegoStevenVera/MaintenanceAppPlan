@@ -28,6 +28,7 @@ class CorrectiveEventDTO(BaseModel):
     affected_asset_path: str
     subsystem: str
     severity: Severity
+    is_critical: bool = False
     status: MaintenanceStatus
     notice_created_at: str
     response_at: str
@@ -36,14 +37,41 @@ class CorrectiveEventDTO(BaseModel):
     timeline: list[TimelineEntryDTO] = []
 
 
+class CorrectiveAffectedAssetWriteDTO(BaseModel):
+    asset_id: str
+    is_critical: bool = False
+
+
+class CorrectiveAffectedAssetDTO(CorrectiveAffectedAssetWriteDTO):
+    name: str
+    path: str
+
+
+class CorrectiveTargetDTO(BaseModel):
+    id: str
+    name: str
+    subsystem: str
+    kind: str
+    member_count: int = 1
+    members: list["CorrectiveTargetMemberDTO"] = Field(default_factory=list)
+
+
+class CorrectiveTargetMemberDTO(BaseModel):
+    id: str
+    name: str
+
+
 class CreateCorrectiveEventRequest(BaseModel):
     sap_event_name: str
     sap_notification: str
     business_anchor_asset_id: str | None = None
     affected_asset_id: str | None = None
-    affected_asset_path: str
+    affected_asset_path: str = ""
+    affected_assets: list[CorrectiveAffectedAssetWriteDTO] = Field(default_factory=list)
+    corrective_equipment_group_id: str | None = None
     subsystem: str
     severity: Severity
+    is_critical: bool = False
     notice_created_at: str
     response_at: str
     physical_location: str
@@ -184,6 +212,7 @@ class MaintenanceActivityDTO(BaseModel):
     status: MaintenanceStatus
     title: str
     internal_code: str
+    sap_order: str | None = None
     project: str | None = None
     stage: str | None = None
     system: str | None = None
@@ -206,6 +235,12 @@ class MaintenanceActivityDetailDTO(MaintenanceActivityDTO):
     reports: list[MaintenanceReportVersionDTO] = Field(default_factory=list)
     preventive_report: PreventiveReportDTO | None = None
     corrective_report: CorrectiveReportDTO | None = None
+    sap_event_name: str | None = None
+    sap_notification: str | None = None
+    notice_created_at: datetime | None = None
+    response_at: datetime | None = None
+    is_critical: bool = False
+    affected_assets: list[CorrectiveAffectedAssetDTO] = Field(default_factory=list)
 
 
 class MaintenanceDashboardDTO(BaseModel):
@@ -272,13 +307,19 @@ class PreventiveStepWriteDTO(BaseModel):
     tests: list[PreventiveTestWriteDTO] = Field(default_factory=list)
 
 
+class ReportToolUsageWriteDTO(BaseModel):
+    tool_id: str
+
+
 class PreventiveReportWriteDTO(BaseModel):
+    sap_order: str | None = None
     activity_ended_at: datetime | None = None
     final_result: str | None = None
     additional_comments: str | None = None
     steps: list[PreventiveStepWriteDTO] = Field(default_factory=list)
     participants: list[ReportParticipantWriteDTO] = Field(default_factory=list)
     evidence: list[ReportEvidenceWriteDTO] = Field(default_factory=list)
+    tools: list[ReportToolUsageWriteDTO] = Field(default_factory=list)
 
 
 class CalibrationReceiverWriteDTO(BaseModel):
@@ -455,6 +496,15 @@ class ReportEditorAssetDTO(BaseModel):
     status: str
 
 
+class ReportEditorToolDTO(BaseModel):
+    id: str
+    name: str
+    serial_number: str
+    availability_status: str
+    certification_number: str | None = None
+    certification_valid_until: date | None = None
+
+
 class PreventiveTemplateTestDTO(BaseModel):
     id: str
     name: str
@@ -511,6 +561,10 @@ class ReportEditorDTO(BaseModel):
     equipment_assets: list[ReportEditorAssetDTO] = Field(default_factory=list)
     stock_assets: list[ReportEditorAssetDTO] = Field(default_factory=list)
     inventory_locations: list[str] = Field(default_factory=list)
+    sap_order: str | None = None
+    sap_order_editable: bool = False
+    available_tools: list[ReportEditorToolDTO] = Field(default_factory=list)
+    required_tool_names: list[str] = Field(default_factory=list)
     participants: list[ReportParticipantDTO] = Field(default_factory=list)
     evidence: list[ReportEvidenceDTO] = Field(default_factory=list)
     comments: list[MaintenanceCommentDTO] = Field(default_factory=list)

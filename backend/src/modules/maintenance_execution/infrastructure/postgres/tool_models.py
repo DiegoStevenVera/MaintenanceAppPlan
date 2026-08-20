@@ -100,3 +100,7 @@ class ReportToolUsageRecord(OperationalRecordMixin, Base):
         ForeignKey("tool_certifications.id"),
     )
     used_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    tool_name_snapshot: Mapped[str | None] = mapped_column(String(200))
+    tool_serial_snapshot: Mapped[str | None] = mapped_column(String(120))
+    certification_number_snapshot: Mapped[str | None] = mapped_column(String(160))
+    certification_valid_until_snapshot: Mapped[date | None] = mapped_column(Date)

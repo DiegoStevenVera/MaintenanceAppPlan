@@ -28,6 +28,7 @@ from modules.maintenance_execution.infrastructure.pdf_service import (
 from modules.maintenance_execution.infrastructure.seed_repository import maintenance_repository
 from modules.maintenance_execution.interfaces.schemas import (
     CorrectiveEventDTO,
+    CorrectiveTargetDTO,
     CorrectiveCreationContextDTO,
     CreateCorrectiveEventRequest,
     MaintenanceActivityDetailDTO,
@@ -542,6 +543,16 @@ async def get_corrective_creation_context(
             detail="Corrective creation context not found",
         )
     return context
+
+
+@router.get("/corrective-targets", response_model=list[CorrectiveTargetDTO])
+async def list_corrective_targets(
+    subsystem: str | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> list[CorrectiveTargetDTO]:
+    if not uses_postgres():
+        return []
+    return await PostgresMaintenanceRepository(session).list_corrective_targets(subsystem)
 
 
 @router.get("/corrective-events/{event_id}", response_model=CorrectiveEventDTO)

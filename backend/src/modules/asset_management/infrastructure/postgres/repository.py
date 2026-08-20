@@ -1,4 +1,6 @@
-from sqlalchemy import Select, func, or_, select
+from uuid import uuid4
+
+from sqlalchemy import Select, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from modules.asset_management.infrastructure.postgres.catalog_models import ManufacturerRecord
@@ -12,6 +14,7 @@ from modules.asset_management.infrastructure.postgres.models import (
     AssetRecord,
 )
 from modules.asset_management.interfaces.schemas import (
+    AssetComponentOperationDTO,
     AssetDTO,
     AssetHistoryEntryDTO,
     AssetTreeNodeDTO,
@@ -211,6 +214,211 @@ class PostgresAssetRepository:
             )
             for depth, record, slot_path, manufacturer in rows
         ]
+
+    async def apply_component_changes(
+        self,
+        root_asset_id: str,
+        operations: list[AssetComponentOperationDTO],
+    ) -> list[AssetTreeNodeDTO]:
+        """Apply a staged component administration batch atomically.
+
+        The root equipment itself cannot be edited here. Existing components must
+        belong to its current tree; a move may target another business-anchor
+        equipment, which is the explicit "move to another equipment" operation.
+        """
+        root = await self._session.get(AssetRecord, root_asset_id)
+        if root is None or not root.is_business_anchor:
+            raise ValueError("El equipo principal no existe o no es administrable.")
+
+        for operation in operations:
+            if operation.action == "CREATE":
+                await self._create_component(root, operation)
+            else:
+                if not operation.component_id:
+                    raise ValueError("La operación requiere el componente a modificar.")
+                component = await self._session.get(AssetRecord, operation.component_id)
+                if component is None:
+                    raise ValueError("El componente seleccionado ya no existe.")
+                if not await self._is_descendant(root_asset_id, component.id):
+                    raise ValueError("El componente ya no pertenece a este equipo.")
+                if operation.action == "UPDATE":
+                    self._update_component(component, operation)
+                elif operation.action == "MOVE":
+                    await self._move_component(component, operation)
+                elif operation.action == "DELETE":
+                    await self._delete_component(component.id)
+
+        await self._session.flush()
+        await self._rebuild_asset_closure()
+        return await self.get_tree(root_asset_id)
+
+    async def _create_component(
+        self,
+        root: AssetRecord,
+        operation: AssetComponentOperationDTO,
+    ) -> None:
+        if not operation.name or not operation.name.strip():
+            raise ValueError("El nombre del componente es obligatorio.")
+        parent = root
+        if operation.parent_id:
+            parent = await self._session.get(AssetRecord, operation.parent_id)
+            if parent is None or not await self._is_descendant(root.id, parent.id, include_root=True):
+                raise ValueError("El componente padre debe pertenecer al equipo actual.")
+        component_id = str(uuid4())
+        serial = self._empty_to_none(operation.serial_number)
+        self._session.add(
+            AssetRecord(
+                id=component_id,
+                name=operation.name.strip(),
+                category=self._value_or_default(operation.category, "Componente"),
+                asset_type=self._value_or_default(operation.asset_type, "Componente no tipificado"),
+                subsystem=parent.subsystem,
+                serial_or_code=serial or f"ADM-{component_id[:8].upper()}",
+                part_number=self._empty_to_none(operation.part_number),
+                status=self._value_or_default(operation.status, "OPERATIVO"),
+                physical_location=parent.physical_location,
+                is_business_anchor=False,
+                parent_id=parent.id,
+                children=[],
+                asset_type_id=None,
+                equipment_category_id=parent.equipment_category_id,
+                equipment_kind_id=parent.equipment_kind_id,
+                subsystem_id=parent.subsystem_id,
+                manufacturer_id=None,
+                status_id=None,
+                current_geographic_location_id=parent.current_geographic_location_id,
+                current_inventory_location_id=None,
+                current_slot_location_id=None,
+                internal_code=f"ADM-{component_id[:12].upper()}",
+                serial_number=serial,
+                serial_number_status="KNOWN" if serial else "NOT_CAPTURED",
+                model=self._empty_to_none(operation.model),
+                manufacture_date=None,
+                software_version=None,
+                current_position=self._empty_to_none(operation.current_position),
+                business_label="Componente",
+                registration_method="MANUAL",
+                is_mobile=False,
+            )
+        )
+
+    @staticmethod
+    def _update_component(component: AssetRecord, operation: AssetComponentOperationDTO) -> None:
+        if operation.name is not None:
+            if not operation.name.strip():
+                raise ValueError("El nombre del componente no puede estar vacío.")
+            component.name = operation.name.strip()
+        if operation.category is not None:
+            component.category = operation.category.strip() or component.category
+        if operation.asset_type is not None:
+            component.asset_type = operation.asset_type.strip() or component.asset_type
+        if operation.status is not None:
+            component.status = operation.status.strip() or component.status
+        if operation.serial_number is not None:
+            component.serial_number = PostgresAssetRepository._empty_to_none(operation.serial_number)
+            component.serial_number_status = "KNOWN" if component.serial_number else "NOT_CAPTURED"
+        if operation.part_number is not None:
+            component.part_number = PostgresAssetRepository._empty_to_none(operation.part_number)
+        if operation.model is not None:
+            component.model = PostgresAssetRepository._empty_to_none(operation.model)
+        if operation.current_position is not None:
+            component.current_position = PostgresAssetRepository._empty_to_none(operation.current_position)
+
+    async def _move_component(
+        self,
+        component: AssetRecord,
+        operation: AssetComponentOperationDTO,
+    ) -> None:
+        if not operation.parent_id:
+            raise ValueError("Seleccione el equipo destino para mover el componente.")
+        destination = await self._session.get(AssetRecord, operation.parent_id)
+        if destination is None or not destination.is_business_anchor:
+            raise ValueError("El destino debe ser un equipo principal existente.")
+        if component.id == destination.id or await self._is_descendant(component.id, destination.id):
+            raise ValueError("No se puede mover un componente dentro de sí mismo.")
+        descendant_ids = select(AssetClosureRecord.descendant_asset_id).where(
+            AssetClosureRecord.ancestor_asset_id == component.id
+        )
+        await self._session.execute(
+            update(AssetRecord)
+            .where(AssetRecord.id.in_(descendant_ids))
+            .values(
+                subsystem=destination.subsystem,
+                subsystem_id=destination.subsystem_id,
+                physical_location=destination.physical_location,
+                current_geographic_location_id=destination.current_geographic_location_id,
+            )
+        )
+        component.parent_id = destination.id
+
+    async def _delete_component(self, component_id: str) -> None:
+        has_children = await self._session.scalar(
+            select(func.count())
+            .select_from(AssetRecord)
+            .where(AssetRecord.parent_id == component_id)
+        )
+        if has_children:
+            raise ValueError("No se puede eliminar un componente que contiene otros componentes.")
+        # Historical references are protected by PostgreSQL foreign keys. A delete
+        # therefore succeeds only for an unreferenced leaf component.
+        await self._session.execute(delete(AssetRecord).where(AssetRecord.id == component_id))
+
+    async def _is_descendant(
+        self,
+        ancestor_id: str,
+        descendant_id: str,
+        *,
+        include_root: bool = False,
+    ) -> bool:
+        minimum_depth = 0 if include_root else 1
+        found = await self._session.scalar(
+            select(func.count())
+            .select_from(AssetClosureRecord)
+            .where(
+                AssetClosureRecord.ancestor_asset_id == ancestor_id,
+                AssetClosureRecord.descendant_asset_id == descendant_id,
+                AssetClosureRecord.depth >= minimum_depth,
+            )
+        )
+        return bool(found)
+
+    async def _rebuild_asset_closure(self) -> None:
+        await self._session.execute(delete(AssetClosureRecord))
+        await self._session.execute(
+            text(
+                """
+                WITH RECURSIVE hierarchy AS (
+                    SELECT id AS ancestor_asset_id, id AS descendant_asset_id, 0 AS depth
+                    FROM assets
+                    UNION ALL
+                    SELECT hierarchy.ancestor_asset_id, child.id, hierarchy.depth + 1
+                    FROM hierarchy JOIN assets child ON child.parent_id = hierarchy.descendant_asset_id
+                )
+                INSERT INTO asset_closure (ancestor_asset_id, descendant_asset_id, depth)
+                SELECT ancestor_asset_id, descendant_asset_id, MIN(depth)
+                FROM hierarchy GROUP BY ancestor_asset_id, descendant_asset_id
+                """
+            )
+        )
+        await self._session.execute(
+            text(
+                """
+                UPDATE assets parent SET children = COALESCE(
+                    (SELECT jsonb_agg(child.name ORDER BY child.name)
+                     FROM assets child WHERE child.parent_id = parent.id),
+                    '[]'::jsonb
+                )
+                """
+            )
+        )
+
+    @staticmethod
+    def _empty_to_none(value: str | None) -> str | None:
+        return value.strip() or None if value is not None else None
+
+    @staticmethod
+    def _value_or_default(value: str | None, default: str) -> str:
+        return value.strip() or default if value is not None else default
 
     async def get_history(self, asset_id: str) -> list[AssetHistoryEntryDTO]:
         latest_versions = (

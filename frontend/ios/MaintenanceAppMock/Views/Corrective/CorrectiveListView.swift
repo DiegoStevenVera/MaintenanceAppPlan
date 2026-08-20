@@ -872,25 +872,64 @@ private struct CorrectiveCreationContext: Decodable {
 private struct CorrectiveCreateRequest: Encodable {
     let sapEventName: String
     let sapNotification: String
-    let businessAnchorAssetID: String
-    let affectedAssetID: String
+    let businessAnchorAssetID: String?
+    let affectedAssetID: String?
     let affectedAssetPath: String
+    let affectedAssets: [CorrectiveAffectedAssetWrite]
+    let correctiveEquipmentGroupID: String?
     let subsystem: String
     let severity: String
+    let isCritical: Bool
     let noticeCreatedAt: Date
     let responseAt: Date
     let physicalLocation: String
 
     enum CodingKeys: String, CodingKey {
         case subsystem, severity
+        case isCritical = "is_critical"
         case sapEventName = "sap_event_name"
         case sapNotification = "sap_notification"
         case businessAnchorAssetID = "business_anchor_asset_id"
         case affectedAssetID = "affected_asset_id"
         case affectedAssetPath = "affected_asset_path"
+        case affectedAssets = "affected_assets"
+        case correctiveEquipmentGroupID = "corrective_equipment_group_id"
         case noticeCreatedAt = "notice_created_at"
         case responseAt = "response_at"
         case physicalLocation = "physical_location"
+    }
+}
+
+private struct CorrectiveAffectedAssetWrite: Encodable {
+    let assetID: String
+    let isCritical: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case assetID = "asset_id"
+        case isCritical = "is_critical"
+    }
+}
+
+private struct CorrectiveTargetMember: Decodable, Identifiable {
+    let id: String
+    let name: String
+}
+
+private struct CorrectiveTarget: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let subsystem: String
+    let kind: String
+    let memberCount: Int
+    let members: [CorrectiveTargetMember]
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, subsystem, kind, members
+        case memberCount = "member_count"
+    }
+
+    var roots: [CorrectiveTargetMember] {
+        kind == "GROUP" ? members : [CorrectiveTargetMember(id: id, name: name)]
     }
 }
 
@@ -923,6 +962,14 @@ private struct CorrectiveCreationAPIService {
         )
     }
 
+    func targets(subsystem: String, accessToken: String) async throws -> [CorrectiveTarget] {
+        try await client.get(
+            "api/v1/corrective-targets",
+            bearerToken: accessToken,
+            queryItems: [URLQueryItem(name: "subsystem", value: subsystem)]
+        )
+    }
+
     func create(
         request: CorrectiveCreateRequest,
         accessToken: String
@@ -944,12 +991,16 @@ private struct DatabaseCorrectiveEventCreateView: View {
 
     @State private var selectedSubsystem = "ATS"
     @State private var equipmentSearchText = ""
-    @State private var selectedEquipmentID: String?
-    @State private var selectedAssetID: String?
+    @State private var targets: [CorrectiveTarget] = []
+    @State private var isLoadingTargets = false
+    @State private var selectedTargetID: String?
+    @State private var selectedAssetIDs: Set<String> = []
+    @State private var criticalAssetIDs: Set<String> = []
     @State private var context: CorrectiveCreationContext?
     @State private var sapEventName = ""
     @State private var sapNotification = ""
     @State private var severity: Severity = .medium
+    @State private var isCritical = false
     @State private var noticeCreatedAt = Date()
     @State private var responseAt = Date()
     @State private var isCreating = false
@@ -957,40 +1008,56 @@ private struct DatabaseCorrectiveEventCreateView: View {
 
     private let subsystemOptions = ["ATS", "CBTC", "IXL"]
 
-    private var selectedEquipment: EquipmentDTO? {
-        guard let selectedEquipmentID else { return nil }
-        return assetStore.details[selectedEquipmentID]
-            ?? assetStore.equipments.first { $0.id == selectedEquipmentID }
+    private var filteredTargets: [CorrectiveTarget] {
+        let query = equipmentSearchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return targets }
+        return targets.filter {
+            $0.name.localizedCaseInsensitiveContains(query)
+                || $0.members.contains { $0.name.localizedCaseInsensitiveContains(query) }
+        }
+    }
+
+    private var selectedTarget: CorrectiveTarget? {
+        targets.first { $0.id == selectedTargetID }
     }
 
     private var selectedAssetPath: String {
-        guard let equipment = selectedEquipment,
-              let selectedAssetID else {
-            return "Asset no seleccionado"
-        }
-        guard selectedAssetID != equipment.id else {
-            return equipment.name
-        }
+        let names = selectedAssets.map(\.name).sorted()
+        return names.isEmpty ? "Asset no seleccionado" : names.joined(separator: ", ")
+    }
 
-        let nodes = assetStore.trees[equipment.id] ?? []
-        let byID = Dictionary(uniqueKeysWithValues: nodes.map { ($0.id, $0) })
-        var names: [String] = []
-        var currentID: String? = selectedAssetID
-        var visited: Set<String> = []
-        while let id = currentID,
-              id != equipment.id,
-              !visited.contains(id),
-              let node = byID[id] {
-            names.insert(node.name, at: 0)
-            visited.insert(id)
-            currentID = node.parentID
+    private var selectedAssets: [EquipmentTreeNodeDTO] {
+        let nodes = selectedTarget?.roots.flatMap { root in
+            assetStore.trees[root.id] ?? []
+        } ?? []
+        let selectedNodes = nodes.filter { selectedAssetIDs.contains($0.id) }
+        let roots = selectedTarget?.roots
+            .filter { selectedAssetIDs.contains($0.id) }
+            .map {
+                EquipmentTreeNodeDTO(
+                    id: $0.id,
+                    name: $0.name,
+                    category: "Equipo",
+                    assetType: "Equipo grande",
+                    status: "ACTIVE",
+                    serialNumber: nil,
+                    partNumber: nil,
+                    model: nil,
+                    manufacturer: nil,
+                    parentID: nil,
+                    depth: 0,
+                    slotPath: nil,
+                    position: nil
+                )
+            } ?? []
+        return selectedNodes + roots.filter { root in
+            !selectedNodes.contains { $0.id == root.id }
         }
-        return ([equipment.name] + names).joined(separator: " > ")
     }
 
     private var canCreate: Bool {
-        selectedEquipmentID != nil
-            && selectedAssetID != nil
+        selectedTarget != nil
+            && !selectedAssetIDs.isEmpty
             && context != nil
             && !sapEventName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !sapNotification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1035,40 +1102,36 @@ private struct DatabaseCorrectiveEventCreateView: View {
         .toolbar {
             Button("Cerrar") { dismiss() }
         }
-        .task(id: "\(selectedSubsystem)|\(equipmentSearchText)") {
-            if !equipmentSearchText.isEmpty {
-                try? await Task.sleep(for: .milliseconds(300))
-            }
-            guard !Task.isCancelled else { return }
-            await assetStore.loadEquipments(
-                query: equipmentSearchText.trimmingCharacters(
-                    in: .whitespacesAndNewlines
-                ),
-                subsystem: selectedSubsystem,
-                session: session
-            )
+        .task(id: selectedSubsystem) {
+            await loadTargets()
         }
-        .task(id: selectedEquipmentID) {
-            guard let selectedEquipmentID else {
+        .task(id: selectedTargetID) {
+            guard let selectedTarget else {
                 context = nil
-                selectedAssetID = nil
+                selectedAssetIDs = []
+                criticalAssetIDs = []
                 return
             }
-            selectedAssetID = selectedEquipmentID
-            async let treeTask: Void = assetStore.loadTree(
-                id: selectedEquipmentID,
-                session: session,
-                force: true
-            )
+            selectedAssetIDs = []
+            criticalAssetIDs = []
+            let roots = selectedTarget.roots
+            async let treeTask: Void = withTaskGroup(of: Void.self) { group in
+                for root in roots {
+                    group.addTask {
+                        await assetStore.loadTree(id: root.id, session: session, force: true)
+                    }
+                }
+            }
             async let contextTask: Void = loadContext(
-                equipmentID: selectedEquipmentID
+                equipmentID: roots.first?.id ?? ""
             )
             _ = await (treeTask, contextTask)
         }
         .onChange(of: selectedSubsystem) { _, _ in
             equipmentSearchText = ""
-            selectedEquipmentID = nil
-            selectedAssetID = nil
+            selectedTargetID = nil
+            selectedAssetIDs = []
+            criticalAssetIDs = []
             context = nil
         }
     }
@@ -1105,39 +1168,43 @@ private struct DatabaseCorrectiveEventCreateView: View {
                 TextField("Buscar equipo grande", text: $equipmentSearchText)
                     .textFieldStyle(.roundedBorder)
 
-                if assetStore.isLoadingList {
+                if isLoadingTargets {
                     ProgressView("Cargando equipos")
                         .frame(maxWidth: .infinity)
-                } else if let error = assetStore.listError {
+                } else if let error = creationError, selectedTargetID == nil {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                } else if assetStore.equipments.isEmpty {
+                } else if filteredTargets.isEmpty {
                     Text("No hay equipos para este filtro.")
                         .foregroundStyle(.secondary)
                 } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: AppSpacing.xs) {
-                            ForEach(assetStore.equipments) { equipment in
+                            ForEach(filteredTargets) { target in
                                 Button {
-                                    selectedEquipmentID = equipment.id
+                                    selectedTargetID = target.id
                                 } label: {
                                     HStack(spacing: AppSpacing.sm) {
                                         Image(
-                                            systemName: selectedEquipmentID == equipment.id
+                                            systemName: selectedTargetID == target.id
                                                 ? "checkmark.circle.fill"
                                                 : "circle"
                                         )
                                         .foregroundStyle(
-                                            selectedEquipmentID == equipment.id
+                                            selectedTargetID == target.id
                                                 ? BrandColor.red
                                                 : .secondary
                                         )
                                         VStack(alignment: .leading, spacing: 2) {
-                                            Text(equipment.name)
+                                            Text(target.name)
                                                 .font(.headline)
                                                 .foregroundStyle(.primary)
-                                            Text(equipment.assetType)
+                                            Text(
+                                                target.kind == "GROUP"
+                                                    ? "Grupo lógico · \(target.memberCount) equipos"
+                                                    : "Equipo grande"
+                                            )
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }
@@ -1152,14 +1219,17 @@ private struct DatabaseCorrectiveEventCreateView: View {
                     .frame(maxHeight: 240)
                 }
 
-                if let equipment = selectedEquipment {
-                    CorrectiveAssetTreePicker(
-                        equipment: equipment,
-                        nodes: assetStore.trees[equipment.id] ?? [],
-                        selectedAssetID: $selectedAssetID
-                    )
+                if let selectedTarget {
+                    ForEach(selectedTarget.roots) { root in
+                        CorrectiveMultiAssetTreePicker(
+                            root: root,
+                            nodes: assetStore.trees[root.id] ?? [],
+                            selectedAssetIDs: $selectedAssetIDs,
+                            criticalAssetIDs: $criticalAssetIDs
+                        )
+                    }
                     DetailTile(
-                        title: "Asset seleccionado",
+                        title: "Assets seleccionados",
                         value: selectedAssetPath
                     )
                 }
@@ -1188,7 +1258,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
                         title: "Ubicacion fisica",
                         value: context.physicalLocation
                     )
-                } else if selectedEquipmentID != nil {
+                } else if selectedTarget != nil {
                     ProgressView("Cargando contexto")
                         .frame(maxWidth: .infinity)
                 } else {
@@ -1214,6 +1284,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                Toggle("Elemento crítico", isOn: $isCritical)
                 DatePicker(
                     "Fecha y hora de creacion de aviso",
                     selection: $noticeCreatedAt,
@@ -1251,10 +1322,31 @@ private struct DatabaseCorrectiveEventCreateView: View {
     }
 
     @MainActor
+    private func loadTargets() async {
+        guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") else {
+            creationError = "No se encontro la URL de la API."
+            return
+        }
+        isLoadingTargets = true
+        creationError = nil
+        defer { isLoadingTargets = false }
+        do {
+            targets = try await session.withValidAccessToken { token in
+                try await CorrectiveCreationAPIService(baseURLString: baseURL).targets(
+                    subsystem: selectedSubsystem,
+                    accessToken: token
+                )
+            }
+        } catch {
+            targets = []
+            creationError = error.localizedDescription
+        }
+    }
+
+    @MainActor
     private func createCorrective() async {
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL"),
-              let selectedEquipmentID,
-              let selectedAssetID,
+              let selectedTarget,
               let context else {
             return
         }
@@ -1276,11 +1368,21 @@ private struct DatabaseCorrectiveEventCreateView: View {
                         sapNotification: sapNotification.trimmingCharacters(
                             in: .whitespacesAndNewlines
                         ),
-                        businessAnchorAssetID: selectedEquipmentID,
-                        affectedAssetID: selectedAssetID,
+                        businessAnchorAssetID: selectedTarget.roots.first?.id,
+                        affectedAssetID: selectedAssetIDs.first,
                         affectedAssetPath: selectedAssetPath,
+                        affectedAssets: selectedAssetIDs.sorted().map {
+                            CorrectiveAffectedAssetWrite(
+                                assetID: $0,
+                                isCritical: criticalAssetIDs.contains($0)
+                            )
+                        },
+                        correctiveEquipmentGroupID: (
+                            selectedTarget.kind == "GROUP" ? selectedTarget.id : nil
+                        ),
                         subsystem: context.subsystem,
                         severity: severity.rawValue.uppercased(),
+                        isCritical: isCritical,
                         noticeCreatedAt: noticeCreatedAt,
                         responseAt: responseTime,
                         physicalLocation: context.physicalLocation
@@ -1337,6 +1439,155 @@ private struct CorrectiveAssetTreeNode: Identifiable {
         }
 
         return build(parentID: equipmentID, visited: [equipmentID], depth: 0)
+    }
+}
+
+private struct CorrectiveMultiAssetTreePicker: View {
+    let root: CorrectiveTargetMember
+    let nodes: [EquipmentTreeNodeDTO]
+    @Binding var selectedAssetIDs: Set<String>
+    @Binding var criticalAssetIDs: Set<String>
+    @State private var expandedAssetIDs: Set<String> = []
+
+    private var tree: [CorrectiveAssetTreeNode] {
+        CorrectiveAssetTreeNode.roots(nodes: nodes, equipmentID: root.id)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text(root.name)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.secondary)
+            multiSelectionRow(
+                id: root.id,
+                name: root.name,
+                type: "Equipo grande"
+            )
+            LazyVStack(alignment: .leading, spacing: AppSpacing.xs) {
+                ForEach(tree) { branch in
+                    CorrectiveMultiAssetTreeBranchView(
+                        branch: branch,
+                        selectedAssetIDs: $selectedAssetIDs,
+                        criticalAssetIDs: $criticalAssetIDs,
+                        expandedAssetIDs: $expandedAssetIDs
+                    )
+                    .padding(.leading, AppSpacing.md)
+                }
+            }
+        }
+        .padding(AppSpacing.md)
+        .background(
+            .background.opacity(0.72),
+            in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+        )
+    }
+
+    private func multiSelectionRow(id: String, name: String, type: String) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Button { toggleAsset(id) } label: {
+                Image(systemName: selectedAssetIDs.contains(id) ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selectedAssetIDs.contains(id) ? BrandColor.red : .secondary)
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name).font(.headline)
+                Text(type).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private func toggleAsset(_ id: String) {
+        if selectedAssetIDs.contains(id) {
+            selectedAssetIDs.remove(id)
+            criticalAssetIDs.remove(id)
+        } else {
+            selectedAssetIDs.insert(id)
+        }
+    }
+
+    private func criticalBinding(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { criticalAssetIDs.contains(id) },
+            set: { isCritical in
+                if isCritical { criticalAssetIDs.insert(id) }
+                else { criticalAssetIDs.remove(id) }
+            }
+        )
+    }
+}
+
+private struct CorrectiveMultiAssetTreeBranchView: View {
+    let branch: CorrectiveAssetTreeNode
+    @Binding var selectedAssetIDs: Set<String>
+    @Binding var criticalAssetIDs: Set<String>
+    @Binding var expandedAssetIDs: Set<String>
+
+    var body: some View {
+        if branch.children.isEmpty {
+            row
+        } else {
+            DisclosureGroup(isExpanded: expansionBinding) {
+                LazyVStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    ForEach(branch.children) { child in
+                        CorrectiveMultiAssetTreeBranchView(
+                            branch: child,
+                            selectedAssetIDs: $selectedAssetIDs,
+                            criticalAssetIDs: $criticalAssetIDs,
+                            expandedAssetIDs: $expandedAssetIDs
+                        )
+                        .padding(.leading, AppSpacing.md)
+                    }
+                }
+            } label: { row }
+            .tint(BrandColor.red)
+        }
+    }
+
+    private var expansionBinding: Binding<Bool> {
+        Binding(
+            get: { expandedAssetIDs.contains(branch.id) },
+            set: { isExpanded in
+                if isExpanded { expandedAssetIDs.insert(branch.id) }
+                else { expandedAssetIDs.remove(branch.id) }
+            }
+        )
+    }
+
+    private var row: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Button { toggleAsset(branch.id) } label: {
+                Image(systemName: selectedAssetIDs.contains(branch.id) ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(selectedAssetIDs.contains(branch.id) ? BrandColor.red : .secondary)
+            }
+            .buttonStyle(.plain)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(branch.asset.name).font(.headline)
+                Text(branch.asset.assetType).font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private func toggleAsset(_ id: String) {
+        if selectedAssetIDs.contains(id) {
+            selectedAssetIDs.remove(id)
+            criticalAssetIDs.remove(id)
+        } else {
+            selectedAssetIDs.insert(id)
+        }
+    }
+
+    private func criticalBinding(_ id: String) -> Binding<Bool> {
+        Binding(
+            get: { criticalAssetIDs.contains(id) },
+            set: { isCritical in
+                if isCritical { criticalAssetIDs.insert(id) }
+                else { criticalAssetIDs.remove(id) }
+            }
+        )
     }
 }
 

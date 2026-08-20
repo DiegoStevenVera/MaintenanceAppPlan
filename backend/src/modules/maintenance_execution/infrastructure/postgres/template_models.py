@@ -182,6 +182,11 @@ class MaintenanceTemplateScopeRecord(OperationalRecordMixin, Base):
         ForeignKey("assets.id"),
         index=True,
     )
+    asset_group_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("asset_groups.id"),
+        index=True,
+    )
     equipment_category_id: Mapped[UUID | None] = mapped_column(
         Uuid,
         ForeignKey("equipment_categories.id"),

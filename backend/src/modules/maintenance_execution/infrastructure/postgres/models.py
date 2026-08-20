@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,3 +84,28 @@ class CorrectiveEventRecord(Base):
     )
     failure_description: Mapped[str | None] = mapped_column(Text)
     operational_impact: Mapped[str | None] = mapped_column(Text)
+    corrective_equipment_group_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("corrective_equipment_groups.id"),
+        index=True,
+    )
+    is_critical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
+class CorrectiveEquipmentGroupRecord(Base):
+    __tablename__ = "corrective_equipment_groups"
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    code: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(240), nullable=False)
+    subsystem_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("subsystems.id"), nullable=False, index=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+
+
+class CorrectiveEquipmentGroupMemberRecord(Base):
+    __tablename__ = "corrective_equipment_group_members"
+    __table_args__ = (UniqueConstraint("group_id", "asset_id", name="uq_corrective_group_member"),)
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True)
+    group_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("corrective_equipment_groups.id", ondelete="CASCADE"), nullable=False)
+    asset_id: Mapped[str] = mapped_column(String(80), ForeignKey("assets.id"), nullable=False, index=True)

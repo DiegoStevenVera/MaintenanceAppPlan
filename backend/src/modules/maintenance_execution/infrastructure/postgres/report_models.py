@@ -101,6 +101,27 @@ class MaintenanceActivityAssetRecord(OperationalRecordMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text)
 
 
+class CorrectiveEventAffectedAssetRecord(OperationalRecordMixin, Base):
+    __tablename__ = "corrective_event_affected_assets"
+    __table_args__ = (
+        UniqueConstraint(
+            "corrective_event_id",
+            "asset_id",
+            name="uq_corrective_event_affected_asset",
+        ),
+    )
+
+    corrective_event_id: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("corrective_events.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    asset_id: Mapped[str] = mapped_column(String(80), ForeignKey("assets.id"), nullable=False, index=True)
+    path_snapshot: Mapped[str] = mapped_column(Text, nullable=False)
+    is_critical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
+
 class MaintenanceActivityAssignmentRecord(OperationalRecordMixin, Base):
     __tablename__ = "maintenance_activity_assignments"
     __table_args__ = (

@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import DateTime, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +16,8 @@ from modules.maintenance_execution.application.lifecycle import (
     resolve_lifecycle_transition,
 )
 from modules.maintenance_execution.infrastructure.postgres.models import (
+    CorrectiveEquipmentGroupMemberRecord,
+    CorrectiveEquipmentGroupRecord,
     CorrectiveEventRecord,
     PreventiveScheduleRecord,
 )
@@ -25,6 +27,7 @@ from modules.maintenance_execution.infrastructure.postgres.report_models import 
     CorrectiveActivityRecord,
     CorrectiveReportBlockRecord,
     CorrectiveReportDetailRecord,
+    CorrectiveEventAffectedAssetRecord,
     MaintenanceActivityAssetRecord,
     MaintenanceActivityRecord,
     MaintenanceReopenRecord,
@@ -42,7 +45,11 @@ from modules.maintenance_execution.interfaces.schemas import (
     CalibrationReceiverDTO,
     CalibrationReportDTO,
     CorrectiveEventDTO,
+    CorrectiveAffectedAssetWriteDTO,
+    CorrectiveTargetDTO,
+    CorrectiveTargetMemberDTO,
     CorrectiveCreationContextDTO,
+    CorrectiveAffectedAssetDTO,
     CorrectiveActivityDTO,
     ComponentReplacementDTO,
     CorrectiveReportDTO,
@@ -215,6 +222,7 @@ class PostgresMaintenanceRepository:
             status=MaintenanceStatus(activity.status),
             title=activity.title,
             internal_code=activity.internal_code,
+            sap_order=activity.sap_order,
             project=project_name,
             stage=stage_name,
             system=system_name,
@@ -551,6 +559,31 @@ class PostgresMaintenanceRepository:
             **base.model_dump(),
             reports=reports,
         )
+        if base.event_id:
+            event = await self._session.get(CorrectiveEventRecord, base.event_id)
+            if event is not None:
+                detail.sap_event_name = event.name
+                detail.sap_notification = event.sap_code
+                detail.notice_created_at = self._parse_optional_datetime(event.notice_created_at)
+                detail.response_at = self._parse_optional_datetime(event.response_at)
+                detail.is_critical = event.is_critical
+                affected = (
+                    await self._session.execute(
+                        select(CorrectiveEventAffectedAssetRecord, AssetRecord.name)
+                        .join(AssetRecord, AssetRecord.id == CorrectiveEventAffectedAssetRecord.asset_id)
+                        .where(CorrectiveEventAffectedAssetRecord.corrective_event_id == event.id)
+                        .order_by(AssetRecord.name)
+                    )
+                ).all()
+                detail.affected_assets = [
+                    CorrectiveAffectedAssetDTO(
+                        asset_id=row.asset_id,
+                        is_critical=row.is_critical,
+                        name=name,
+                        path=row.path_snapshot,
+                    )
+                    for row, name in affected
+                ]
         main_reports = [
             report
             for report in reports
@@ -935,34 +968,75 @@ class PostgresMaintenanceRepository:
         *,
         user_id: str,
     ) -> CorrectiveEventDTO:
-        if payload.business_anchor_asset_id is None or payload.affected_asset_id is None:
+        selected = payload.affected_assets or (
+            [
+                CorrectiveAffectedAssetWriteDTO(
+                    asset_id=payload.affected_asset_id,
+                    is_critical=False,
+                )
+            ]
+            if payload.affected_asset_id
+            else []
+        )
+        if not selected:
             raise ValueError(
-                "El equipo grande y el asset afectado son obligatorios."
+                "Selecciona al menos un activo afectado."
             )
 
-        context = await self._corrective_creation_records(
-            payload.business_anchor_asset_id
-        )
+        group = None
+        group_member_ids: set[str] = set()
+        if payload.corrective_equipment_group_id:
+            try:
+                group = await self._session.get(
+                    CorrectiveEquipmentGroupRecord,
+                    UUID(payload.corrective_equipment_group_id),
+                )
+            except ValueError as error:
+                raise ValueError("El grupo correctivo no es válido.") from error
+            if group is None or not group.is_active:
+                raise ValueError("El grupo correctivo no está disponible.")
+            group_member_ids = set(
+                (
+                    await self._session.scalars(
+                        select(CorrectiveEquipmentGroupMemberRecord.asset_id).where(
+                            CorrectiveEquipmentGroupMemberRecord.group_id == group.id
+                        )
+                    )
+                ).all()
+            )
+            if not group_member_ids:
+                raise ValueError("El grupo correctivo no tiene equipos configurados.")
+        anchor_id = payload.business_anchor_asset_id
+        if group is not None:
+            # A logical group has no physical asset of its own. Use one of its
+            # member anchors to resolve the common organizational context.
+            anchor_id = next(iter(group_member_ids))
+        context = await self._corrective_creation_records(anchor_id or "")
         if context is None:
             raise ValueError("El equipo grande seleccionado no es válido.")
         anchor, subsystem, system, project, site, stage = context
 
-        affected_asset = await self._session.get(
-            AssetRecord,
-            payload.affected_asset_id,
-        )
-        if affected_asset is None:
-            raise ValueError("El asset afectado seleccionado no existe.")
-        belongs_to_anchor = affected_asset.id == anchor.id or await self._session.scalar(
-            select(AssetClosureRecord.ancestor_asset_id).where(
-                AssetClosureRecord.ancestor_asset_id == anchor.id,
-                AssetClosureRecord.descendant_asset_id == affected_asset.id,
+        allowed_ids = {anchor.id}
+        allowed_ids.update((await self._session.scalars(
+            select(AssetClosureRecord.descendant_asset_id).where(
+                AssetClosureRecord.ancestor_asset_id == anchor.id
             )
-        )
-        if not belongs_to_anchor:
-            raise ValueError(
-                "El asset afectado no pertenece al equipo grande seleccionado."
-            )
+        )).all())
+        if group is not None:
+            allowed_ids = set()
+            for member_id in group_member_ids:
+                allowed_ids.add(member_id)
+                allowed_ids.update((await self._session.scalars(
+                    select(AssetClosureRecord.descendant_asset_id).where(
+                        AssetClosureRecord.ancestor_asset_id == member_id
+                    )
+                )).all())
+        affected_assets = []
+        for item in selected:
+            affected_asset = await self._session.get(AssetRecord, item.asset_id)
+            if affected_asset is None or affected_asset.id not in allowed_ids:
+                raise ValueError("Uno de los activos afectados no pertenece al objetivo seleccionado.")
+            affected_assets.append((affected_asset, item.is_critical))
 
         now = datetime.now(timezone.utc)
         identifier = uuid4().hex[:10].upper()
@@ -988,10 +1062,11 @@ class PostgresMaintenanceRepository:
             code=event_code,
             sap_code=payload.sap_notification,
             name=payload.sap_event_name,
-            affected_asset_id=affected_asset.id,
-            affected_asset_path=payload.affected_asset_path,
+            affected_asset_id=affected_assets[0][0].id,
+            affected_asset_path=payload.affected_asset_path or affected_assets[0][0].name,
             subsystem=subsystem.name,
             severity=payload.severity.value,
+            is_critical=payload.is_critical,
             status=MaintenanceStatus.SCHEDULED.value,
             notice_created_at=payload.notice_created_at,
             response_at=payload.response_at,
@@ -1006,6 +1081,7 @@ class PostgresMaintenanceRepository:
             ],
             maintenance_activity_id=activity.id,
             primary_asset_id=anchor.id,
+            corrective_equipment_group_id=group.id if group else None,
             subsystem_id=subsystem.id,
             created_by_user_id=user_id,
         )
@@ -1018,13 +1094,23 @@ class PostgresMaintenanceRepository:
                 include_descendants=True,
             )
         )
-        if affected_asset.id != anchor.id:
+        for affected_asset, is_critical in affected_assets:
             self._session.add(
                 MaintenanceActivityAssetRecord(
                     maintenance_activity_id=activity.id,
                     asset_id=affected_asset.id,
                     role="AFFECTED",
                     include_descendants=False,
+                )
+            )
+            self._session.add(
+                CorrectiveEventAffectedAssetRecord(
+                    corrective_event_id=event_id,
+                    asset_id=affected_asset.id,
+                    path_snapshot=affected_asset.name,
+                    # Criticality belongs to the corrective event/equipment,
+                    # not to an individual component selected underneath it.
+                    is_critical=False,
                 )
             )
         self._session.add(
@@ -1040,6 +1126,67 @@ class PostgresMaintenanceRepository:
         await self._session.flush()
         await self._session.refresh(record)
         return self._to_corrective_dto(record)
+
+    async def list_corrective_targets(
+        self,
+        subsystem: str | None,
+    ) -> list[CorrectiveTargetDTO]:
+        group_rows = (
+            await self._session.execute(
+                select(CorrectiveEquipmentGroupRecord, SubsystemRecord.name, func.count(CorrectiveEquipmentGroupMemberRecord.id))
+                .join(SubsystemRecord, SubsystemRecord.id == CorrectiveEquipmentGroupRecord.subsystem_id)
+                .outerjoin(CorrectiveEquipmentGroupMemberRecord, CorrectiveEquipmentGroupMemberRecord.group_id == CorrectiveEquipmentGroupRecord.id)
+                .where(CorrectiveEquipmentGroupRecord.is_active.is_(True))
+                .group_by(CorrectiveEquipmentGroupRecord.id, SubsystemRecord.name)
+            )
+        ).all()
+        grouped_asset_ids = set((await self._session.scalars(select(CorrectiveEquipmentGroupMemberRecord.asset_id))).all())
+        assets_query = select(AssetRecord).where(AssetRecord.is_business_anchor.is_(True))
+        if subsystem:
+            assets_query = assets_query.where(func.lower(AssetRecord.subsystem) == subsystem.casefold())
+        assets = (await self._session.scalars(assets_query.order_by(AssetRecord.name))).all()
+        group_members: dict[str, list[CorrectiveTargetMemberDTO]] = {}
+        member_rows = (
+            await self._session.execute(
+                select(
+                    CorrectiveEquipmentGroupMemberRecord.group_id,
+                    AssetRecord.id,
+                    AssetRecord.name,
+                )
+                .join(
+                    AssetRecord,
+                    AssetRecord.id == CorrectiveEquipmentGroupMemberRecord.asset_id,
+                )
+                .order_by(AssetRecord.name)
+            )
+        ).all()
+        for group_id, asset_id, asset_name in member_rows:
+            group_members.setdefault(str(group_id), []).append(
+                CorrectiveTargetMemberDTO(id=asset_id, name=asset_name)
+            )
+
+        targets = [
+            CorrectiveTargetDTO(
+                id=asset.id,
+                name=asset.name,
+                subsystem=asset.subsystem,
+                kind="ASSET",
+            )
+            for asset in assets if asset.id not in grouped_asset_ids
+        ]
+        targets.extend(
+            CorrectiveTargetDTO(
+                id=str(group.id),
+                name=group.name,
+                subsystem=name,
+                kind="GROUP",
+                member_count=count,
+                members=group_members.get(str(group.id), []),
+            )
+            for group, name, count in group_rows
+            if count and (not subsystem or name.casefold() == subsystem.casefold())
+        )
+        return sorted(targets, key=lambda target: target.name)
 
     async def get_corrective_creation_context(
         self,
@@ -1066,7 +1213,15 @@ class PostgresMaintenanceRepository:
         business_anchor_asset_id: str,
     ):
         anchor = await self._session.get(AssetRecord, business_anchor_asset_id)
-        if anchor is None or not anchor.is_business_anchor:
+        # Logical corrective selectors such as SOFTWARE ATS PCON resolve to an
+        # individual physical asset. Walk upward to its real equipment anchor.
+        visited: set[str] = set()
+        while anchor is not None and not anchor.is_business_anchor:
+            if anchor.id in visited or anchor.parent_id is None:
+                return None
+            visited.add(anchor.id)
+            anchor = await self._session.get(AssetRecord, anchor.parent_id)
+        if anchor is None:
             return None
         subsystem = (
             await self._session.get(SubsystemRecord, anchor.subsystem_id)
@@ -1128,6 +1283,7 @@ class PostgresMaintenanceRepository:
             affected_asset_path=record.affected_asset_path,
             subsystem=record.subsystem,
             severity=Severity(record.severity),
+            is_critical=record.is_critical,
             status=MaintenanceStatus(record.status),
             notice_created_at=record.notice_created_at,
             response_at=record.response_at,

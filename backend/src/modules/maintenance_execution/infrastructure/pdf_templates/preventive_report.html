@@ -44,10 +44,10 @@
     .signature-cell img { display: block; width: 100%; height: 24px; object-fit: contain; }
     .muted { color: #555; }
     .photo-page { page-break-before: always; }
-    .photo-title { margin: 8mm 0 7mm 1mm; font-size: 11px; font-weight: 400; }
-    .photo-grid { border-collapse: separate; border-spacing: 4mm 6mm; }
-    .photo-grid td { width: 50%; height: 91mm; border: 0; padding: 0; vertical-align: top; }
-    .photo-grid img { display: block; width: 100%; height: 80mm; object-fit: contain; }
+    .photo-title { margin: 4mm 0 3mm 1mm; font-size: 11px; font-weight: 400; }
+    .photo-grid { border-collapse: separate; border-spacing: 0 2mm; }
+    .photo-grid td { width: 100%; height: 115mm; border: 0; padding: 0; vertical-align: top; }
+    .photo-grid img { display: block; width: 100%; height: 106mm; object-fit: contain; }
     .photo-caption { margin-top: 3px; font-size: 7px; }
   </style>
 </head>
@@ -118,7 +118,7 @@
           {% endif %}
         </td>
         <td class="label" colspan="2">Orden SAP:</td>
-        <td class="center" colspan="2">{{ activity.internal_code or "-" }}</td>
+        <td class="center" colspan="2">{{ activity.sap_order or "-" }}</td>
       </tr>
       <tr>
         <td class="section-label" colspan="12">Tipo de Actividad y subsistema:</td>
@@ -232,11 +232,11 @@
     </tbody>
   </table>
 
-  {% for photo_page in photos|batch(4) %}
+  {% for photo_page in photos|batch(2) %}
   <section class="photo-page">
     <h2 class="photo-title">Registro Fotográfico {{ loop.index }}</h2>
     <table class="photo-grid">
-      {% for photo_row in photo_page|batch(2) %}
+      {% for photo_row in photo_page|batch(1) %}
       <tr>
         {% for photo in photo_row %}
         <td>
@@ -246,7 +246,6 @@
           {% endif %}
         </td>
         {% endfor %}
-        {% if photo_row|length == 1 %}<td></td>{% endif %}
       </tr>
       {% endfor %}
     </table>

@@ -227,7 +227,38 @@ struct CorrectiveDetailView: View {
                 DetailTile(title: "Etapa", value: detail.stage.orFallback("No registrada"))
                 DetailTile(title: "Sistema", value: detail.system.orFallback("No registrado"))
                 DetailTile(title: "Subsistema", value: detail.subsystem)
-                DetailTile(title: "Equipo / asset", value: detail.assets.map(\.name).joined(separator: ", ").orFallback("No registrado"))
+                DetailTile(
+                    title: "Nombre del evento SAP",
+                    value: detail.sapEventName.orFallback("No registrado")
+                )
+                DetailTile(
+                    title: "Notificación SAP",
+                    value: detail.sapNotification.orFallback("No registrada")
+                )
+                if let noticeCreatedAt = detail.noticeCreatedAt {
+                    DetailTile(
+                        title: "Fecha y hora de creación de aviso",
+                        value: Self.dateFormatter.string(from: noticeCreatedAt)
+                    )
+                }
+                if let responseAt = detail.responseAt {
+                    DetailTile(
+                        title: "Fecha y hora de respuesta",
+                        value: Self.dateFormatter.string(from: responseAt)
+                    )
+                }
+                DetailTile(
+                    title: "Equipo / asset",
+                    value: detail.affectedAssets.isEmpty
+                        ? detail.assets.map(\.name).joined(separator: ", ").orFallback("No registrado")
+                        : detail.affectedAssets.map(\.path).joined(separator: "\n")
+                )
+                if detail.isCritical {
+                    DetailTile(
+                        title: "Elemento crítico",
+                        value: "Sí"
+                    )
+                }
                 DetailTile(title: "Ubicacion fisica", value: detail.locationPath.orFallback("No registrada"))
                 if let start = detail.actualStartAt {
                     DetailTile(title: "Inicio real", value: Self.dateFormatter.string(from: start))

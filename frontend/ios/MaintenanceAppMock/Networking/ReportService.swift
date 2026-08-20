@@ -99,18 +99,49 @@ struct APIPreventiveStepWrite: Codable, Equatable, Identifiable {
 }
 
 struct APIPreventiveReportWrite: Codable, Equatable {
+    var sapOrder: String?
     var activityEndedAt: Date?
     var finalResult: String?
     var additionalComments: String?
     var steps: [APIPreventiveStepWrite]
     var participants: [APIReportParticipantWrite]
     var evidence: [APIReportEvidenceWrite]
+    var tools: [APIReportToolUsageWrite]
 
     enum CodingKeys: String, CodingKey {
-        case steps, participants, evidence
+        case steps, participants, evidence, tools
+        case sapOrder = "sap_order"
         case activityEndedAt = "activity_ended_at"
         case finalResult = "final_result"
         case additionalComments = "additional_comments"
+    }
+}
+
+struct APIReportToolUsageWrite: Codable, Equatable, Identifiable {
+    var id: String { toolID }
+    let toolID: String
+
+    enum CodingKeys: String, CodingKey {
+        case toolID = "tool_id"
+    }
+}
+
+struct APIEditorTool: Codable, Identifiable {
+    let id: String
+    let name: String
+    let serialNumber: String
+    let availabilityStatus: String
+    let certificationNumber: String?
+    // The API serializes a database DATE as YYYY-MM-DD, not an ISO-8601 instant.
+    // Keeping it as text avoids making the whole report editor fail to decode.
+    let certificationValidUntil: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case serialNumber = "serial_number"
+        case availabilityStatus = "availability_status"
+        case certificationNumber = "certification_number"
+        case certificationValidUntil = "certification_valid_until"
     }
 }
 
@@ -506,12 +537,20 @@ struct APIReportEditor: Codable {
     let equipmentAssets: [APIEditorAsset]
     let stockAssets: [APIEditorAsset]
     let inventoryLocations: [String]
+    let sapOrder: String?
+    let sapOrderEditable: Bool
+    let availableTools: [APIEditorTool]
+    let requiredToolNames: [String]
     let participants: [APIStoredParticipant]
     let evidence: [APIStoredEvidence]
     let comments: [APIMaintenanceComment]
 
     enum CodingKeys: String, CodingKey {
         case status, participants, evidence, comments
+        case sapOrder = "sap_order"
+        case sapOrderEditable = "sap_order_editable"
+        case availableTools = "available_tools"
+        case requiredToolNames = "required_tool_names"
         case activityID = "activity_id"
         case activityType = "activity_type"
         case actualDate = "actual_date"

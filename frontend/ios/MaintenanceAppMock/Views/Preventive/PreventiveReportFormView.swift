@@ -15,6 +15,9 @@ struct PreventiveReportFormView: View {
     @State private var steps: [APIPreventiveStepWrite] = []
     @State private var participants: [ReportFormParticipant] = []
     @State private var evidence: [APIReportEvidenceWrite] = []
+    @State private var sapOrder = ""
+    @State private var selectedToolIDs: Set<String> = []
+    @State private var showsUnselectedTools = false
     @State private var conclusion = "Equipo operativo"
     @State private var additionalComments = ""
     @State private var endTime = Date()
@@ -51,12 +54,14 @@ struct PreventiveReportFormView: View {
             baseReportVersionID: baseReportVersionID,
             enforceBaseVersion: true,
             preventive: APIPreventiveReportWrite(
+                sapOrder: sapOrder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : sapOrder,
                 activityEndedAt: endTime,
                 finalResult: conclusion,
                 additionalComments: additionalComments,
                 steps: steps,
                 participants: participants.map(\.apiWrite),
-                evidence: evidence
+                evidence: evidence,
+                tools: selectedToolIDs.sorted().map(APIReportToolUsageWrite.init(toolID:))
             ),
             corrective: nil,
             calibration: editor?.calibrationRequired == true
@@ -84,6 +89,7 @@ struct PreventiveReportFormView: View {
                         }
                         header(detail)
                         generalData(detail, editor: editor)
+                        toolsPanel(editor)
                         stepsPanel
                         if editor.calibrationRequired {
                             calibrationPanel
@@ -186,10 +192,22 @@ struct PreventiveReportFormView: View {
     }
 
     private func generalData(_ detail: APIActivityDetail, editor: APIReportEditor) -> some View {
-        GlassPanel {
+        return GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Datos generales", subtitle: "Datos definidos por la programación")
                 DetailTile(title: "Actividad", value: detail.title)
+                if editor.sapOrderEditable {
+                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        Text("Orden SAP")
+                            .font(.caption.weight(.bold))
+                            .textCase(.uppercase)
+                            .foregroundStyle(.secondary)
+                        TextField("Ingresar Orden SAP", text: $sapOrder)
+                            .textFieldStyle(.roundedBorder)
+                    }
+                } else if let sapOrder = editor.sapOrder, !sapOrder.isEmpty {
+                    DetailTile(title: "Orden SAP", value: sapOrder)
+                }
                 DetailTile(title: "Equipos", value: detail.assets.map(\.name).joined(separator: ", "))
                 DetailTile(title: "Sede", value: detail.site ?? "No registrada")
                 DetailTile(title: "Proyecto", value: detail.project ?? "No registrado")
@@ -280,6 +298,86 @@ struct PreventiveReportFormView: View {
                 EditableReportEvidenceGrid(evidence: $evidence)
             }
         }
+    }
+
+    private func toolsPanel(_ editor: APIReportEditor) -> some View {
+        let selectedTools = editor.availableTools.filter { selectedToolIDs.contains($0.id) }
+        let unselectedTools = editor.availableTools.filter { !selectedToolIDs.contains($0.id) }
+
+        return GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Herramientas usadas",
+                    subtitle: "\(selectedTools.count) seleccionada(s)"
+                )
+                if !editor.requiredToolNames.isEmpty {
+                    Text("Requeridas por el mantenimiento: \(editor.requiredToolNames.joined(separator: ", "))")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if editor.availableTools.isEmpty {
+                    Text("No hay herramientas disponibles registradas.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    if selectedTools.isEmpty {
+                        Label(
+                            "Seleccione las herramientas utilizadas",
+                            systemImage: "wrench.and.screwdriver"
+                        )
+                        .foregroundStyle(.secondary)
+                        .padding(.vertical, AppSpacing.sm)
+                    }
+
+                    ForEach(selectedTools) { tool in
+                        toolToggle(tool)
+                    }
+
+                    if !unselectedTools.isEmpty {
+                        DisclosureGroup(isExpanded: $showsUnselectedTools) {
+                            VStack(spacing: AppSpacing.xs) {
+                                ForEach(unselectedTools) { tool in
+                                    toolToggle(tool)
+                                        .padding(.vertical, AppSpacing.xs)
+                                }
+                            }
+                            .padding(.top, AppSpacing.sm)
+                        } label: {
+                            Label(
+                                "No seleccionadas (\(unselectedTools.count))",
+                                systemImage: "wrench.and.screwdriver"
+                            )
+                            .font(.subheadline.weight(.semibold))
+                        }
+                        .padding(AppSpacing.md)
+                        .background(
+                            .background.opacity(0.58),
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func toolToggle(_ tool: APIEditorTool) -> some View {
+        Toggle(isOn: Binding(
+            get: { selectedToolIDs.contains(tool.id) },
+            set: { selected in
+                if selected { selectedToolIDs.insert(tool.id) }
+                else { selectedToolIDs.remove(tool.id) }
+            }
+        )) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(tool.name).font(.headline)
+                Text("Serie: \(tool.serialNumber)")
+                    .font(.caption).foregroundStyle(.secondary)
+                if let certification = tool.certificationNumber {
+                    Text("Certificado: \(certification)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .toggleStyle(.switch)
     }
 
     private var isCameraAvailable: Bool {
@@ -550,6 +648,8 @@ struct PreventiveReportFormView: View {
         additionalComments = localReport?.additionalComments
             ?? loaded.preventiveDraft?.additionalComments
             ?? ""
+        sapOrder = localReport?.sapOrder ?? loaded.preventiveDraft?.sapOrder ?? loaded.sapOrder ?? ""
+        selectedToolIDs = Set((localReport?.tools ?? loaded.preventiveDraft?.tools ?? []).map(\.toolID))
         let calibration = localPayload?.calibration ?? loaded.calibrationDraft
         calibrationFrequency = calibration?.frequency ?? ""
         transmitterJumpers = calibration?.transmitterJumpers ?? ""

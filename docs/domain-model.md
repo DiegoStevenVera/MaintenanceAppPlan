@@ -17,11 +17,11 @@ The following decisions supersede older draft sections in this document where th
 - Each finalized edit creates a new immutable report version. A canonical PDF snapshot is generated from that version through the report-version action.
 - Stop Here is a corrective report/PDF visibility marker, not a SECTIONAL_DRAFT state machine.
 - Corrective reports use dynamic blocks following the real corrective format, not a fixed six-section structure.
-- Asset and Component are unified under one Asset model for v1. Component is an Asset category, not a separate primary entity.
+- Asset and Component are unified under one physical `Asset` model for v1. A component is an Asset category, never a separate primary entity.
+- `AssetGroup` is a separate operational aggregate. It defines the preventive scope over one or more physical assets, including a 1:1 group such as `CIRCUITO DE VIA 1002 -> Circuito de via 1002`.
 - Part number identifies AssetType. Serial number or internal code identifies an Asset instance.
-- Business anchor assets are the main assets used for operational questions and metrics, such as trains, Zone Controllers, Frontam cabinets, CRK cabinets, servers, and functional software groups.
-- In the Spanish app UI, business anchor assets are shown as `Equipos`. This is a business label for large or operationally meaningful assets, not a separate aggregate from Asset.
-- Maintenance reports link to assets through report scope records. A report may involve one or many business anchor assets, and corrective work may additionally reference smaller component assets for replacements.
+- In the Spanish app UI, physical business-anchor assets are shown as `Equipos`. Functional maintenance groups are shown as preventive scopes, never as correctively selectable assets.
+- Preventive reports link to an `AssetGroup`; corrective events link to one physical equipment asset and may reference one or more child assets. `Elemento crítico` is one boolean for the corrective event/equipment, not a property of each selected child.
 - Stage represents rollout/planning scope, not a hard visibility boundary. Assets and locations may be assigned to one or more stages over time.
 - The role formerly named Supervisor is now Boss. Boss is read-only.
 - Coordinator closes/reopens maintenance activities.
@@ -98,7 +98,8 @@ This platform manages the lifecycle of railway maintenance operations, including
 | Term | Domain Definition |
 |------|------------------|
 | Asset | Any equipment, component, or software entity in the maintenance hierarchy. Identified by system-generated UUID. May have serial number (optional). |
-| Equipment / Equipo | Business-facing term for a large or operationally meaningful Asset shown in the UI as `Equipos`. It is typically a top-level or reporting-relevant asset such as a train, ATS server, cabinet, Zone Controller, Frontam, workstation, switch machine, or track circuit. It is represented by Asset with `isBusinessAnchor = true`, not by a separate aggregate. |
+| Equipment / Equipo | Business-facing term for a physical large or operationally meaningful Asset shown in the UI as `Equipos`, such as a train, cabinet, Zone Controller, Frontam, workstation, switch machine, or track circuit. It is represented by Asset with `isBusinessAnchor = true`. |
+| AssetGroup / Grupo de activos | Non-physical operational grouping used as a preventive maintenance scope. It owns one or more physical Asset members. It is uniformly used for both 1:1 scopes and multi-equipment scopes such as ATS PCON. |
 | AssetType | A pure classification of assets defining identity policies (serial number rules, part number rules, support for versioning). Does not define composition rules. |
 | AssetCompositionRule | A contextual policy defining which child AssetTypes a parent AssetType may contain, in what quantity, and in which position. Scoped per Subsystem. |
 | GeographicLocation | A physical facility or geographic position (station, tunnel section, technical room). Applies to fixed and mobile assets. |
@@ -2420,3 +2421,33 @@ The current polymorphic approach is acceptable for v1.
 ---
 
 *End of Domain Model Document (Draft v0.3)*
+
+---
+
+## 22. Objetivos Correctivos y Herramientas de Reporte
+
+Los preventivos pueden tener como alcance un **grupo operativo** de equipos, por
+ejemplo `SOFTWARE ATS PCON`. Ese alcance no representa necesariamente un activo
+físico. Los correctivos, en cambio, siempre registran uno o más activos físicos
+afectados y pueden marcar cada uno como `is_critical`.
+
+| Concepto | Modelo | Regla |
+|---|---|---|
+| Grupo lógico para correctivos | `CorrectiveEquipmentGroup` | Agrupa equipos grandes físicos como objetivo de selección; no reemplaza ni duplica activos. |
+| Miembro de grupo | `CorrectiveEquipmentGroupMember` | Relaciona el grupo con cada equipo grande real y habilita sus descendientes para la selección. |
+| Activo afectado | `CorrectiveEventAffectedAsset` | Un correctivo debe tener uno o más; cada registro conserva ruta y criticidad independientes. |
+| Herramienta usada | `ReportToolUsage` | La versión preventiva guarda herramienta, serie y certificado como snapshot, aunque el catálogo cambie después. |
+| Orden SAP preventiva | `PreventiveSchedule.sap_order` y `MaintenanceActivity.sap_order` | Si existe se muestra bloqueada; si falta, se completa una vez al guardar el reporte y se replica al cronograma. |
+
+Los grupos iniciales son `SOFTWARE ATS PCON` (equipos ATS terminados en `001` a
+`009`) y `SOFTWARE ATS PCOE` (terminados en `101` a `109`). `CRK 1`, `CRK 2`,
+`ERK 1`, `ERK 2` y el simulador siguen siendo equipos individuales.
+
+### 22.1 Grupos uniformes para preventivos
+
+Todo alcance preventivo se representa por `AssetGroup`, sin excepciones. Un
+grupo puede tener un miembro, como `CIRCUITO DE VÍA 1002 -> CBDAC 1002`, o
+varios, como `CRK 1 - 2 -> CRK 1, CRK 2`. `AssetGroup` no es un activo físico;
+los correctivos siempre se registran contra un `Asset` físico y, opcionalmente,
+uno o más de sus componentes afectados. La criticidad (`is_critical`) pertenece
+al evento correctivo completo y es independiente de su severidad.

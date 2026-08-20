@@ -28,6 +28,13 @@ from modules.maintenance_execution.infrastructure.postgres.catalog_models import
 )
 from modules.maintenance_execution.infrastructure.postgres.models import (
     CorrectiveEventRecord,
+    PreventiveScheduleRecord,
+)
+from modules.maintenance_execution.infrastructure.postgres.tool_models import (
+    MaintenanceTemplateToolRecord,
+    ReportToolUsageRecord,
+    ToolCertificationRecord,
+    ToolRecord,
 )
 from modules.maintenance_execution.infrastructure.postgres.report_models import (
     AttachmentRecord,
@@ -69,11 +76,13 @@ from modules.maintenance_execution.interfaces.schemas import (
     ReportEditorAssetDTO,
     ReportEditorActionTypeDTO,
     ReportEditorDTO,
+    ReportEditorToolDTO,
     ReportEditorUserDTO,
     ReportEvidenceDTO,
     ReportEvidenceWriteDTO,
     ReportParticipantDTO,
     ReportParticipantWriteDTO,
+    ReportToolUsageWriteDTO,
     ReportWriteResultDTO,
     GeneratedReportDTO,
     MaintenanceReportVersionDetailDTO,
@@ -308,6 +317,10 @@ class PostgresReportWriter:
                     )
                 ).all()
             ),
+            sap_order=activity.sap_order,
+            sap_order_editable=activity.activity_type == "PREVENTIVE" and not bool(activity.sap_order),
+            available_tools=await self._available_tools(),
+            required_tool_names=await self._required_tool_names(activity),
             participants=participants,
             evidence=evidence,
             comments=comments,
@@ -812,6 +825,7 @@ class PostgresReportWriter:
             PreventiveStepResultRecord,
             ReportParticipantRecord,
             ReportVersionAssetRecord,
+            ReportToolUsageRecord,
         ):
             await self._session.execute(
                 delete(model).where(model.report_version_id == version_id)
@@ -851,6 +865,7 @@ class PostgresReportWriter:
                 "El mantenimiento no tiene sede, etapa, sistema o subsistema completos."
             )
         started_at = activity.actual_start_at or datetime.now(timezone.utc)
+        await self._persist_sap_order(activity, payload.sap_order)
         self._session.add(
             PreventiveReportDetailRecord(
                 report_version_id=version.id,
@@ -892,6 +907,93 @@ class PostgresReportWriter:
                         notes=test.notes,
                     )
                 )
+
+        await self._save_tools(version, payload.tools)
+
+    async def _persist_sap_order(
+        self,
+        activity: MaintenanceActivityRecord,
+        proposed: str | None,
+    ) -> None:
+        value = (proposed or "").strip() or None
+        if activity.sap_order and value and value != activity.sap_order:
+            raise ReportValidationError("La Orden SAP ya está registrada y no puede modificarse.")
+        if not value or activity.sap_order:
+            return
+        activity.sap_order = value
+        await self._session.execute(
+            PreventiveScheduleRecord.__table__.update()
+            .where(PreventiveScheduleRecord.maintenance_activity_id == activity.id)
+            .values(sap_order=value)
+        )
+
+    async def _save_tools(
+        self,
+        version: ReportVersionRecord,
+        usages: list[ReportToolUsageWriteDTO],
+    ) -> None:
+        for item in usages:
+            try:
+                tool_id = UUID(item.tool_id)
+            except ValueError as error:
+                raise ReportValidationError("Herramienta inválida.") from error
+            tool = await self._session.get(ToolRecord, tool_id)
+            if tool is None or not tool.is_active:
+                raise ReportValidationError("La herramienta seleccionada no está disponible.")
+            certification = await self._session.scalar(
+                select(ToolCertificationRecord)
+                .where(
+                    ToolCertificationRecord.tool_id == tool.id,
+                    ToolCertificationRecord.is_active.is_(True),
+                )
+                .order_by(ToolCertificationRecord.next_calibration_date.desc())
+                .limit(1)
+            )
+            self._session.add(
+                ReportToolUsageRecord(
+                    report_version_id=version.id,
+                    tool_id=tool.id,
+                    certification_id=certification.id if certification else None,
+                    used_at=datetime.now(timezone.utc),
+                    tool_name_snapshot=tool.name,
+                    tool_serial_snapshot=tool.serial_number,
+                    certification_number_snapshot=(certification.certification_number if certification else None),
+                    certification_valid_until_snapshot=(certification.next_calibration_date if certification else None),
+                )
+            )
+
+    async def _available_tools(self) -> list[ReportEditorToolDTO]:
+        tools = (
+            await self._session.scalars(
+                select(ToolRecord)
+                .where(ToolRecord.is_active.is_(True))
+                .order_by(ToolRecord.name, ToolRecord.serial_number)
+            )
+        ).all()
+        result = []
+        for tool in tools:
+            certification = await self._session.scalar(
+                select(ToolCertificationRecord)
+                .where(ToolCertificationRecord.tool_id == tool.id, ToolCertificationRecord.is_active.is_(True))
+                .order_by(ToolCertificationRecord.next_calibration_date.desc())
+                .limit(1)
+            )
+            result.append(ReportEditorToolDTO(
+                id=str(tool.id), name=tool.name, serial_number=tool.serial_number,
+                availability_status=tool.availability_status,
+                certification_number=certification.certification_number if certification else None,
+                certification_valid_until=certification.next_calibration_date if certification else None,
+            ))
+        return result
+
+    async def _required_tool_names(self, activity: MaintenanceActivityRecord) -> list[str]:
+        if activity.maintenance_template_id is None:
+            return []
+        return list((await self._session.scalars(
+            select(MaintenanceTemplateToolRecord.tool_name)
+            .where(MaintenanceTemplateToolRecord.maintenance_template_id == activity.maintenance_template_id)
+            .order_by(MaintenanceTemplateToolRecord.tool_name)
+        )).all())
 
     async def _save_calibration_companion(
         self,

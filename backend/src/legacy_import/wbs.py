@@ -216,7 +216,14 @@ class WBSImporter:
             )
             await self.context.process_rows(sheet, source_rows, handler)
 
-        if selected_table is None or selected_table in {"tbl_Equipment", "tbl_Component"}:
+        if selected_table is None:
+            # A complete import may contain legacy rows that describe a maintenance
+            # group (for example, "CRK 1 - 2") as if it were an asset. Keep those
+            # rows for traceability, but normalize the operational model so groups
+            # live in asset_groups and correctives only select physical assets.
+            await self._normalize_legacy_asset_groups()
+            await self._rebuild_asset_closure()
+        elif selected_table in {"tbl_Equipment", "tbl_Component"}:
             await self._rebuild_asset_closure()
 
     async def _import_project_context(self, row: SourceRow) -> list[MappingTarget]:
@@ -1156,6 +1163,39 @@ class WBSImporter:
     async def _import_template_scope(self, row: SourceRow) -> list[MappingTarget]:
         values = row.values
         record_id = wbs_uuid(row.sheet, row.key, "maintenance_template_scopes")
+        equipment_key = values.get("ID_Equipment")
+        asset_id = wbs_string_id("tbl_Equipment", equipment_key, "assets")
+        group_id = wbs_uuid("tbl_Equipment", equipment_key, "asset_groups")
+        equipment = self._source_row("tbl_Equipment", equipment_key)
+        equipment_category = self._source_row(
+            "tbl_Equipment_Category",
+            equipment.values.get("FK_Equipment_Category"),
+        )
+        area_id, _ = self._area_target(values.get("ID_Area"))
+        await self.context.upsert(
+            "asset_groups",
+            {
+                "id": group_id,
+                "code": f"WBS-EQUIPMENT-{identifier(equipment_key)}",
+                "name": required_text(equipment.values.get("EquipmentN3"), "EquipmentN3"),
+                "subsystem_id": wbs_uuid(
+                    "tbl_Subsystem",
+                    equipment_category.values.get("FK_Subsystem"),
+                    "subsystems",
+                ),
+                "geographic_location_id": area_id,
+                "is_active": True,
+            },
+        )
+        await self.context.upsert(
+            "asset_group_members",
+            {
+                "id": wbs_uuid(row.sheet, row.key, "asset_group_members"),
+                "asset_group_id": group_id,
+                "asset_id": asset_id,
+            },
+            conflict_columns=("asset_group_id", "asset_id"),
+        )
         await self.context.upsert(
             "maintenance_template_scopes",
             {
@@ -1166,13 +1206,10 @@ class WBSImporter:
                     values.get("ID_Activity"),
                     "maintenance_templates",
                 ),
-                "asset_id": wbs_string_id(
-                    "tbl_Equipment",
-                    values.get("ID_Equipment"),
-                    "assets",
-                ),
+                "asset_id": asset_id,
+                "asset_group_id": group_id,
                 "equipment_category_id": None,
-                "geographic_location_id": self._area_target(values.get("ID_Area"))[0],
+                "geographic_location_id": area_id,
                 "display_name": required_text(
                     values.get("Name_Activity_Equipment"),
                     "Name_Activity_Equipment",
@@ -1180,7 +1217,10 @@ class WBSImporter:
                 "notes": text(values.get("Notes")),
             },
         )
-        return [MappingTarget("maintenance_template_scopes", str(record_id))]
+        return [
+            MappingTarget("asset_groups", str(group_id), "ASSET_GROUP"),
+            MappingTarget("maintenance_template_scopes", str(record_id)),
+        ]
 
     async def _import_worker(self, row: SourceRow) -> list[MappingTarget]:
         values = row.values
@@ -1314,6 +1354,106 @@ class WBSImporter:
                 """
             )
         )
+
+    async def _normalize_legacy_asset_groups(self) -> None:
+        """Convert known legacy aggregate equipment rows into physical assets/groups.
+
+        The WBS source predates the distinction between an asset and a preventive
+        scope, so this runs after all rows are available. It is idempotent and is
+        intentionally also represented in migration 0013 for already-imported DBs.
+        """
+        statements = (
+            """
+            INSERT INTO assets (
+                id, name, category, asset_type, subsystem, serial_or_code, status,
+                physical_location, is_business_anchor, parent_id, children, asset_type_id,
+                equipment_category_id, equipment_kind_id, subsystem_id, manufacturer_id,
+                status_id, current_geographic_location_id, current_inventory_location_id,
+                current_slot_location_id, internal_code, serial_number, serial_number_status,
+                model, manufacture_date, software_version, current_position, business_label,
+                registration_method, is_mobile, created_at, updated_at
+            )
+            SELECT v.id, v.name, legacy.category, legacy.asset_type, legacy.subsystem,
+                   v.name, legacy.status, legacy.physical_location, true, NULL, '[]'::jsonb,
+                   legacy.asset_type_id, legacy.equipment_category_id, legacy.equipment_kind_id,
+                   legacy.subsystem_id, legacy.manufacturer_id, legacy.status_id,
+                   legacy.current_geographic_location_id, NULL, NULL, NULL, NULL,
+                   'NOT_CAPTURED', NULL, NULL, NULL, NULL, 'Equipo', 'MIGRATED', false,
+                   now(), now()
+            FROM (VALUES
+                ('physical-crk-1', 'CRK 1', 'CRK 1 - 2'),
+                ('physical-crk-2', 'CRK 2', 'CRK 1 - 2'),
+                ('physical-erk-1', 'ERK 1', 'ERK 1 - 2'),
+                ('physical-erk-2', 'ERK 2', 'ERK 1 - 2')
+            ) AS v(id, name, legacy_name)
+            JOIN assets legacy ON legacy.name = v.legacy_name
+            ON CONFLICT (id) DO NOTHING
+            """,
+            """
+            UPDATE assets child SET parent_id = mapping.new_parent_id, updated_at = now()
+            FROM (
+                SELECT child.id,
+                       CASE child.physical_location
+                           WHEN 'CRK 1' THEN 'physical-crk-1'
+                           WHEN 'CRK 2' THEN 'physical-crk-2'
+                           WHEN 'ERK 1' THEN 'physical-erk-1'
+                           WHEN 'ERK 2' THEN 'physical-erk-2'
+                       END AS new_parent_id
+                FROM assets child
+                JOIN assets legacy ON legacy.id = child.parent_id
+                WHERE legacy.name IN ('CRK 1 - 2', 'ERK 1 - 2')
+                  AND child.physical_location IN ('CRK 1', 'CRK 2', 'ERK 1', 'ERK 2')
+            ) mapping
+            WHERE child.id = mapping.id AND mapping.new_parent_id IS NOT NULL
+            """,
+            """
+            DELETE FROM asset_group_members gm
+            USING asset_groups ag
+            WHERE gm.asset_group_id = ag.id
+              AND ag.name IN ('CRK 1 - 2', 'ERK 1 - 2')
+            """,
+            """
+            INSERT INTO asset_group_members (id, asset_group_id, asset_id, created_at, updated_at)
+            SELECT gen_random_uuid(), ag.id, item.asset_id, now(), now()
+            FROM asset_groups ag
+            JOIN (VALUES
+                ('CRK 1 - 2', 'physical-crk-1'), ('CRK 1 - 2', 'physical-crk-2'),
+                ('ERK 1 - 2', 'physical-erk-1'), ('ERK 1 - 2', 'physical-erk-2')
+            ) AS item(group_name, asset_id) ON item.group_name = ag.name
+            ON CONFLICT (asset_group_id, asset_id) DO NOTHING
+            """,
+            """
+            DELETE FROM asset_group_members gm
+            USING asset_groups ag
+            WHERE gm.asset_group_id = ag.id
+              AND ag.name IN (
+                  'SYS001, SYS002, DBC001, COM001, COM002, CWS001, CWS002, CWS003, CWS004, CWS005, OVW001, OVW002',
+                  'SYS101, SYS102, DBC101, COM101, COM102, CWS101, CWS102, CWS103, CWS104, CWS105, OVW101, OVW102'
+              )
+            """,
+            """
+            INSERT INTO asset_group_members (id, asset_group_id, asset_id, created_at, updated_at)
+            SELECT gen_random_uuid(), ag.id, a.id, now(), now()
+            FROM asset_groups ag
+            JOIN assets a ON (
+                (ag.name LIKE 'SYS001,%' AND upper(regexp_replace(a.name, '[^A-Za-z0-9]', '', 'g')) ~ '^(LIM)?(SYS|DBC|COM|CWS|OVW)00[1-9]$')
+                OR
+                (ag.name LIKE 'SYS101,%' AND upper(regexp_replace(a.name, '[^A-Za-z0-9]', '', 'g')) ~ '^(LIM)?(SYS|DBC|COM|CWS|OVW)10[1-9]$')
+            )
+            ON CONFLICT (asset_group_id, asset_id) DO NOTHING
+            """,
+            """
+            UPDATE assets
+            SET is_business_anchor = false, business_label = 'Grupo preventivo legado', updated_at = now()
+            WHERE name IN (
+                'CRK 1 - 2', 'ERK 1 - 2',
+                'SYS001, SYS002, DBC001, COM001, COM002, CWS001, CWS002, CWS003, CWS004, CWS005, OVW001, OVW002',
+                'SYS101, SYS102, DBC101, COM101, COM102, CWS101, CWS102, CWS103, CWS104, CWS105, OVW101, OVW102'
+            )
+            """,
+        )
+        for statement in statements:
+            await self.context.session.execute(sql_text(statement))
 
     def _component_hierarchy_sort_key(self, row: SourceRow) -> tuple[int, int]:
         slot_source = row.values.get("FK_SlotLocation")

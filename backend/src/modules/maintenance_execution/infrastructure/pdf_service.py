@@ -20,12 +20,16 @@ from modules.maintenance_execution.infrastructure.postgres.report_models import 
     ReportParticipantRecord,
     ReportVersionRecord,
 )
+from modules.maintenance_execution.infrastructure.postgres.models import (
+    CorrectiveEventRecord,
+)
 from modules.maintenance_execution.infrastructure.postgres.report_writer import (
     PostgresReportWriter,
     ReportValidationError,
 )
 from modules.maintenance_execution.infrastructure.postgres.tool_models import (
     MaintenanceTemplateToolRecord,
+    ReportToolUsageRecord,
 )
 from modules.maintenance_execution.infrastructure.postgres.template_models import (
     MaintenanceTemplatePersonnelRecord,
@@ -113,6 +117,24 @@ class PreventivePDFService:
                     )
                 ).all()
             )
+
+        used_tools = list(
+            (
+                await self._session.scalars(
+                    select(ReportToolUsageRecord)
+                    .where(ReportToolUsageRecord.report_version_id == version.id)
+                    .order_by(ReportToolUsageRecord.tool_name_snapshot)
+                )
+            ).all()
+        )
+        if used_tools:
+            tools = [
+                {
+                    "tool_name": tool.tool_name_snapshot or "Herramienta sin nombre",
+                    "estimated_hours": None,
+                }
+                for tool in used_tools
+            ]
 
         photos = await self._photos(detail)
         signatures = await self._signatures(version.id)
@@ -317,7 +339,13 @@ class PreventivePDFService:
 
     @staticmethod
     def _format_datetime(value: datetime | None) -> str:
-        return value.astimezone().strftime("%d/%m/%Y %H:%M") if value else "No registrado"
+        if value is None:
+            return "No registrado"
+        # Docker images use UTC by default. Reports are operational documents for
+        # Lima, therefore their printed date/time must not depend on host settings.
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(ZoneInfo("America/Lima")).strftime("%d/%m/%Y %H:%M")
 
     @staticmethod
     def _time_range(start: datetime | None, end: datetime | None) -> str:
@@ -398,6 +426,7 @@ class CorrectivePDFService(PreventivePDFService):
         report_code = settings.corrective_report_format_code
         photos = await self._photos(detail)
         signatures = await self._signatures(version.id)
+        event = await self._session.get(CorrectiveEventRecord, detail.activity.event_id)
         context = {
             "report_code": report_code,
             "revision": settings.corrective_report_revision,
@@ -416,11 +445,7 @@ class CorrectivePDFService(PreventivePDFService):
             "signatures": signatures,
             "photos": photos,
             "creator_name": creator.name if creator else version.created_by_user_id,
-            "critical_element": (
-                "Sí"
-                if detail.activity.severity in {"HIGH", "CRITICAL"}
-                else "No"
-            ),
+            "critical_element": "Sí" if event is not None and event.is_critical else "No",
             "logo_data_uri": self._data_uri(settings.resolved_report_logo),
             "format_datetime": self._format_datetime,
         }
