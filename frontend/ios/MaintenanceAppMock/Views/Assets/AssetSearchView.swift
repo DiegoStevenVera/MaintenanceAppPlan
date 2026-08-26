@@ -46,6 +46,8 @@ struct EquipmentTreeNodeDTO: Identifiable, Decodable {
     let depth: Int
     let slotPath: String?
     let position: String?
+    let nodeKind: String
+    let selectable: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name, category, status, model, manufacturer, depth, position
@@ -54,6 +56,42 @@ struct EquipmentTreeNodeDTO: Identifiable, Decodable {
         case partNumber = "part_number"
         case parentID = "parent_id"
         case slotPath = "slot_path"
+        case nodeKind = "node_kind"
+        case selectable
+    }
+
+    init(
+        id: String,
+        name: String,
+        category: String,
+        assetType: String,
+        status: String,
+        serialNumber: String?,
+        partNumber: String?,
+        model: String?,
+        manufacturer: String?,
+        parentID: String?,
+        depth: Int,
+        slotPath: String?,
+        position: String?,
+        nodeKind: String = "ASSET",
+        selectable: Bool = true
+    ) {
+        self.id = id
+        self.name = name
+        self.category = category
+        self.assetType = assetType
+        self.status = status
+        self.serialNumber = serialNumber
+        self.partNumber = partNumber
+        self.model = model
+        self.manufacturer = manufacturer
+        self.parentID = parentID
+        self.depth = depth
+        self.slotPath = slotPath
+        self.position = position
+        self.nodeKind = nodeKind
+        self.selectable = selectable
     }
 }
 
@@ -800,7 +838,7 @@ private struct ComponentAdministrationSheet: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Equipo grande")
+            Text("Equipo")
                 .font(.caption.weight(.bold))
                 .textCase(.uppercase)
                 .foregroundStyle(BrandColor.red)

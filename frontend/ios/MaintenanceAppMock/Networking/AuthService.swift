@@ -24,12 +24,12 @@ struct AuthService {
         return response.authenticatedUser
     }
 
-    func currentUser(accessToken: String) async throws -> MockUser {
+    func currentUser(accessToken: String) async throws -> AppUser {
         let response: APIUser = try await client.get(
             "api/v1/auth/me",
             bearerToken: accessToken
         )
-        return response.mockUser
+        return response.appUser
     }
 
     func logout(refreshToken: String) async throws {
@@ -78,7 +78,7 @@ struct AuthenticatedUser {
     let accessToken: String
     let refreshToken: String
     let expiresIn: Int
-    let user: MockUser
+    let user: AppUser
 }
 
 struct RolePreviewOption: Decodable, Identifiable {
@@ -141,7 +141,7 @@ private struct TokenPairResponse: Decodable {
             accessToken: accessToken,
             refreshToken: refreshToken,
             expiresIn: expiresIn,
-            user: user.mockUser
+            user: user.appUser
         )
     }
 }
@@ -152,7 +152,7 @@ private struct APIUser: Decodable {
     let email: String
     let role: String
 
-    var mockUser: MockUser {
+    var appUser: AppUser {
         let resolvedRole: UserRole
         switch role {
         case "COORDINATOR":
@@ -177,7 +177,7 @@ private struct APIUser: Decodable {
             avatarSystemImage = "person.badge.key.fill"
         }
 
-        return MockUser(
+        return AppUser(
             id: id,
             name: name,
             role: resolvedRole,
@@ -195,7 +195,7 @@ struct KeychainStore {
         case administratorRefreshToken
     }
 
-    private let service = "com.maintenanceapp.mock.authentication"
+    private let service = "com.maintenanceapp.authentication"
 
     func save(_ value: String, for key: Key) throws {
         let data = Data(value.utf8)
@@ -263,9 +263,9 @@ private enum KeychainError: LocalizedError {
 
 @MainActor
 final class SessionStore: ObservableObject {
-    @Published private(set) var currentUser: MockUser?
+    @Published private(set) var currentUser: AppUser?
     @Published private(set) var isRestoring = true
-    @Published private(set) var rolePreviewAdministrator: MockUser?
+    @Published private(set) var rolePreviewAdministrator: AppUser?
 
     private let keychain = KeychainStore()
     private let cachedUserKey = "authenticatedUserCache"
@@ -279,7 +279,7 @@ final class SessionStore: ObservableObject {
         rolePreviewAdministrator != nil
     }
 
-    func restoreSession() async -> MockUser? {
+    func restoreSession() async -> AppUser? {
         defer { isRestoring = false }
         rolePreviewAdministrator = cachedAdministrator()
 
@@ -316,7 +316,7 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    func signIn(email: String, password: String, baseURL: String) async throws -> MockUser {
+    func signIn(email: String, password: String, baseURL: String) async throws -> AppUser {
         let normalizedURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let authenticated = try await AuthService(baseURLString: normalizedURL)
             .login(email: email, password: password)
@@ -341,7 +341,7 @@ final class SessionStore: ObservableObject {
         clearLocalSession()
     }
 
-    func previewRole(_ role: UserRole) async throws -> MockUser {
+    func previewRole(_ role: UserRole) async throws -> AppUser {
         guard let administrator = currentUser,
               administrator.role == .administrator,
               !isRolePreviewActive,
@@ -378,7 +378,7 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    func returnToAdministrator() async throws -> MockUser {
+    func returnToAdministrator() async throws -> AppUser {
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL"),
               let refreshToken = try keychain.read(.administratorRefreshToken) else {
             throw APIClient.APIError.unauthorized
@@ -461,17 +461,17 @@ final class SessionStore: ObservableObject {
         rolePreviewAdministrator = nil
     }
 
-    private func cachedUser() -> MockUser? {
+    private func cachedUser() -> AppUser? {
         guard let data = UserDefaults.standard.data(forKey: cachedUserKey) else {
             return nil
         }
-        return try? JSONDecoder().decode(MockUser.self, from: data)
+        return try? JSONDecoder().decode(AppUser.self, from: data)
     }
 
-    private func cachedAdministrator() -> MockUser? {
+    private func cachedAdministrator() -> AppUser? {
         guard let data = UserDefaults.standard.data(forKey: cachedAdministratorKey) else {
             return nil
         }
-        return try? JSONDecoder().decode(MockUser.self, from: data)
+        return try? JSONDecoder().decode(AppUser.self, from: data)
     }
 }

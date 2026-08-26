@@ -494,6 +494,8 @@ class ReportEditorAssetDTO(BaseModel):
     model: str | None = None
     manufacturer: str | None = None
     status: str
+    node_kind: Literal["ASSET", "LOCATION"] = "ASSET"
+    selectable: bool = True
 
 
 class ReportEditorToolDTO(BaseModel):

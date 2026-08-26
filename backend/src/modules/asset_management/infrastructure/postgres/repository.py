@@ -196,24 +196,137 @@ class PostgresAssetRepository:
                 )
             )
         ).all()
-        return [
-            AssetTreeNodeDTO(
-                id=record.id,
-                name=record.name,
-                category=record.category,
-                asset_type=record.asset_type,
-                status=record.status,
-                serial_number=record.serial_number or record.serial_or_code or None,
-                part_number=record.part_number,
-                model=record.model,
-                manufacturer=manufacturer,
-                parent_id=record.parent_id,
-                depth=depth,
-                slot_path=slot_path,
-                position=record.current_position,
+        if not rows:
+            return []
+
+        # The imported asset parent relation is useful when it exists, but many
+        # legacy records are attached directly to the equipment. Their actual
+        # physical arrangement lives in slot_locations (for example
+        # /R1/CC/Cubiculo 2/SCCR B1). Expose those slot levels as virtual nodes
+        # so clients can navigate the real installation instead of a flat list.
+        asset_ids = {record.id for _, record, _, _ in rows}
+        current_slots = {
+            record.current_slot_location_id
+            for _, record, _, _ in rows
+            if record.current_slot_location_id
+        }
+        slot_records = {
+            slot.id: slot
+            for slot in (
+                await self._session.scalars(select(SlotLocationRecord))
+            ).all()
+        }
+        included_slots: set[str] = set()
+        for slot_id in current_slots:
+            current_id: str | None = slot_id
+            while current_id and current_id not in included_slots:
+                included_slots.add(current_id)
+                current = slot_records.get(current_id)
+                current_id = current.parent_slot_location_id if current else None
+
+        # A slot that owns exactly one installed asset is the physical identity
+        # of that asset, not an extra folder. Rendering both used to produce
+        # paths such as TIR 1 -> TIR 1 EQUIPED 600 -> its components. Map those
+        # slots to their asset, while retaining virtual folders for empty slots
+        # and slots holding multiple assets.
+        assets_by_slot: dict[str, list[AssetRecord]] = {}
+        for _, record, _, _ in rows:
+            if record.current_slot_location_id in included_slots:
+                assets_by_slot.setdefault(record.current_slot_location_id, []).append(record)
+        slot_owner_asset_id = {
+            slot_id: records[0].id
+            for slot_id, records in assets_by_slot.items()
+            if len(records) == 1
+        }
+
+        def slot_node_id(slot_id: str) -> str:
+            return slot_owner_asset_id.get(slot_id, f"slot:{slot_id}")
+
+        def parent_slot_node_id(slot_id: str | None) -> str:
+            if not slot_id:
+                return asset_id
+            slot = slot_records.get(slot_id)
+            if slot is None or slot.parent_slot_location_id not in included_slots:
+                return asset_id
+            return slot_node_id(slot.parent_slot_location_id)
+
+        root_and_assets = asset_ids | {asset_id}
+        asset_nodes: list[AssetTreeNodeDTO] = []
+        for depth, record, slot_path, manufacturer in rows:
+            if record.current_slot_location_id in included_slots:
+                if slot_owner_asset_id.get(record.current_slot_location_id) == record.id:
+                    parent_id = parent_slot_node_id(record.current_slot_location_id)
+                else:
+                    parent_id = slot_node_id(record.current_slot_location_id)
+            else:
+                parent_id = (
+                    record.parent_id
+                    if record.parent_id in root_and_assets
+                    else asset_id
+                )
+            asset_nodes.append(
+                AssetTreeNodeDTO(
+                    id=record.id,
+                    name=record.name,
+                    category=record.category,
+                    asset_type=record.asset_type,
+                    status=record.status,
+                    serial_number=record.serial_number or record.serial_or_code or None,
+                    part_number=record.part_number,
+                    model=record.model,
+                    manufacturer=manufacturer,
+                parent_id=parent_id,
+                    depth=depth,
+                    slot_path=slot_path,
+                    position=record.current_position,
+                )
             )
-            for depth, record, slot_path, manufacturer in rows
+
+        location_nodes = [
+            AssetTreeNodeDTO(
+                id=f"slot:{slot.id}",
+                name=slot.name,
+                category="Ubicacion fisica",
+                asset_type="Ubicacion",
+                status="ACTIVE",
+                parent_id=parent_slot_node_id(slot.id),
+                depth=0,
+                slot_path=slot.path,
+                position=None,
+                node_kind="LOCATION",
+                selectable=False,
+            )
+            for slot_id in included_slots
+            if (
+                slot_id not in slot_owner_asset_id
+                and (slot := slot_records.get(slot_id)) is not None
+            )
         ]
+
+        all_nodes = {node.id: node for node in location_nodes + asset_nodes}
+        def node_depth(node_id: str, visiting: set[str] | None = None) -> int:
+            node = all_nodes[node_id]
+            parent_id = node.parent_id
+            if parent_id == asset_id or parent_id not in all_nodes:
+                return 1
+            visiting = visiting or set()
+            if node_id in visiting:
+                return 1
+            return node_depth(parent_id, visiting | {node_id}) + 1
+
+        resolved = [
+            node.model_copy(update={"depth": node_depth(node.id)})
+            for node in all_nodes.values()
+        ]
+        return sorted(
+            resolved,
+            key=lambda node: (
+                node.depth,
+                node.parent_id or "",
+                0 if node.node_kind == "LOCATION" else 1,
+                node.name.casefold(),
+            ),
+        )
 
     async def apply_component_changes(
         self,

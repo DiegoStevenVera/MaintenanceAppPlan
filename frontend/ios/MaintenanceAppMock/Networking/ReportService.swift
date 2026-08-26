@@ -404,12 +404,16 @@ struct APIEditorAsset: Codable, Identifiable {
     let model: String?
     let manufacturer: String?
     let status: String
+    let nodeKind: String
+    let selectable: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name, path, model, manufacturer, status
         case parentID = "parent_id"
         case partNumber = "part_number"
         case serialNumber = "serial_number"
+        case nodeKind = "node_kind"
+        case selectable
     }
 }
 

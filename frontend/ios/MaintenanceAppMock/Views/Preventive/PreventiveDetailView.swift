@@ -472,7 +472,7 @@ struct PreventiveDetailView: View {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(
                     title: "Reportes anteriores",
-                    subtitle: "Historico del mismo mantenimiento y equipo grande"
+                    subtitle: "Historico del mismo mantenimiento y equipo"
                 )
 
                 if isLoadingGuide, guide == nil {

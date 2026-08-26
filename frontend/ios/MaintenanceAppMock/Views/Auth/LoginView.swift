@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct LoginView: View {
-    @EnvironmentObject private var store: MockMaintenanceStore
     @EnvironmentObject private var session: SessionStore
     @State private var email = ""
     @State private var password = ""
@@ -123,13 +122,11 @@ struct LoginView: View {
 
         Task {
             do {
-                let user = try await session.signIn(
+                _ = try await session.signIn(
                     email: email,
                     password: password,
                     baseURL: AppEnvironment.apiBaseURL
                 )
-                store.apiBaseURL = AppEnvironment.apiBaseURL
-                store.completeAPISignIn(user: user)
                 isSigningIn = false
             } catch {
                 isSigningIn = false
@@ -142,7 +139,6 @@ struct LoginView: View {
 struct LoginView_Previews: PreviewProvider {
     static var previews: some View {
         LoginView()
-            .environmentObject(MockMaintenanceStore())
             .environmentObject(SessionStore())
     }
 }

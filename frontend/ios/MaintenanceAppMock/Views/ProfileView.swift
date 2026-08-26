@@ -1,8 +1,8 @@
 import SwiftUI
 
 struct ProfileView: View {
-    @EnvironmentObject private var store: MockMaintenanceStore
     @EnvironmentObject private var session: SessionStore
+    @AppStorage("isDarkModeEnabled") private var isDarkModeEnabled = false
     @State private var isChangingPassword = false
     @State private var isSelectingRole = false
     @State private var sessionError: String?
@@ -13,19 +13,19 @@ struct ProfileView: View {
             VStack(alignment: .leading, spacing: AppSpacing.xl) {
                 GlassPanel {
                     HStack(spacing: AppSpacing.lg) {
-                        Image(systemName: store.currentUser.avatarSystemImage)
+                        Image(systemName: session.currentUser?.avatarSystemImage ?? "person.crop.circle.fill")
                             .font(.system(size: 54))
                             .foregroundStyle(BrandColor.red)
                             .frame(width: 82, height: 82)
                             .background(BrandColor.red.opacity(0.12), in: Circle())
 
                         VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                            Text(store.currentUser.name)
+                            Text(session.currentUser?.name ?? "Usuario")
                                 .font(.system(.title, design: .rounded).weight(.bold))
-                            Text(store.currentUser.role.label)
+                            Text(session.currentUser?.role.label ?? "Sin rol")
                                 .font(.headline)
                                 .foregroundStyle(.secondary)
-                            Text(store.currentUser.email)
+                            Text(session.currentUser?.email ?? "")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                             Text("Foto de perfil real o avatar por defecto en la app final")
@@ -40,7 +40,7 @@ struct ProfileView: View {
                 GlassPanel {
                     VStack(alignment: .leading, spacing: AppSpacing.md) {
                         SectionHeaderText(title: "Apariencia", subtitle: "Ajustes locales del dispositivo")
-                        Toggle("Modo noche", isOn: $store.isDarkModeEnabled)
+                        Toggle("Modo noche", isOn: $isDarkModeEnabled)
                             .font(.headline)
                     }
                 }
@@ -63,7 +63,6 @@ struct ProfileView: View {
                         Button {
                             Task {
                                 await session.signOut()
-                                store.signOut()
                             }
                         } label: {
                             Label("Cerrar sesion", systemImage: "rectangle.portrait.and.arrow.right")
@@ -80,12 +79,10 @@ struct ProfileView: View {
         .navigationTitle("Perfil")
         .sheet(isPresented: $isChangingPassword) {
             ChangePasswordView()
-                .environmentObject(store)
                 .environmentObject(session)
         }
         .sheet(isPresented: $isSelectingRole) {
             RolePreviewPickerView()
-                .environmentObject(store)
                 .environmentObject(session)
         }
         .alert(
@@ -153,7 +150,7 @@ struct ProfileView: View {
         Task {
             do {
                 let administrator = try await session.returnToAdministrator()
-                store.completeAPISignIn(user: administrator)
+                _ = administrator
             } catch {
                 sessionError = error.localizedDescription
             }
@@ -164,7 +161,6 @@ struct ProfileView: View {
 
 private struct RolePreviewPickerView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: MockMaintenanceStore
     @EnvironmentObject private var session: SessionStore
     @State private var options: [RolePreviewOption] = []
     @State private var selectedRole: UserRole?
@@ -275,7 +271,7 @@ private struct RolePreviewPickerView: View {
         Task {
             do {
                 let user = try await session.previewRole(selectedRole)
-                store.completeAPISignIn(user: user)
+                _ = user
                 dismiss()
             } catch {
                 errorMessage = error.localizedDescription
@@ -299,7 +295,6 @@ private struct RolePreviewPickerView: View {
 
 private struct ChangePasswordView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: MockMaintenanceStore
     @EnvironmentObject private var session: SessionStore
     @State private var currentPassword = ""
     @State private var newPassword = ""
@@ -362,7 +357,6 @@ private struct ChangePasswordView: View {
                     currentPassword: currentPassword,
                     newPassword: newPassword
                 )
-                store.signOut()
                 dismiss()
             } catch {
                 isSaving = false
@@ -376,7 +370,6 @@ struct ProfileView_Previews: PreviewProvider {
     static var previews: some View {
         NavigationStack {
             ProfileView()
-                .environmentObject(MockMaintenanceStore())
                 .environmentObject(SessionStore())
         }
     }

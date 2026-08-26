@@ -21,7 +21,7 @@ enum AppEnvironment {
 @main
 struct MaintenanceAppMockApp: App {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var store = MockMaintenanceStore()
+    @AppStorage("isDarkModeEnabled") private var isDarkModeEnabled = false
     @StateObject private var session = SessionStore()
     @StateObject private var assetStore = AssetStore()
     @StateObject private var activityStore = MaintenanceActivityStore()
@@ -34,13 +34,12 @@ struct MaintenanceAppMockApp: App {
     var body: some Scene {
         WindowGroup {
             AuthenticatedRootView()
-                .environmentObject(store)
                 .environmentObject(session)
                 .environmentObject(assetStore)
                 .environmentObject(activityStore)
                 .environmentObject(offlineStore)
                 .tint(BrandColor.red)
-                .preferredColorScheme(store.isDarkModeEnabled ? .dark : .light)
+                .preferredColorScheme(isDarkModeEnabled ? .dark : .light)
                 .onChange(of: scenePhase) { _, phase in
                     Task {
                         if phase == .active {
@@ -55,7 +54,6 @@ struct MaintenanceAppMockApp: App {
 }
 
 private struct AuthenticatedRootView: View {
-    @EnvironmentObject private var store: MockMaintenanceStore
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var offlineStore: OfflineReportStore
 
@@ -75,11 +73,8 @@ private struct AuthenticatedRootView: View {
         }
         .animation(.smooth(duration: 0.28), value: session.isAuthenticated)
         .task {
-            if let user = await session.restoreSession() {
-                store.completeAPISignIn(user: user)
+            if await session.restoreSession() != nil {
                 await offlineStore.configure(session: session)
-            } else {
-                store.signOut()
             }
         }
         .task(id: session.currentUser?.id) {

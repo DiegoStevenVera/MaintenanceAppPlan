@@ -9,8 +9,7 @@
 /* Begin PBXBuildFile section */
 		AA0000000000000000000001 /* MaintenanceAppMockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* MaintenanceAppMockApp.swift */; };
 		AA0000000000000000000002 /* DesignSystem/DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000002 /* DesignSystem/DesignTokens.swift */; };
-		AA0000000000000000000003 /* Models/MockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000003 /* Models/MockModels.swift */; };
-		AA0000000000000000000004 /* MockData/MockMaintenanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000004 /* MockData/MockMaintenanceStore.swift */; };
+		AA0000000000000000000003 /* Models/AppModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000003 /* Models/AppModels.swift */; };
 		AA0000000000000000000005 /* Views/MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000005 /* Views/MainTabView.swift */; };
 		AA0000000000000000000006 /* Views/HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000006 /* Views/HomeView.swift */; };
 		AA0000000000000000000007 /* Views/ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000007 /* Views/ProfileView.swift */; };
@@ -28,7 +27,6 @@
 		AA0000000000000000000019 /* Views/Auth/LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000019 /* Views/Auth/LoginView.swift */; };
 		AA0000000000000000000020 /* Networking/APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000020 /* Networking/APIClient.swift */; };
 		AA0000000000000000000021 /* Networking/AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000021 /* Networking/AuthService.swift */; };
-		AA0000000000000000000022 /* Networking/AppStateService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000022 /* Networking/AppStateService.swift */; };
 		AA0000000000000000000023 /* Networking/ReportService.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000023 /* Networking/ReportService.swift */; };
 		AA0000000000000000000024 /* Networking/OfflineReportStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000024 /* Networking/OfflineReportStore.swift */; };
 		AA0000000000000000000025 /* Views/Planning/PCONPlanningView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000025 /* Views/Planning/PCONPlanningView.swift */; };
@@ -38,8 +36,7 @@
 /* Begin PBXFileReference section */
 		BB0000000000000000000001 /* MaintenanceAppMockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceAppMockApp.swift; sourceTree = "<group>"; };
 		BB0000000000000000000002 /* DesignSystem/DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem/DesignTokens.swift; sourceTree = "<group>"; };
-		BB0000000000000000000003 /* Models/MockModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/MockModels.swift; sourceTree = "<group>"; };
-		BB0000000000000000000004 /* MockData/MockMaintenanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MockData/MockMaintenanceStore.swift; sourceTree = "<group>"; };
+		BB0000000000000000000003 /* Models/AppModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models/AppModels.swift; sourceTree = "<group>"; };
 		BB0000000000000000000005 /* Views/MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/MainTabView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000006 /* Views/HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/HomeView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000007 /* Views/ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/ProfileView.swift; sourceTree = "<group>"; };
@@ -57,7 +54,6 @@
 		BB0000000000000000000019 /* Views/Auth/LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Auth/LoginView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000020 /* Networking/APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/APIClient.swift; sourceTree = "<group>"; };
 		BB0000000000000000000021 /* Networking/AuthService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/AuthService.swift; sourceTree = "<group>"; };
-		BB0000000000000000000022 /* Networking/AppStateService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/AppStateService.swift; sourceTree = "<group>"; };
 		BB0000000000000000000023 /* Networking/ReportService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/ReportService.swift; sourceTree = "<group>"; };
 		BB0000000000000000000024 /* Networking/OfflineReportStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Networking/OfflineReportStore.swift; sourceTree = "<group>"; };
 		BB0000000000000000000025 /* Views/Planning/PCONPlanningView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Planning/PCONPlanningView.swift; sourceTree = "<group>"; };
@@ -90,8 +86,7 @@
 			children = (
 				BB0000000000000000000001 /* MaintenanceAppMockApp.swift */,
 				BB0000000000000000000002 /* DesignSystem/DesignTokens.swift */,
-				BB0000000000000000000003 /* Models/MockModels.swift */,
-				BB0000000000000000000004 /* MockData/MockMaintenanceStore.swift */,
+				BB0000000000000000000003 /* Models/AppModels.swift */,
 				BB0000000000000000000005 /* Views/MainTabView.swift */,
 				BB0000000000000000000006 /* Views/HomeView.swift */,
 				BB0000000000000000000007 /* Views/ProfileView.swift */,
@@ -109,7 +104,6 @@
 				BB0000000000000000000019 /* Views/Auth/LoginView.swift */,
 				BB0000000000000000000020 /* Networking/APIClient.swift */,
 				BB0000000000000000000021 /* Networking/AuthService.swift */,
-				BB0000000000000000000022 /* Networking/AppStateService.swift */,
 				BB0000000000000000000023 /* Networking/ReportService.swift */,
 				BB0000000000000000000024 /* Networking/OfflineReportStore.swift */,
 				BB0000000000000000000025 /* Views/Planning/PCONPlanningView.swift */,
@@ -198,8 +192,7 @@
 			files = (
 				AA0000000000000000000001 /* MaintenanceAppMockApp.swift in Sources */,
 				AA0000000000000000000002 /* DesignSystem/DesignTokens.swift in Sources */,
-				AA0000000000000000000003 /* Models/MockModels.swift in Sources */,
-				AA0000000000000000000004 /* MockData/MockMaintenanceStore.swift in Sources */,
+				AA0000000000000000000003 /* Models/AppModels.swift in Sources */,
 				AA0000000000000000000005 /* Views/MainTabView.swift in Sources */,
 				AA0000000000000000000006 /* Views/HomeView.swift in Sources */,
 				AA0000000000000000000007 /* Views/ProfileView.swift in Sources */,
@@ -216,7 +209,6 @@
 				AA0000000000000000000019 /* Views/Auth/LoginView.swift in Sources */,
 				AA0000000000000000000020 /* Networking/APIClient.swift in Sources */,
 				AA0000000000000000000021 /* Networking/AuthService.swift in Sources */,
-				AA0000000000000000000022 /* Networking/AppStateService.swift in Sources */,
 				AA0000000000000000000023 /* Networking/ReportService.swift in Sources */,
 				AA0000000000000000000024 /* Networking/OfflineReportStore.swift in Sources */,
 				AA0000000000000000000025 /* Views/Planning/PCONPlanningView.swift in Sources */,

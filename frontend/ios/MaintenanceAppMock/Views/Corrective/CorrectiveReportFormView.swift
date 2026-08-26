@@ -1099,55 +1099,28 @@ private struct ReplacementAssetSelectionSheet: View {
     let selectedAssetID: String
     let showsHierarchy: Bool
     let onSelect: (APIEditorAsset) -> Void
+    @State private var expandedAssetIDs: Set<String> = []
 
-    private var assetIDsWithChildren: Set<String> {
-        Set(assets.compactMap(\.parentID))
+    private var normalizedQuery: String {
+        searchText.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var rows: [ReplacementAssetRow] {
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !query.isEmpty {
-            return assets
-                .filter { asset in
-                    asset.name.localizedCaseInsensitiveContains(query)
-                        || asset.path.localizedCaseInsensitiveContains(query)
-                        || (asset.partNumber?.localizedCaseInsensitiveContains(query) ?? false)
-                        || (asset.serialNumber?.localizedCaseInsensitiveContains(query) ?? false)
-                }
-                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                .map { ReplacementAssetRow(asset: $0, depth: 0) }
-        }
-        guard showsHierarchy else {
-            return assets
-                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-                .map { ReplacementAssetRow(asset: $0, depth: 0) }
-        }
-        return hierarchicalRows
-    }
-
-    private var hierarchicalRows: [ReplacementAssetRow] {
+    private var rootAssetIDs: Set<String> {
         let ids = Set(assets.map(\.id))
-        let grouped = Dictionary(grouping: assets) { $0.parentID }
-        let roots = assets
-            .filter { $0.parentID == nil || !ids.contains($0.parentID ?? "") }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        var result: [ReplacementAssetRow] = []
-        var visited = Set<String>()
+        return Set(
+            assets
+                .filter { $0.parentID == nil || !ids.contains($0.parentID ?? "") }
+                .map(\.id)
+        )
+    }
 
-        func append(_ asset: APIEditorAsset, depth: Int) {
-            guard visited.insert(asset.id).inserted else { return }
-            result.append(ReplacementAssetRow(asset: asset, depth: depth))
-            for child in (grouped[asset.id] ?? []).sorted(
-                by: { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-            ) {
-                append(child, depth: depth + 1)
-            }
-        }
+    private var roots: [ReplacementAssetBranch] {
+        ReplacementAssetBranch.roots(from: assets)
+    }
 
-        for root in roots {
-            append(root, depth: 0)
-        }
-        return result
+    private var visibleRoots: [ReplacementAssetBranch] {
+        guard showsHierarchy, !normalizedQuery.isEmpty else { return roots }
+        return roots.filter(matchesOrContainsMatch)
     }
 
     var body: some View {
@@ -1171,61 +1144,22 @@ private struct ReplacementAssetSelectionSheet: View {
                         }
                     }
 
-                    if rows.isEmpty {
+                    if visibleRoots.isEmpty {
                         ContentUnavailableView(
                             "No hay componentes disponibles",
                             systemImage: "shippingbox"
                         )
                     } else {
                         LazyVStack(spacing: AppSpacing.sm) {
-                            ForEach(rows) { row in
-                                let canSelect = !showsHierarchy
-                                    || !assetIDsWithChildren.contains(row.asset.id)
-                                Button {
-                                    onSelect(row.asset)
-                                } label: {
-                                    HStack(spacing: AppSpacing.md) {
-                                        Color.clear.frame(width: CGFloat(row.depth) * 22)
-                                        Image(
-                                            systemName: row.depth == 0
-                                                ? "shippingbox.fill"
-                                                : "cpu"
-                                        )
-                                        .foregroundStyle(
-                                            row.asset.id == selectedAssetID
-                                                ? BrandColor.red
-                                                : .secondary
-                                        )
-                                        VStack(alignment: .leading, spacing: 3) {
-                                            Text(row.asset.name)
-                                                .font(.headline)
-                                                .foregroundStyle(.primary)
-                                            Text(
-                                                row.asset.serialNumber
-                                                    ?? row.asset.partNumber
-                                                    ?? row.asset.path
-                                            )
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        if row.asset.id == selectedAssetID {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(BrandColor.red)
-                                        } else if canSelect {
-                                            Image(systemName: "chevron.right")
-                                                .foregroundStyle(.tertiary)
-                                        }
-                                    }
-                                    .padding(AppSpacing.md)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        .regularMaterial,
-                                        in: RoundedRectangle(cornerRadius: 10)
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(!canSelect)
+                            ForEach(visibleRoots) { branch in
+                                ReplacementAssetTreeBranchView(
+                                    branch: branch,
+                                    selectedAssetID: selectedAssetID,
+                                    expandedAssetIDs: $expandedAssetIDs,
+                                    query: normalizedQuery,
+                                    rootAssetIDs: rootAssetIDs,
+                                    onSelect: onSelect
+                                )
                             }
                         }
                     }
@@ -1241,12 +1175,155 @@ private struct ReplacementAssetSelectionSheet: View {
                     Button("Cerrar") { dismiss() }
                 }
             }
+            .onChange(of: normalizedQuery) { _, query in
+                guard showsHierarchy, !query.isEmpty else { return }
+                expandedAssetIDs = Set(
+                    roots.flatMap { $0.expandableIDs(keepingMatchesFor: query) }
+                )
+            }
         }
+    }
+
+    private func matchesOrContainsMatch(_ branch: ReplacementAssetBranch) -> Bool {
+        branch.matches(normalizedQuery)
+            || branch.children.contains { matchesOrContainsMatch($0) }
     }
 }
 
-private struct ReplacementAssetRow: Identifiable {
-    var id: String { asset.id }
+private struct ReplacementAssetBranch: Identifiable {
     let asset: APIEditorAsset
-    let depth: Int
+    let children: [ReplacementAssetBranch]
+
+    var id: String { asset.id }
+
+    static func roots(from assets: [APIEditorAsset]) -> [ReplacementAssetBranch] {
+        let ids = Set(assets.map(\.id))
+        let grouped = Dictionary(grouping: assets) { $0.parentID }
+        var visited = Set<String>()
+
+        func build(_ asset: APIEditorAsset) -> ReplacementAssetBranch? {
+            guard visited.insert(asset.id).inserted else { return nil }
+            let children = (grouped[asset.id] ?? [])
+                .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+                .compactMap(build)
+            return ReplacementAssetBranch(asset: asset, children: children)
+        }
+
+        return assets
+            .filter { $0.parentID == nil || !ids.contains($0.parentID ?? "") }
+            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+            .compactMap(build)
+    }
+
+    func matches(_ query: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        return asset.name.localizedCaseInsensitiveContains(query)
+            || asset.path.localizedCaseInsensitiveContains(query)
+            || (asset.partNumber?.localizedCaseInsensitiveContains(query) ?? false)
+            || (asset.serialNumber?.localizedCaseInsensitiveContains(query) ?? false)
+    }
+
+    func expandableIDs(keepingMatchesFor query: String) -> [String] {
+        guard !children.isEmpty else { return [] }
+        let childMatches = children.contains { $0.matches(query) || !$0.expandableIDs(keepingMatchesFor: query).isEmpty }
+        let nested = children.flatMap { $0.expandableIDs(keepingMatchesFor: query) }
+        return (childMatches ? [id] : []) + nested
+    }
+}
+
+private struct ReplacementAssetTreeBranchView: View {
+    let branch: ReplacementAssetBranch
+    let selectedAssetID: String
+    @Binding var expandedAssetIDs: Set<String>
+    let query: String
+    let rootAssetIDs: Set<String>
+    let onSelect: (APIEditorAsset) -> Void
+
+    private var visibleChildren: [ReplacementAssetBranch] {
+        guard !query.isEmpty else { return branch.children }
+        return branch.children.filter { $0.matches(query) || $0.children.containsDescendantMatch(query) }
+    }
+
+    private var canSelect: Bool {
+        branch.asset.selectable && !rootAssetIDs.contains(branch.asset.id)
+    }
+
+    var body: some View {
+        if visibleChildren.isEmpty {
+            row
+        } else {
+            DisclosureGroup(isExpanded: expansionBinding) {
+                LazyVStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    ForEach(visibleChildren) { child in
+                        ReplacementAssetTreeBranchView(
+                            branch: child,
+                            selectedAssetID: selectedAssetID,
+                            expandedAssetIDs: $expandedAssetIDs,
+                            query: query,
+                            rootAssetIDs: rootAssetIDs,
+                            onSelect: onSelect
+                        )
+                        .padding(.leading, AppSpacing.lg)
+                    }
+                }
+                .padding(.top, AppSpacing.xs)
+            } label: {
+                row
+            }
+            .tint(BrandColor.red)
+        }
+    }
+
+    private var expansionBinding: Binding<Bool> {
+        Binding(
+            get: { expandedAssetIDs.contains(branch.id) },
+            set: { isExpanded in
+                if isExpanded { expandedAssetIDs.insert(branch.id) }
+                else { expandedAssetIDs.remove(branch.id) }
+            }
+        )
+    }
+
+    private var row: some View {
+        Button {
+            guard canSelect else { return }
+            onSelect(branch.asset)
+        } label: {
+            HStack(spacing: AppSpacing.md) {
+                Image(systemName: branch.asset.nodeKind == "LOCATION" || !visibleChildren.isEmpty ? "folder.fill" : "cpu")
+                    .foregroundStyle(
+                        branch.asset.id == selectedAssetID ? BrandColor.red : .secondary
+                    )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(branch.asset.name)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(branch.asset.serialNumber ?? branch.asset.partNumber ?? branch.asset.path)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if branch.asset.id == selectedAssetID {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(BrandColor.red)
+                } else if canSelect {
+                    Image(systemName: "circle")
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .padding(AppSpacing.md)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(!canSelect)
+    }
+}
+
+private extension Array where Element == ReplacementAssetBranch {
+    func containsDescendantMatch(_ query: String) -> Bool {
+        contains { branch in
+            branch.matches(query) || branch.children.containsDescendantMatch(query)
+        }
+    }
 }

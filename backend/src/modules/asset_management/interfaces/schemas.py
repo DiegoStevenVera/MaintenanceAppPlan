@@ -38,6 +38,10 @@ class AssetTreeNodeDTO(BaseModel):
     depth: int
     slot_path: str | None = None
     position: str | None = None
+    # A physical-location node is virtual: it organizes assets by their slot path
+    # and therefore cannot be selected or persisted as an asset.
+    node_kind: Literal["ASSET", "LOCATION"] = "ASSET"
+    selectable: bool = True
 
 
 class StockAssetDTO(BaseModel):

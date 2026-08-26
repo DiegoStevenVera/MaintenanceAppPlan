@@ -22,6 +22,9 @@ from modules.asset_management.infrastructure.postgres.domain_models import (
     InventoryLocationRecord,
 )
 from modules.asset_management.infrastructure.postgres.models import AssetRecord
+from modules.asset_management.infrastructure.postgres.repository import (
+    PostgresAssetRepository,
+)
 from modules.identity_access.infrastructure.postgres.models import UserRecord
 from modules.maintenance_execution.infrastructure.postgres.catalog_models import (
     MaintenanceActionTypeRecord,
@@ -1943,8 +1946,12 @@ class PostgresReportWriter:
                 )
             )
         ).all()
-        anchor_ids = [asset_id for asset_id, _, is_anchor in linked_assets if is_anchor]
-        if not anchor_ids:
+        # Preventive scopes can point either to one physical equipment or to a
+        # normalized preventive group (for example Software ATS PTSA/ECIN).
+        # Groups deliberately are not business anchors, therefore filtering by
+        # is_business_anchor hid their valid historical reports.
+        scope_asset_ids = [asset_id for asset_id, _, _ in linked_assets]
+        if not scope_asset_ids:
             return [], False
 
         previous_activities = (
@@ -1960,7 +1967,7 @@ class PostgresReportWriter:
                     .where(
                         MaintenanceActivityAssetRecord.maintenance_activity_id
                         == MaintenanceActivityRecord.id,
-                        MaintenanceActivityAssetRecord.asset_id.in_(anchor_ids),
+                        MaintenanceActivityAssetRecord.asset_id.in_(scope_asset_ids),
                     )
                     .exists(),
                     select(MaintenanceReportRecord.id)
@@ -2059,7 +2066,6 @@ class PostgresReportWriter:
                     MaintenanceActivityAssetRecord.maintenance_activity_id.in_(
                         latest_by_activity
                     ),
-                    AssetRecord.is_business_anchor.is_(True),
                 )
                 .order_by(AssetRecord.name)
             )
@@ -2125,7 +2131,7 @@ class PostgresReportWriter:
         self,
         activity: MaintenanceActivityRecord,
     ) -> list[ReportEditorAssetDTO]:
-        root_ids = (
+        selected_asset_ids = (
             await self._session.scalars(
                 select(MaintenanceActivityAssetRecord.asset_id).where(
                     MaintenanceActivityAssetRecord.maintenance_activity_id
@@ -2133,21 +2139,71 @@ class PostgresReportWriter:
                 )
             )
         ).all()
-        if not root_ids:
+        if not selected_asset_ids:
             return []
-        assets = (
-            await self._session.scalars(
-                select(AssetRecord)
-                .distinct()
-                .join(
-                    AssetClosureRecord,
-                    AssetClosureRecord.descendant_asset_id == AssetRecord.id,
+
+        # A corrective may be registered against a nested asset. The replacement
+        # editor must still start from its physical equipment so technicians see
+        # the complete hierarchy instead of a flat subset rooted at the failure.
+        equipment_ids: set[str] = set()
+        for asset_id in selected_asset_ids:
+            equipment = await self._physical_equipment_for_asset(asset_id)
+            if equipment is not None:
+                equipment_ids.add(equipment.id)
+        if not equipment_ids:
+            return []
+
+        # Use the same physical slot-aware tree returned by the equipment API.
+        # This keeps the replacement selector consistent with "Nuevo correctivo"
+        # even when the event was registered against an internal component.
+        asset_repository = PostgresAssetRepository(self._session)
+        result: list[ReportEditorAssetDTO] = []
+        seen: set[str] = set()
+        for equipment_id in sorted(equipment_ids):
+            equipment = await self._session.get(AssetRecord, equipment_id)
+            if equipment is None:
+                continue
+            root = await self._asset_dto(equipment)
+            if root.id not in seen:
+                result.append(root)
+                seen.add(root.id)
+            for node in await asset_repository.get_tree(equipment_id):
+                if node.id in seen:
+                    continue
+                result.append(
+                    ReportEditorAssetDTO(
+                        id=node.id,
+                        name=node.name,
+                        path=node.slot_path or node.position or node.name,
+                        parent_id=node.parent_id,
+                        part_number=node.part_number,
+                        serial_number=node.serial_number,
+                        model=node.model,
+                        manufacturer=node.manufacturer,
+                        status=node.status,
+                        node_kind=node.node_kind,
+                        selectable=node.selectable,
+                    )
                 )
-                .where(AssetClosureRecord.ancestor_asset_id.in_(root_ids))
-                .order_by(AssetRecord.name)
-            )
-        ).all()
-        return [await self._asset_dto(asset) for asset in assets]
+                seen.add(node.id)
+        return result
+
+    async def _physical_equipment_for_asset(
+        self,
+        asset_id: str,
+    ) -> AssetRecord | None:
+        asset = await self._session.get(AssetRecord, asset_id)
+        visited: set[str] = set()
+        while asset is not None:
+            if asset.id in visited:
+                return None
+            visited.add(asset.id)
+            if asset.is_business_anchor:
+                return asset
+            if asset.parent_id is None:
+                return None
+            asset = await self._session.get(AssetRecord, asset.parent_id)
+        return None
 
     async def _stock_assets(self) -> list[ReportEditorAssetDTO]:
         assets = (

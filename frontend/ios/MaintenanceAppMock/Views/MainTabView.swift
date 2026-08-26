@@ -73,7 +73,6 @@ struct PlaceholderTabView: View {
 struct MainTabView_Previews: PreviewProvider {
     static var previews: some View {
         MainTabView()
-            .environmentObject(MockMaintenanceStore())
             .environmentObject(SessionStore())
             .environmentObject(AssetStore())
             .environmentObject(MaintenanceActivityStore())

@@ -29,20 +29,6 @@ enum AppSpacing {
     static let xl: CGFloat = 32
 }
 
-struct StatusBadge: View {
-    let status: MaintenanceStatus
-
-    var body: some View {
-        Label(status.label, systemImage: status.icon)
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(status.foregroundColor)
-            .padding(.horizontal, AppSpacing.sm)
-            .padding(.vertical, 6)
-            .background(status.backgroundColor)
-            .clipShape(Capsule())
-    }
-}
-
 struct MaintenanceScreenBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -398,89 +384,6 @@ private extension MaintenanceLifecycleCommand {
         case .complete: return "Marca el mantenimiento en progreso como Completado."
         case .close: return "Cierra el mantenimiento completado."
         case .reopen: return "Solicita un motivo y devuelve el mantenimiento a En progreso."
-        }
-    }
-}
-
-struct ParticipantsSignaturePanel: View {
-    @Binding var participants: [ReportParticipantDraft]
-    @Binding var signingParticipantID: UUID?
-    @Binding var signatureStrokes: [UUID: [[CGPoint]]]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            ForEach($participants) { $participant in
-                VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                    Toggle(isOn: $participant.isSelected) {
-                        HStack(spacing: AppSpacing.sm) {
-                            Image(systemName: participant.user.avatarSystemImage)
-                                .font(.title3)
-                                .foregroundStyle(BrandColor.red)
-                            VStack(alignment: .leading) {
-                                Text(participant.user.name)
-                                    .font(.headline)
-                                Text(participant.user.role.label)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-
-                    if participant.isSelected {
-                        HStack(alignment: .center, spacing: AppSpacing.md) {
-                            Button {
-                                signingParticipantID = participant.id
-                            } label: {
-                                Label(participant.hasSignature ? "Volver a firmar" : "Dibujar firma", systemImage: "pencil.and.scribble")
-                            }
-                            .buttonStyle(ActionTileButtonStyle(prominent: !participant.hasSignature))
-                            .frame(maxWidth: 260)
-
-                            SignaturePreview(
-                                name: participant.user.name,
-                                isSigned: participant.hasSignature,
-                                strokes: signatureStrokes[participant.id] ?? []
-                            )
-                        }
-                    }
-                }
-                .padding(AppSpacing.md)
-                .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-        }
-    }
-}
-
-struct ReportSignaturesPreview: View {
-    let signatures: [ReportSignature]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            ForEach(signatures) { signature in
-                HStack(alignment: .center, spacing: AppSpacing.md) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(signature.user.name)
-                            .font(.headline)
-                        Text(signature.user.role.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(width: 220, alignment: .leading)
-
-                    SignaturePreview(
-                        name: signature.user.name,
-                        isSigned: !signature.strokes.isEmpty,
-                        strokes: signature.strokes
-                    )
-                }
-                .padding(AppSpacing.md)
-                .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            }
-
-            if signatures.isEmpty {
-                Text("Aun no hay firmas capturadas para este reporte.")
-                    .foregroundStyle(.secondary)
-            }
         }
     }
 }
