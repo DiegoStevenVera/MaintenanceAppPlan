@@ -544,17 +544,28 @@ struct PreventiveReportFormView: View {
         errorMessage = nil
         hasLoadedState = false
         let localDraft = offlineStore.draft(for: activityID)
+        let workPackage = offlineStore.workPackage(for: activityID)
         if let localDraft {
             activityStore.cacheDetail(localDraft.activityDetail)
+        } else if let workPackage {
+            activityStore.cacheDetail(workPackage.activityDetail)
         }
-        await activityStore.loadDetail(
-            id: activityID,
-            session: session,
-            force: localDraft != nil
-        )
+        if offlineStore.isNetworkAvailable {
+            await activityStore.loadDetail(
+                id: activityID,
+                session: session,
+                force: localDraft != nil
+            )
+        }
         do {
-            let loaded = try await session.withValidAccessToken { token in
-                try await service.editor(activityID: activityID, accessToken: token)
+            let loaded: APIReportEditor
+            if !offlineStore.isNetworkAvailable, let workPackage {
+                loaded = workPackage.editor
+                await offlineStore.markWorkPackageOpened(activityID: activityID)
+            } else {
+                loaded = try await session.withValidAccessToken { token in
+                    try await service.editor(activityID: activityID, accessToken: token)
+                }
             }
             editor = loaded
             baseReportVersionID = localDraft?.payload.baseReportVersionID
@@ -573,6 +584,11 @@ struct PreventiveReportFormView: View {
                     localPayload: localDraft.payload
                 )
                 successMessage = "Modo offline: se recuperó el borrador de este iPad."
+            } else if let workPackage {
+                editor = workPackage.editor
+                activityStore.cacheDetail(workPackage.activityDetail)
+                apply(editor: workPackage.editor, localPayload: nil)
+                successMessage = "Modo offline: se abrió el trabajo descargado en este iPad."
             } else {
                 errorMessage = error.localizedDescription
             }

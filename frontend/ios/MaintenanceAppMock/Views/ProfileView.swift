@@ -7,6 +7,7 @@ struct ProfileView: View {
     @State private var isSelectingRole = false
     @State private var sessionError: String?
     @State private var isReturningToAdministrator = false
+    @State private var isShowingOfflineWork = false
 
     var body: some View {
         ScrollView {
@@ -54,6 +55,13 @@ struct ProfileView: View {
                 GlassPanel {
                     ActionButtonGrid {
                         Button {
+                            isShowingOfflineWork = true
+                        } label: {
+                            Label("Trabajo offline", systemImage: "ipad.and.arrow.forward")
+                        }
+                        .buttonStyle(ActionTileButtonStyle())
+
+                        Button {
                             isChangingPassword = true
                         } label: {
                             Label("Cambiar password", systemImage: "key.fill")
@@ -84,6 +92,9 @@ struct ProfileView: View {
         .sheet(isPresented: $isSelectingRole) {
             RolePreviewPickerView()
                 .environmentObject(session)
+        }
+        .sheet(isPresented: $isShowingOfflineWork) {
+            OfflineWorkCenterView()
         }
         .alert(
             "No se pudo cambiar la vista",

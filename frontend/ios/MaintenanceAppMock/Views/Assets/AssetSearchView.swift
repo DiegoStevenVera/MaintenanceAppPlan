@@ -32,7 +32,7 @@ struct EquipmentDTO: Identifiable, Decodable {
     }
 }
 
-struct EquipmentTreeNodeDTO: Identifiable, Decodable {
+struct EquipmentTreeNodeDTO: Identifiable, Codable {
     let id: String
     let name: String
     let category: String

@@ -3,6 +3,7 @@ import SwiftUI
 struct PreventiveDetailView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
+    @EnvironmentObject private var offlineStore: OfflineReportStore
     let activityID: String
 
     @State private var comments: [APIMaintenanceComment] = []
@@ -14,6 +15,8 @@ struct PreventiveDetailView: View {
     @State private var guideError: String?
     @State private var isLoadingMoreHistory = false
     @State private var historyLoadError: String?
+    @State private var isDownloadingOfflineWork = false
+    @State private var offlineWorkMessage: String?
 
     private let previousReportsPageSize = 10
 
@@ -24,6 +27,7 @@ struct PreventiveDetailView: View {
                     VStack(alignment: .leading, spacing: AppSpacing.xl) {
                         header(detail)
                         photoPanel(detail)
+                        offlineWorkPanel(detail)
                         lifecycleActions(detail)
                         reportActions(detail)
                         statusPanel(detail)
@@ -82,6 +86,58 @@ struct PreventiveDetailView: View {
         )
     }
 
+    private func offlineWorkPanel(_ detail: APIActivityDetail) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Trabajo offline",
+                    subtitle: "Descarga este mantenimiento antes de salir de la oficina"
+                )
+                if let package = offlineStore.workPackage(for: activityID) {
+                    Label(
+                        "Disponible en este iPad desde \(package.downloadedAt.formatted(date: .abbreviated, time: .shortened))",
+                        systemImage: "checkmark.icloud.fill"
+                    )
+                    .font(.subheadline)
+                    .foregroundStyle(BrandColor.green)
+                } else {
+                    Text("Incluye formulario, pasos, participantes, activos y evidencias del reporte.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                ActionButtonGrid {
+                    Button {
+                        Task { await downloadOfflineWork(detail) }
+                    } label: {
+                        if isDownloadingOfflineWork { ProgressView() }
+                        else {
+                            Label(
+                                offlineStore.workPackage(for: activityID) == nil
+                                    ? "Descargar trabajo" : "Actualizar descarga",
+                                systemImage: "arrow.down.circle.fill"
+                            )
+                        }
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+                    .disabled(isDownloadingOfflineWork || !offlineStore.isNetworkAvailable)
+                    if offlineStore.workPackage(for: activityID) != nil {
+                        Button {
+                            Task { await offlineStore.removeWorkPackage(activityID: activityID) }
+                        } label: {
+                            Label("Eliminar descarga", systemImage: "trash")
+                        }
+                        .buttonStyle(ActionTileButtonStyle())
+                    }
+                }
+                if let offlineWorkMessage {
+                    Text(offlineWorkMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     @MainActor
     private func loadComments() async {
         do {
@@ -90,6 +146,21 @@ struct PreventiveDetailView: View {
             }
         } catch {
             commentError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func downloadOfflineWork(_ detail: APIActivityDetail) async {
+        isDownloadingOfflineWork = true
+        offlineWorkMessage = nil
+        defer { isDownloadingOfflineWork = false }
+        do {
+            try await offlineStore.downloadWorkPackage(
+                activityID: activityID, detail: detail, session: session
+            )
+            offlineWorkMessage = "Trabajo descargado y protegido en este iPad."
+        } catch {
+            offlineWorkMessage = error.localizedDescription
         }
     }
 
@@ -170,8 +241,19 @@ struct PreventiveDetailView: View {
             comments.append(comment)
             commentText = ""
         } catch {
-            commentError = error.localizedDescription
+            if !offlineStore.isNetworkAvailable || error.isReportConnectivityFailure {
+                await offlineStore.queueComment(activityID: activityID, message: message)
+                comments.append(localComment(message))
+                commentText = ""
+                commentError = "Comentario guardado en el iPad. Se enviará al recuperar conexión."
+            } else {
+                commentError = error.localizedDescription
+            }
         }
+    }
+
+    private func localComment(_ message: String) -> APIMaintenanceComment {
+        APIMaintenanceComment(id: "local-\(UUID().uuidString)", scope: "OFFLINE", authorUserID: session.currentUser?.id ?? "local", authorName: session.currentUser?.name ?? "Usuario", authorRole: session.currentUser?.role.label ?? "", message: message, createdAt: Date())
     }
 
     private var reportService: ReportAPIService {
@@ -301,12 +383,16 @@ struct PreventiveDetailView: View {
                 },
                 onPerform: { command, reason in
                     Task {
-                        await activityStore.performLifecycle(
-                            id: activityID,
-                            command: command,
-                            reason: reason,
-                            session: session
-                        )
+                        if offlineStore.isNetworkAvailable {
+                            await activityStore.performLifecycle(
+                                id: activityID, command: command, reason: reason, session: session
+                            )
+                        } else {
+                            await offlineStore.queueLifecycle(
+                                activityID: activityID, command: command, reason: reason
+                            )
+                            activityStore.applyOfflineLifecycle(id: activityID, command: command)
+                        }
                     }
                 }
             )

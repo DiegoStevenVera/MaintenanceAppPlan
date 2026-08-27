@@ -3,11 +3,17 @@ struct DatabaseCorrectiveListView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
     @EnvironmentObject private var assetStore: AssetStore
+    @EnvironmentObject private var offlineStore: OfflineReportStore
     @State private var isCreatingEvent = false
     @State private var selectedFilter: MaintenanceDateFilter?
     @State private var searchText = ""
     @State private var selectedMonth = Calendar.current.component(.month, from: Date())
     @State private var selectedYear = Calendar.current.component(.year, from: Date())
+    @State private var selectedStatus = "Todos"
+    @State private var selectedSubsystem = "Todos"
+    @State private var selectedEquipment = "Todos"
+    @State private var isSelectingOfflineWork = false
+    @State private var selectedOfflineIDs: Set<String> = []
 
     var body: some View {
         ScrollView {
@@ -29,6 +35,13 @@ struct DatabaseCorrectiveListView: View {
                 }
 
                 filterPanel
+                if isSelectingOfflineWork {
+                    OfflinePackageBatchPanel(
+                        selectedCount: selectedOfflineIDs.count,
+                        onCancel: { selectedOfflineIDs = []; isSelectingOfflineWork = false },
+                        onDownload: { Task { await downloadSelected() } }
+                    )
+                }
                 section("Abiertos", statuses: ["SCHEDULED"])
                 section("En progreso", statuses: ["IN_PROGRESS"])
                 section("Completados", statuses: ["COMPLETED"])
@@ -57,6 +70,15 @@ struct DatabaseCorrectiveListView: View {
         .background(MaintenanceScreenBackground())
         .navigationTitle("Correctivos")
         .toolbar {
+            Button {
+                isSelectingOfflineWork.toggle()
+                if !isSelectingOfflineWork { selectedOfflineIDs = [] }
+            } label: {
+                Label(
+                    isSelectingOfflineWork ? "Cancelar selección" : "Descargar offline",
+                    systemImage: isSelectingOfflineWork ? "xmark.circle" : "arrow.down.circle"
+                )
+            }
             if session.currentUser?.role.canEditMaintenance == true {
                 Button {
                     isCreatingEvent = true
@@ -113,6 +135,22 @@ struct DatabaseCorrectiveListView: View {
                     .padding(AppSpacing.md)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
+                HStack(spacing: AppSpacing.md) {
+                    Picker("Estado", selection: $selectedStatus) {
+                        ForEach(["Todos", "SCHEDULED", "IN_PROGRESS", "COMPLETED", "CLOSED"], id: \.self) { value in
+                            Text(statusLabel(value)).tag(value)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Picker("Subsistema", selection: $selectedSubsystem) {
+                        ForEach(subsystemOptions, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    Picker("Equipo", selection: $selectedEquipment) {
+                        ForEach(equipmentOptions, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                }
                 HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Buscar por nombre, SAP o equipo", text: $searchText)
@@ -127,16 +165,34 @@ struct DatabaseCorrectiveListView: View {
 
     @ViewBuilder
     private func section(_ title: String, statuses: [String]) -> some View {
-        let activities = activityStore.correctiveActivities.filter { statuses.contains($0.status) }
+        let activities = filteredActivities.filter { statuses.contains($0.status) }
         if !activities.isEmpty {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: title, subtitle: "\(activities.count) evento(s)")
                 LazyVStack(spacing: AppSpacing.sm) {
                     ForEach(activities) { activity in
-                        NavigationLink { CorrectiveDetailView(eventID: activity.id) } label: {
-                            CorrectiveAPIActivityCard(activity: activity)
+                        if isSelectingOfflineWork {
+                            Button { toggleOfflineSelection(activity.id) } label: {
+                                HStack(spacing: AppSpacing.sm) {
+                                    Image(systemName: selectedOfflineIDs.contains(activity.id) ? "checkmark.circle.fill" : "circle")
+                                        .font(.title3)
+                                        .foregroundStyle(selectedOfflineIDs.contains(activity.id) ? BrandColor.red : .secondary)
+                                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                        CorrectiveAPIActivityCard(activity: activity)
+                                        OfflineActivityDownloadMetadata(activity: activity)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            NavigationLink { CorrectiveDetailView(eventID: activity.id) } label: {
+                                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                    CorrectiveAPIActivityCard(activity: activity)
+                                    OfflineActivityDownloadMetadata(activity: activity)
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -152,6 +208,43 @@ struct DatabaseCorrectiveListView: View {
             dateTo: range?.upperBound,
             session: session
         )
+    }
+
+    private var filteredActivities: [APIActivity] {
+        activityStore.correctiveActivities.filter { activity in
+            (selectedStatus == "Todos" || activity.status == selectedStatus)
+                && (selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
+                && (selectedEquipment == "Todos" || activity.assets.contains { $0.name == selectedEquipment })
+        }
+    }
+
+    private var subsystemOptions: [String] {
+        ["Todos"] + Array(Set(activityStore.correctiveActivities.map(\.subsystem))).sorted()
+    }
+
+    private var equipmentOptions: [String] {
+        ["Todos"] + Array(Set(activityStore.correctiveActivities.flatMap { $0.assets.map(\.name) })).sorted()
+    }
+
+    private func toggleOfflineSelection(_ id: String) {
+        if selectedOfflineIDs.contains(id) { selectedOfflineIDs.remove(id) }
+        else { selectedOfflineIDs.insert(id) }
+    }
+
+    private func downloadSelected() async {
+        let activities = filteredActivities.filter { selectedOfflineIDs.contains($0.id) }
+        await offlineStore.downloadWorkPackages(activities: activities, session: session, activityStore: activityStore)
+        if offlineStore.lastDownloadFailedTitles.isEmpty { selectedOfflineIDs = [] }
+    }
+
+    private func statusLabel(_ value: String) -> String {
+        switch value {
+        case "SCHEDULED": return "Programado"
+        case "IN_PROGRESS": return "En progreso"
+        case "COMPLETED": return "Completado"
+        case "CLOSED": return "Cerrado"
+        default: return "Todos"
+        }
     }
 
     private var dateRange: Range<Date>? {
@@ -185,7 +278,7 @@ struct DatabaseCorrectiveListView: View {
     }
 }
 
-private struct CorrectiveCreationContext: Decodable {
+struct CorrectiveCreationContext: Codable {
     let businessAnchorAssetID: String
     let site: String
     let project: String
@@ -201,7 +294,7 @@ private struct CorrectiveCreationContext: Decodable {
     }
 }
 
-private struct CorrectiveCreateRequest: Encodable {
+struct CorrectiveCreateRequest: Codable {
     let sapEventName: String
     let sapNotification: String
     let businessAnchorAssetID: String?
@@ -232,7 +325,7 @@ private struct CorrectiveCreateRequest: Encodable {
     }
 }
 
-private struct CorrectiveAffectedAssetWrite: Encodable {
+struct CorrectiveAffectedAssetWrite: Codable {
     let assetID: String
     let isCritical: Bool
 
@@ -242,12 +335,12 @@ private struct CorrectiveAffectedAssetWrite: Encodable {
     }
 }
 
-private struct CorrectiveTargetMember: Decodable, Identifiable {
+struct CorrectiveTargetMember: Codable, Identifiable {
     let id: String
     let name: String
 }
 
-private struct CorrectiveTarget: Decodable, Identifiable {
+struct CorrectiveTarget: Codable, Identifiable {
     let id: String
     let name: String
     let subsystem: String
@@ -265,13 +358,13 @@ private struct CorrectiveTarget: Decodable, Identifiable {
     }
 }
 
-private struct CorrectiveCreateResult: Decodable {
+struct CorrectiveCreateResult: Codable {
     let id: String
     let code: String
     let status: String
 }
 
-private struct CorrectiveCreationAPIService {
+struct CorrectiveCreationAPIService {
     private let client: APIClient
 
     init(baseURLString: String) {
@@ -317,6 +410,7 @@ private struct CorrectiveCreationAPIService {
 private struct DatabaseCorrectiveEventCreateView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var assetStore: AssetStore
+    @EnvironmentObject private var offlineStore: OfflineReportStore
     @Environment(\.dismiss) private var dismiss
 
     let onCreated: () -> Void
@@ -337,6 +431,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
     @State private var responseAt = Date()
     @State private var isCreating = false
     @State private var creationError: String?
+    @State private var offlineTrees: [String: [EquipmentTreeNodeDTO]] = [:]
 
     private let subsystemOptions = ["ATS", "CBTC", "IXL"]
 
@@ -360,7 +455,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
 
     private var selectedAssets: [EquipmentTreeNodeDTO] {
         let nodes = selectedTarget?.roots.flatMap { root in
-            assetStore.trees[root.id] ?? []
+            offlineTrees[root.id] ?? assetStore.trees[root.id] ?? []
         } ?? []
         let selectedNodes = nodes.filter { selectedAssetIDs.contains($0.id) }
         let roots = selectedTarget?.roots
@@ -447,6 +542,14 @@ private struct DatabaseCorrectiveEventCreateView: View {
             selectedAssetIDs = []
             criticalAssetIDs = []
             let roots = selectedTarget.roots
+            if !offlineStore.isNetworkAvailable,
+               let catalog = offlineStore.correctiveCatalog {
+                offlineTrees = Dictionary(uniqueKeysWithValues: roots.map {
+                    ($0.id, catalog.trees[$0.id] ?? [])
+                })
+                context = roots.lazy.compactMap { catalog.contexts[$0.id] }.first
+                return
+            }
             async let treeTask: Void = withTaskGroup(of: Void.self) { group in
                 for root in roots {
                     group.addTask {
@@ -555,7 +658,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
                     ForEach(selectedTarget.roots) { root in
                         CorrectiveMultiAssetTreePicker(
                             root: root,
-                            nodes: assetStore.trees[root.id] ?? [],
+                            nodes: offlineTrees[root.id] ?? assetStore.trees[root.id] ?? [],
                             selectedAssetIDs: $selectedAssetIDs,
                             criticalAssetIDs: $criticalAssetIDs
                         )
@@ -632,6 +735,12 @@ private struct DatabaseCorrectiveEventCreateView: View {
 
     @MainActor
     private func loadContext(equipmentID: String) async {
+        if !offlineStore.isNetworkAvailable,
+           let context = offlineStore.correctiveCatalog?.contexts[equipmentID] {
+            self.context = context
+            responseAt = Date()
+            return
+        }
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") else {
             creationError = "No se encontro la URL de la API."
             return
@@ -655,6 +764,12 @@ private struct DatabaseCorrectiveEventCreateView: View {
 
     @MainActor
     private func loadTargets() async {
+        if !offlineStore.isNetworkAvailable,
+           let catalog = offlineStore.correctiveCatalog {
+            targets = catalog.targets.filter { $0.subsystem == selectedSubsystem }
+            creationError = nil
+            return
+        }
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") else {
             creationError = "No se encontro la URL de la API."
             return
@@ -683,42 +798,37 @@ private struct DatabaseCorrectiveEventCreateView: View {
             return
         }
 
+        let request = CorrectiveCreateRequest(
+            sapEventName: sapEventName.trimmingCharacters(in: .whitespacesAndNewlines),
+            sapNotification: sapNotification.trimmingCharacters(in: .whitespacesAndNewlines),
+            businessAnchorAssetID: selectedTarget.roots.first?.id,
+            affectedAssetID: selectedAssetIDs.first,
+            affectedAssetPath: selectedAssetPath,
+            affectedAssets: selectedAssetIDs.sorted().map {
+                CorrectiveAffectedAssetWrite(assetID: $0, isCritical: criticalAssetIDs.contains($0))
+            },
+            correctiveEquipmentGroupID: selectedTarget.kind == "GROUP" ? selectedTarget.id : nil,
+            subsystem: context.subsystem, severity: severity.rawValue.uppercased(),
+            isCritical: isCritical, noticeCreatedAt: noticeCreatedAt,
+            responseAt: Date(), physicalLocation: context.physicalLocation
+        )
+        if !offlineStore.isNetworkAvailable {
+            await offlineStore.queueCorrective(request: request)
+            onCreated()
+            dismiss()
+            return
+        }
+
         isCreating = true
         creationError = nil
         defer { isCreating = false }
         do {
-            let responseTime = Date()
-            responseAt = responseTime
+            responseAt = request.responseAt
             _ = try await session.withValidAccessToken { token in
                 try await CorrectiveCreationAPIService(
                     baseURLString: baseURL
                 ).create(
-                    request: CorrectiveCreateRequest(
-                        sapEventName: sapEventName.trimmingCharacters(
-                            in: .whitespacesAndNewlines
-                        ),
-                        sapNotification: sapNotification.trimmingCharacters(
-                            in: .whitespacesAndNewlines
-                        ),
-                        businessAnchorAssetID: selectedTarget.roots.first?.id,
-                        affectedAssetID: selectedAssetIDs.first,
-                        affectedAssetPath: selectedAssetPath,
-                        affectedAssets: selectedAssetIDs.sorted().map {
-                            CorrectiveAffectedAssetWrite(
-                                assetID: $0,
-                                isCritical: criticalAssetIDs.contains($0)
-                            )
-                        },
-                        correctiveEquipmentGroupID: (
-                            selectedTarget.kind == "GROUP" ? selectedTarget.id : nil
-                        ),
-                        subsystem: context.subsystem,
-                        severity: severity.rawValue.uppercased(),
-                        isCritical: isCritical,
-                        noticeCreatedAt: noticeCreatedAt,
-                        responseAt: responseTime,
-                        physicalLocation: context.physicalLocation
-                    ),
+                    request: request,
                     accessToken: token
                 )
             }

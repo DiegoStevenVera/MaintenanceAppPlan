@@ -324,7 +324,7 @@ struct APIMaintenanceDashboard: Decodable {
     }
 }
 
-enum MaintenanceLifecycleCommand: String, Identifiable {
+enum MaintenanceLifecycleCommand: String, Codable, Identifiable {
     case start
     case complete
     case close
@@ -616,6 +616,40 @@ final class MaintenanceActivityStore: ObservableObject {
         transitionErrors[id] = nil
     }
 
+    func applyOfflineLifecycle(
+        id: String,
+        command: MaintenanceLifecycleCommand
+    ) {
+        guard let detail = details[id] else { return }
+        let now = Date()
+        let status: String
+        switch command {
+        case .start: status = "IN_PROGRESS"
+        case .complete: status = "COMPLETED"
+        case .close: status = "CLOSED"
+        case .reopen: status = "IN_PROGRESS"
+        }
+        let updated = APIActivityDetail(
+            id: detail.id, activityType: detail.activityType, status: status,
+            title: detail.title, internalCode: detail.internalCode, sapOrder: detail.sapOrder,
+            project: detail.project, stage: detail.stage, system: detail.system,
+            subsystem: detail.subsystem, site: detail.site, locationPath: detail.locationPath,
+            scheduledAt: detail.scheduledAt, plannedYear: detail.plannedYear,
+            plannedMonth: detail.plannedMonth,
+            actualStartAt: command == .start || command == .reopen ? now : detail.actualStartAt,
+            actualEndAt: command == .complete || command == .close ? now : detail.actualEndAt,
+            assets: detail.assets, reportVersionCount: detail.reportVersionCount,
+            eventID: detail.eventID, eventCode: detail.eventCode, severity: detail.severity,
+            isCritical: detail.isCritical, reports: detail.reports,
+            preventiveReport: detail.preventiveReport, correctiveReport: detail.correctiveReport,
+            sapEventName: detail.sapEventName, sapNotification: detail.sapNotification,
+            noticeCreatedAt: detail.noticeCreatedAt, responseAt: detail.responseAt,
+            affectedAssets: detail.affectedAssets
+        )
+        details[id] = updated
+        updateCachedActivity(from: updated)
+    }
+
     private func updateCachedActivity(from detail: APIActivityDetail) {
         let activity = APIActivity(
             id: detail.id,
@@ -669,13 +703,23 @@ final class MaintenanceActivityStore: ObservableObject {
 struct PreventiveListView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
+    @EnvironmentObject private var offlineStore: OfflineReportStore
     @State private var selectedFilter: MaintenanceDateFilter = .today
     @State private var searchText = ""
     @State private var selectedMonth = Calendar.current.component(.month, from: Date())
     @State private var selectedYear = Calendar.current.component(.year, from: Date())
+    @State private var selectedStatus = "Todos"
+    @State private var selectedSubsystem = "Todos"
+    @State private var selectedEquipment = "Todos"
+    @State private var isSelectingOfflineWork = false
+    @State private var selectedOfflineIDs: Set<String> = []
 
     private var visibleActivities: [APIActivity] {
-        activityStore.preventiveActivities
+        activityStore.preventiveActivities.filter { activity in
+            (selectedStatus == "Todos" || activity.status == selectedStatus)
+                && (selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
+                && (selectedEquipment == "Todos" || activity.assets.contains { $0.name == selectedEquipment })
+        }
     }
 
     var body: some View {
@@ -683,6 +727,13 @@ struct PreventiveListView: View {
             VStack(alignment: .leading, spacing: AppSpacing.xl) {
                 PreventiveAPISummaryStrip(activities: visibleActivities)
                 filterPanel
+                if isSelectingOfflineWork {
+                    OfflinePackageBatchPanel(
+                        selectedCount: selectedOfflineIDs.count,
+                        onCancel: { selectedOfflineIDs = []; isSelectingOfflineWork = false },
+                        onDownload: { Task { await downloadSelected() } }
+                    )
+                }
                 activitySection("Preventivos", subtitle: filterSubtitle, activities: visibleActivities)
 
                 if let error = activityStore.preventiveError {
@@ -707,6 +758,17 @@ struct PreventiveListView: View {
         }
         .background(MaintenanceScreenBackground())
         .navigationTitle("Preventivos")
+        .toolbar {
+            Button {
+                isSelectingOfflineWork.toggle()
+                if !isSelectingOfflineWork { selectedOfflineIDs = [] }
+            } label: {
+                Label(
+                    isSelectingOfflineWork ? "Cancelar selección" : "Descargar offline",
+                    systemImage: isSelectingOfflineWork ? "xmark.circle" : "arrow.down.circle"
+                )
+            }
+        }
         .refreshable { await load() }
         .task(id: "\(selectedFilter.id)-\(selectedMonth)-\(selectedYear)-\(searchText)") {
             if !searchText.isEmpty { try? await Task.sleep(for: .milliseconds(300)) }
@@ -741,6 +803,22 @@ struct PreventiveListView: View {
                     .padding(AppSpacing.md)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
+                HStack(spacing: AppSpacing.md) {
+                    Picker("Estado", selection: $selectedStatus) {
+                        ForEach(["Todos", "SCHEDULED", "IN_PROGRESS", "COMPLETED", "CLOSED"], id: \.self) { value in
+                            Text(statusLabel(value)).tag(value)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Picker("Subsistema", selection: $selectedSubsystem) {
+                        ForEach(subsystemOptions, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                    Picker("Equipo", selection: $selectedEquipment) {
+                        ForEach(equipmentOptions, id: \.self) { Text($0).tag($0) }
+                    }
+                    .pickerStyle(.menu)
+                }
                 HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                     TextField("Buscar por nombre de mantenimiento", text: $searchText)
@@ -760,10 +838,28 @@ struct PreventiveListView: View {
                 SectionHeaderText(title: title, subtitle: subtitle)
                 LazyVStack(spacing: AppSpacing.sm) {
                     ForEach(activities) { activity in
-                        NavigationLink { PreventiveDetailView(activityID: activity.id) } label: {
-                            APIActivityCard(activity: activity)
+                        if isSelectingOfflineWork {
+                            Button { toggleOfflineSelection(activity.id) } label: {
+                                HStack(spacing: AppSpacing.sm) {
+                                    Image(systemName: selectedOfflineIDs.contains(activity.id) ? "checkmark.circle.fill" : "circle")
+                                        .font(.title3)
+                                        .foregroundStyle(selectedOfflineIDs.contains(activity.id) ? BrandColor.red : .secondary)
+                                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                        APIActivityCard(activity: activity)
+                                        OfflineActivityDownloadMetadata(activity: activity)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            NavigationLink { PreventiveDetailView(activityID: activity.id) } label: {
+                                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                    APIActivityCard(activity: activity)
+                                    OfflineActivityDownloadMetadata(activity: activity)
+                                }
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -772,6 +868,35 @@ struct PreventiveListView: View {
 
     private var filterSubtitle: String {
         selectedFilter == .specificMonth ? "\(Self.monthName(selectedMonth)) \(selectedYear)" : selectedFilter.label
+    }
+
+    private var subsystemOptions: [String] {
+        ["Todos"] + Array(Set(activityStore.preventiveActivities.map(\.subsystem))).sorted()
+    }
+
+    private var equipmentOptions: [String] {
+        ["Todos"] + Array(Set(activityStore.preventiveActivities.flatMap { $0.assets.map(\.name) })).sorted()
+    }
+
+    private func toggleOfflineSelection(_ id: String) {
+        if selectedOfflineIDs.contains(id) { selectedOfflineIDs.remove(id) }
+        else { selectedOfflineIDs.insert(id) }
+    }
+
+    private func downloadSelected() async {
+        let activities = visibleActivities.filter { selectedOfflineIDs.contains($0.id) }
+        await offlineStore.downloadWorkPackages(activities: activities, session: session, activityStore: activityStore)
+        if offlineStore.lastDownloadFailedTitles.isEmpty { selectedOfflineIDs = [] }
+    }
+
+    private func statusLabel(_ value: String) -> String {
+        switch value {
+        case "SCHEDULED": return "Programado"
+        case "IN_PROGRESS": return "En progreso"
+        case "COMPLETED": return "Completado"
+        case "CLOSED": return "Cerrado"
+        default: return "Todos"
+        }
     }
 
     private func load() async {

@@ -3,12 +3,15 @@ import SwiftUI
 struct CorrectiveDetailView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
+    @EnvironmentObject private var offlineStore: OfflineReportStore
     let eventID: String
 
     @State private var comments: [APIMaintenanceComment] = []
     @State private var commentText = ""
     @State private var isSendingComment = false
     @State private var commentError: String?
+    @State private var isDownloadingOfflineWork = false
+    @State private var offlineWorkMessage: String?
 
     var body: some View {
         Group {
@@ -16,6 +19,7 @@ struct CorrectiveDetailView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AppSpacing.xl) {
                         header(detail)
+                        offlineWorkPanel(detail)
                         lifecycleActions(detail)
                         reportActions(detail)
                         statusPanel(detail)
@@ -69,6 +73,34 @@ struct CorrectiveDetailView: View {
         )
     }
 
+    private func offlineWorkPanel(_ detail: APIActivityDetail) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(title: "Trabajo offline", subtitle: "Paquete del correctivo para trabajo en campo")
+                Text(offlineStore.workPackage(for: eventID) == nil
+                    ? "Descarga el formulario, activos, stock disponible y participantes antes de perder conexión."
+                    : "Este correctivo ya está disponible en este iPad.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                ActionButtonGrid {
+                    Button { Task { await downloadOfflineWork(detail) } } label: {
+                        if isDownloadingOfflineWork { ProgressView() }
+                        else { Label(offlineStore.workPackage(for: eventID) == nil ? "Descargar trabajo" : "Actualizar descarga", systemImage: "arrow.down.circle.fill") }
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+                    .disabled(isDownloadingOfflineWork || !offlineStore.isNetworkAvailable)
+                    if offlineStore.workPackage(for: eventID) != nil {
+                        Button { Task { await offlineStore.removeWorkPackage(activityID: eventID) } } label: {
+                            Label("Eliminar descarga", systemImage: "trash")
+                        }
+                        .buttonStyle(ActionTileButtonStyle())
+                    }
+                }
+                if let offlineWorkMessage { Text(offlineWorkMessage).font(.caption).foregroundStyle(.secondary) }
+            }
+        }
+    }
+
     @MainActor
     private func loadComments() async {
         do {
@@ -77,6 +109,19 @@ struct CorrectiveDetailView: View {
             }
         } catch {
             commentError = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func downloadOfflineWork(_ detail: APIActivityDetail) async {
+        isDownloadingOfflineWork = true
+        offlineWorkMessage = nil
+        defer { isDownloadingOfflineWork = false }
+        do {
+            try await offlineStore.downloadWorkPackage(activityID: eventID, detail: detail, session: session)
+            offlineWorkMessage = "Trabajo descargado y protegido en este iPad."
+        } catch {
+            offlineWorkMessage = error.localizedDescription
         }
     }
 
@@ -99,8 +144,19 @@ struct CorrectiveDetailView: View {
             comments.append(comment)
             commentText = ""
         } catch {
-            commentError = error.localizedDescription
+            if !offlineStore.isNetworkAvailable || error.isReportConnectivityFailure {
+                await offlineStore.queueComment(activityID: eventID, message: message)
+                comments.append(localComment(message))
+                commentText = ""
+                commentError = "Comentario guardado en el iPad. Se enviará al recuperar conexión."
+            } else {
+                commentError = error.localizedDescription
+            }
         }
+    }
+
+    private func localComment(_ message: String) -> APIMaintenanceComment {
+        APIMaintenanceComment(id: "local-\(UUID().uuidString)", scope: "OFFLINE", authorUserID: session.currentUser?.id ?? "local", authorName: session.currentUser?.name ?? "Usuario", authorRole: session.currentUser?.role.label ?? "", message: message, createdAt: Date())
     }
 
     private var reportService: ReportAPIService {
@@ -206,12 +262,16 @@ struct CorrectiveDetailView: View {
                 },
                 onPerform: { command, reason in
                     Task {
-                        await activityStore.performLifecycle(
-                            id: eventID,
-                            command: command,
-                            reason: reason,
-                            session: session
-                        )
+                        if offlineStore.isNetworkAvailable {
+                            await activityStore.performLifecycle(
+                                id: eventID, command: command, reason: reason, session: session
+                            )
+                        } else {
+                            await offlineStore.queueLifecycle(
+                                activityID: eventID, command: command, reason: reason
+                            )
+                            activityStore.applyOfflineLifecycle(id: eventID, command: command)
+                        }
                     }
                 }
             )

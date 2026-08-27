@@ -416,17 +416,28 @@ struct CorrectiveReportFormView: View {
         errorMessage = nil
         hasLoadedState = false
         let localDraft = offlineStore.draft(for: eventID)
+        let workPackage = offlineStore.workPackage(for: eventID)
         if let localDraft {
             activityStore.cacheDetail(localDraft.activityDetail)
+        } else if let workPackage {
+            activityStore.cacheDetail(workPackage.activityDetail)
         }
-        await activityStore.loadDetail(
-            id: eventID,
-            session: session,
-            force: localDraft != nil
-        )
+        if offlineStore.isNetworkAvailable {
+            await activityStore.loadDetail(
+                id: eventID,
+                session: session,
+                force: localDraft != nil
+            )
+        }
         do {
-            let loaded = try await session.withValidAccessToken { token in
-                try await service.editor(activityID: eventID, accessToken: token)
+            let loaded: APIReportEditor
+            if !offlineStore.isNetworkAvailable, let workPackage {
+                loaded = workPackage.editor
+                await offlineStore.markWorkPackageOpened(activityID: eventID)
+            } else {
+                loaded = try await session.withValidAccessToken { token in
+                    try await service.editor(activityID: eventID, accessToken: token)
+                }
             }
             editor = loaded
             baseReportVersionID = localDraft?.payload.baseReportVersionID
@@ -461,6 +472,16 @@ struct CorrectiveReportFormView: View {
                     evidence = localReport.evidence
                 }
                 successMessage = "Modo offline: se recuperó el borrador de este iPad."
+            } else if let workPackage {
+                editor = workPackage.editor
+                activityStore.cacheDetail(workPackage.activityDetail)
+                apply(
+                    workPackage.editor.correctiveDraft,
+                    actionTypes: workPackage.editor.actionTypes
+                )
+                participants = participantDrafts(from: workPackage.editor)
+                evidence = storedEvidenceWrites(from: workPackage.editor)
+                successMessage = "Modo offline: se abrió el trabajo descargado en este iPad."
             } else {
                 errorMessage = error.localizedDescription
             }
