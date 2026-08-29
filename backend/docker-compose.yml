@@ -30,7 +30,9 @@ services:
       POSTGRES_PORT: 5432
       ATTACHMENT_STORAGE_PATH: /app/backend/storage/attachments
       REPORT_STORAGE_PATH: /app/backend/storage/reports
-      REPORT_LOGO_PATH: /app/backend/assets/Hitachi-Logo.png
+      # The selected environment may override this path. Keep the container
+      # default aligned with Settings.report_logo_path.
+      REPORT_LOGO_PATH: ${REPORT_LOGO_PATH:-/app/backend/assets/Hitachi-Logo-v2.png}
     ports:
       - "${BACKEND_PORT:?Set BACKEND_PORT in the selected environment}:8000"
     volumes:

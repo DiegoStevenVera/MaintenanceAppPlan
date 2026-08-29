@@ -57,6 +57,8 @@ from modules.maintenance_execution.infrastructure.postgres.report_models import 
     PreventiveTestResultRecord,
     ReportParticipantRecord,
     ReportSignatureRecord,
+    ReportAuditEventRecord,
+    ReportFormatRecord,
     ReportVersionAssetRecord,
     ReportVersionRecord,
 )
@@ -408,7 +410,26 @@ class PostgresReportWriter:
                     )
                 self._validate_calibration(payload.calibration)
 
-        report, version = await self._draft_version(activity, user_id)
+        report, version, created_version = await self._draft_version(activity, user_id)
+        if created_version:
+            self._session.add(
+                ReportAuditEventRecord(
+                    maintenance_activity_id=activity.id,
+                    report_version_id=version.id,
+                    event_type="VERSION_CREATED",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_user_id=user_id,
+                    details={
+                        "report_kind": report.report_kind,
+                        "version_number": version.version_number,
+                        "source_version_id": (
+                            str(version.source_version_id)
+                            if version.source_version_id is not None
+                            else None
+                        ),
+                    },
+                )
+            )
         evidence_version_ids = [version.id]
         if version.source_version_id is not None:
             evidence_version_ids.append(version.source_version_id)
@@ -466,6 +487,19 @@ class PostgresReportWriter:
             version.finalized_at = now
             report.status = "FINALIZED"
             activity.actual_end_at = activity_ended_at or now
+            self._session.add(
+                ReportAuditEventRecord(
+                    maintenance_activity_id=activity.id,
+                    report_version_id=version.id,
+                    event_type="REPORT_FINALIZED",
+                    occurred_at=now,
+                    actor_user_id=user_id,
+                    details={
+                        "report_kind": report.report_kind,
+                        "version_number": version.version_number,
+                    },
+                )
+            )
         else:
             version.document_status = "DRAFT"
             version.finalized_by_user_id = None
@@ -714,7 +748,7 @@ class PostgresReportWriter:
         activity: MaintenanceActivityRecord,
         user_id: str,
         report_kind: str | None = None,
-    ) -> tuple[MaintenanceReportRecord, ReportVersionRecord]:
+    ) -> tuple[MaintenanceReportRecord, ReportVersionRecord, bool]:
         report_kinds = (
             {report_kind}
             if report_kind is not None
@@ -774,7 +808,7 @@ class PostgresReportWriter:
             .limit(1)
         )
         if version is not None:
-            return report, version
+            return report, version, False
 
         latest = await self._session.scalar(
             select(ReportVersionRecord)
@@ -782,16 +816,51 @@ class PostgresReportWriter:
             .order_by(ReportVersionRecord.version_number.desc())
             .limit(1)
         )
+        format_kind = self._format_kind_for_report(report.report_kind)
+        report_format = await self._active_report_format(format_kind)
         version = ReportVersionRecord(
             maintenance_report_id=report.id,
             version_number=(latest.version_number + 1) if latest else 1,
             document_status="DRAFT",
             source_version_id=latest.id if latest else None,
+            report_format_id=report_format.id if report_format else None,
+            format_code_snapshot=(
+                report_format.format_code if report_format else None
+            ),
+            format_revision_snapshot=(
+                report_format.revision if report_format else None
+            ),
+            format_template_snapshot=(
+                report_format.template_name if report_format else None
+            ),
             created_by_user_id=user_id,
         )
         self._session.add(version)
         await self._session.flush()
-        return report, version
+        return report, version, True
+
+    @staticmethod
+    def _format_kind_for_report(report_kind: str) -> str | None:
+        if report_kind in {"PREVENTIVE", "PREVENTIVE_MAIN"}:
+            return "PREVENTIVE"
+        if report_kind == "CORRECTIVE":
+            return "CORRECTIVE"
+        return None
+
+    async def _active_report_format(
+        self,
+        report_kind: str | None,
+    ) -> ReportFormatRecord | None:
+        if report_kind is None:
+            return None
+        return await self._session.scalar(
+            select(ReportFormatRecord)
+            .where(
+                ReportFormatRecord.report_kind == report_kind,
+                ReportFormatRecord.status == "ACTIVE",
+            )
+            .limit(1)
+        )
 
     async def _clear_version_children(self, version_id: UUID) -> None:
         step_ids = (
@@ -1008,11 +1077,30 @@ class PostgresReportWriter:
         user_id: str,
         finalize: bool,
     ) -> ReportVersionRecord:
-        report, version = await self._draft_version(
+        report, version, created_version = await self._draft_version(
             activity,
             user_id,
             report_kind="CALIBRATION",
         )
+        if created_version:
+            self._session.add(
+                ReportAuditEventRecord(
+                    maintenance_activity_id=activity.id,
+                    report_version_id=version.id,
+                    event_type="VERSION_CREATED",
+                    occurred_at=datetime.now(timezone.utc),
+                    actor_user_id=user_id,
+                    details={
+                        "report_kind": report.report_kind,
+                        "version_number": version.version_number,
+                        "source_version_id": (
+                            str(version.source_version_id)
+                            if version.source_version_id is not None
+                            else None
+                        ),
+                    },
+                )
+            )
         await self._clear_version_children(version.id)
         version.data_snapshot = payload.model_dump(mode="json")
         version.summary = f"Calibración de {track_circuit_asset.name}"
@@ -1081,6 +1169,19 @@ class PostgresReportWriter:
             version.finalized_by_user_id = user_id
             version.finalized_at = now
             report.status = "FINALIZED"
+            self._session.add(
+                ReportAuditEventRecord(
+                    maintenance_activity_id=activity.id,
+                    report_version_id=version.id,
+                    event_type="REPORT_FINALIZED",
+                    occurred_at=now,
+                    actor_user_id=user_id,
+                    details={
+                        "report_kind": report.report_kind,
+                        "version_number": version.version_number,
+                    },
+                )
+            )
         else:
             version.document_status = "DRAFT"
             version.finalized_by_user_id = None
@@ -1359,6 +1460,13 @@ class PostgresReportWriter:
                 raise ReportValidationError(
                     "El componente retirado y el instalado deben ser distintos."
                 )
+            source_kind = (replacement.source_kind or "WAREHOUSE").upper()
+            if source_kind not in {
+                "WAREHOUSE",
+                "EQUIPMENT_TRANSFER",
+                "EQUIPMENT_SWAP",
+            }:
+                raise ReportValidationError("El origen del componente no es válido.")
             active_removed_assignment = await self._active_assignment(removed.id)
             if (
                 active_removed_assignment is None
@@ -1377,32 +1485,77 @@ class PostgresReportWriter:
                     "El componente retirado contiene activos hijos y no puede reemplazarse como una unidad."
                 )
             active_installed_assignment = await self._active_assignment(installed.id)
-            if (
-                installed.status != "EN STOCK"
-                or (
-                    active_installed_assignment is not None
-                    and active_installed_assignment.parent_asset_id is not None
+            donor_parent = None
+            if source_kind == "WAREHOUSE":
+                if (
+                    installed.status != "EN STOCK"
+                    or (
+                        active_installed_assignment is not None
+                        and active_installed_assignment.parent_asset_id is not None
+                    )
+                ):
+                    raise ReportValidationError(
+                        f"{installed.name} ya no está disponible en stock."
+                    )
+                source_location = (
+                    await self._session.get(
+                        InventoryLocationRecord,
+                        installed.current_inventory_location_id,
+                    )
+                    if installed.current_inventory_location_id
+                    else None
                 )
-            ):
-                raise ReportValidationError(
-                    f"{installed.name} ya no está disponible en stock."
+                if (
+                    source_location is not None
+                    and source_location.name.casefold()
+                    != replacement.source_description.casefold()
+                ):
+                    raise ReportValidationError(
+                        f"{installed.name} ya no está en {replacement.source_description}."
+                    )
+            else:
+                donor_parent = await self._session.get(
+                    AssetRecord,
+                    replacement.donor_parent_asset_id,
+                    with_for_update=True,
                 )
-            source_location = (
-                await self._session.get(
-                    InventoryLocationRecord,
-                    installed.current_inventory_location_id,
-                )
-                if installed.current_inventory_location_id
-                else None
-            )
-            if (
-                source_location is not None
-                and source_location.name.casefold()
-                != replacement.source_description.casefold()
-            ):
-                raise ReportValidationError(
-                    f"{installed.name} ya no está en {replacement.source_description}."
-                )
+                if (
+                    donor_parent is None
+                    or active_installed_assignment is None
+                    or active_installed_assignment.parent_asset_id != donor_parent.id
+                ):
+                    raise ReportValidationError(
+                        f"{installed.name} ya no está instalado en el equipo donante seleccionado."
+                    )
+                if donor_parent.id == parent.id:
+                    raise ReportValidationError(
+                        "El componente donante debe provenir de otro equipo o posición."
+                    )
+                if await self._session.scalar(
+                    select(AssetClosureRecord.descendant_asset_id).where(
+                        AssetClosureRecord.ancestor_asset_id == installed.id,
+                        AssetClosureRecord.depth > 0,
+                    ).limit(1)
+                ):
+                    raise ReportValidationError(
+                        "El componente donante contiene activos hijos y no puede transferirse."
+                    )
+                if (
+                    removed.part_number
+                    and installed.part_number
+                    and removed.part_number.casefold() != installed.part_number.casefold()
+                ):
+                    raise ReportValidationError(
+                        "Los componentes no son compatibles: el part number no coincide."
+                    )
+                if (
+                    removed.asset_type
+                    and installed.asset_type
+                    and removed.asset_type.casefold() != installed.asset_type.casefold()
+                ):
+                    raise ReportValidationError(
+                        "Los componentes no son compatibles: el tipo de activo no coincide."
+                    )
 
             destination = await self._session.scalar(
                 select(InventoryLocationRecord).where(
@@ -1444,6 +1597,46 @@ class PostgresReportWriter:
                     "No se encontró la actividad correctiva del reemplazo."
                 )
 
+            if source_kind == "EQUIPMENT_SWAP":
+                if (replacement.removed_condition or "").casefold() != "operativo":
+                    raise ReportValidationError(
+                        "Un intercambio exige que el componente enviado al equipo donante esté operativo."
+                    )
+                assert donor_parent is not None and active_installed_assignment is not None
+                await self._apply_component_swap(
+                    removed=removed,
+                    installed=installed,
+                    target_parent=parent,
+                    donor_parent=donor_parent,
+                    target_assignment=active_removed_assignment,
+                    donor_assignment=active_installed_assignment,
+                    version=version,
+                    occurred_at=now,
+                )
+                self._session.add(
+                    AssetReplacementRecord(
+                        removed_asset_id=removed.id,
+                        installed_asset_id=installed.id,
+                        parent_asset_id=parent.id,
+                        slot_location_id=active_removed_assignment.slot_location_id,
+                        position_snapshot=active_removed_assignment.position_snapshot
+                        or removed.current_position or removed.name,
+                        source_description=replacement.source_description,
+                        source_kind=source_kind,
+                        donor_parent_asset_id=donor_parent.id,
+                        destination_description=donor_parent.name,
+                        replaced_at=now,
+                        responsible_user_id=user_id,
+                        maintenance_activity_id=activity.id,
+                        report_version_id=version.id,
+                        corrective_activity_id=corrective_activity.id,
+                        removed_condition=replacement.removed_condition,
+                        installed_condition=replacement.installed_condition,
+                        reason=replacement.reason,
+                    )
+                )
+                continue
+
             removed.parent_id = None
             removed.current_slot_location_id = None
             removed.current_inventory_location_id = (
@@ -1472,6 +1665,11 @@ class PostgresReportWriter:
             ]
             if installed.id not in parent.children:
                 parent.children.append(installed.id)
+            if donor_parent is not None:
+                donor_parent.children = [
+                    child_id for child_id in (donor_parent.children or [])
+                    if child_id != installed.id
+                ]
 
             self._session.add(
                 AssetAssignmentRecord(
@@ -1507,6 +1705,8 @@ class PostgresReportWriter:
                     or removed.current_position
                     or removed.name,
                     source_description=replacement.source_description,
+                    source_kind=source_kind,
+                    donor_parent_asset_id=donor_parent.id if donor_parent else None,
                     destination_description=replacement.destination_description,
                     replaced_at=now,
                     responsible_user_id=user_id,
@@ -1635,6 +1835,141 @@ class PostgresReportWriter:
                         depth=depth + 1,
                     )
                     for ancestor_id, depth in ancestors
+                ],
+            ]
+        )
+
+    async def _apply_component_swap(
+        self,
+        *,
+        removed: AssetRecord,
+        installed: AssetRecord,
+        target_parent: AssetRecord,
+        donor_parent: AssetRecord,
+        target_assignment: AssetAssignmentRecord,
+        donor_assignment: AssetAssignmentRecord,
+        version: ReportVersionRecord,
+        occurred_at: datetime,
+    ) -> None:
+        """Atomically exchange two leaf components between physical positions."""
+        operative_status = await self._session.scalar(
+            select(AssetStatusRecord).where(AssetStatusRecord.code == "OPERATIVO")
+        )
+        target_assignment.unassigned_at = occurred_at
+        donor_assignment.unassigned_at = occurred_at
+
+        removed.parent_id = donor_parent.id
+        removed.current_slot_location_id = donor_assignment.slot_location_id
+        removed.current_geographic_location_id = donor_assignment.geographic_location_id
+        removed.current_inventory_location_id = None
+        removed.current_position = donor_assignment.position_snapshot
+        removed.status = operative_status.name if operative_status else "OPERATIVO"
+        removed.status_id = operative_status.id if operative_status else removed.status_id
+
+        installed.parent_id = target_parent.id
+        installed.current_slot_location_id = target_assignment.slot_location_id
+        installed.current_geographic_location_id = target_assignment.geographic_location_id
+        installed.current_inventory_location_id = None
+        installed.current_position = target_assignment.position_snapshot
+        installed.status = operative_status.name if operative_status else "OPERATIVO"
+        installed.status_id = operative_status.id if operative_status else installed.status_id
+
+        target_parent.children = [
+            installed.id if child_id == removed.id else child_id
+            for child_id in (target_parent.children or [])
+        ]
+        donor_parent.children = [
+            removed.id if child_id == installed.id else child_id
+            for child_id in (donor_parent.children or [])
+        ]
+
+        self._session.add_all(
+            [
+                AssetAssignmentRecord(
+                    asset_id=installed.id,
+                    parent_asset_id=target_parent.id,
+                    slot_location_id=target_assignment.slot_location_id,
+                    geographic_location_id=target_assignment.geographic_location_id,
+                    position_snapshot=target_assignment.position_snapshot,
+                    assigned_at=occurred_at,
+                    reason="Intercambio de componente entre equipos",
+                    source_report_version_id=version.id,
+                ),
+                AssetAssignmentRecord(
+                    asset_id=removed.id,
+                    parent_asset_id=donor_parent.id,
+                    slot_location_id=donor_assignment.slot_location_id,
+                    geographic_location_id=donor_assignment.geographic_location_id,
+                    position_snapshot=donor_assignment.position_snapshot,
+                    assigned_at=occurred_at,
+                    reason="Intercambio de componente entre equipos",
+                    source_report_version_id=version.id,
+                ),
+            ]
+        )
+        await self._swap_closure_links(
+            removed_id=removed.id,
+            installed_id=installed.id,
+            target_parent_id=target_parent.id,
+            donor_parent_id=donor_parent.id,
+        )
+
+    async def _swap_closure_links(
+        self,
+        *,
+        removed_id: str,
+        installed_id: str,
+        target_parent_id: str,
+        donor_parent_id: str,
+    ) -> None:
+        target_ancestors = (
+            await self._session.execute(
+                select(
+                    AssetClosureRecord.ancestor_asset_id,
+                    AssetClosureRecord.depth,
+                ).where(AssetClosureRecord.descendant_asset_id == target_parent_id)
+            )
+        ).all()
+        donor_ancestors = (
+            await self._session.execute(
+                select(
+                    AssetClosureRecord.ancestor_asset_id,
+                    AssetClosureRecord.depth,
+                ).where(AssetClosureRecord.descendant_asset_id == donor_parent_id)
+            )
+        ).all()
+        await self._session.execute(
+            delete(AssetClosureRecord).where(
+                AssetClosureRecord.descendant_asset_id.in_([removed_id, installed_id])
+            )
+        )
+        self._session.add_all(
+            [
+                AssetClosureRecord(
+                    ancestor_asset_id=removed_id,
+                    descendant_asset_id=removed_id,
+                    depth=0,
+                ),
+                AssetClosureRecord(
+                    ancestor_asset_id=installed_id,
+                    descendant_asset_id=installed_id,
+                    depth=0,
+                ),
+                *[
+                    AssetClosureRecord(
+                        ancestor_asset_id=ancestor_id,
+                        descendant_asset_id=installed_id,
+                        depth=depth + 1,
+                    )
+                    for ancestor_id, depth in target_ancestors
+                ],
+                *[
+                    AssetClosureRecord(
+                        ancestor_asset_id=ancestor_id,
+                        descendant_asset_id=removed_id,
+                        depth=depth + 1,
+                    )
+                    for ancestor_id, depth in donor_ancestors
                 ],
             ]
         )
@@ -2206,15 +2541,47 @@ class PostgresReportWriter:
         return None
 
     async def _stock_assets(self) -> list[ReportEditorAssetDTO]:
+        """Return the inventory catalogue for the replacement picker.
+
+        The client needs unavailable records too, so it can explain why a
+        component in a selected warehouse cannot be installed. The final
+        replacement validation remains server-side and accepts only EN STOCK.
+        """
         assets = (
             await self._session.scalars(
                 select(AssetRecord)
-                .where(AssetRecord.status == "EN STOCK")
+                .where(AssetRecord.current_inventory_location_id.is_not(None))
                 .order_by(AssetRecord.name)
-                .limit(500)
             )
         ).all()
         return [await self._asset_dto(asset) for asset in assets]
+
+    async def record_lifecycle_audit_event(
+        self,
+        *,
+        activity_id: str,
+        event_type: str,
+        actor_user_id: str,
+        reason: str | None = None,
+    ) -> None:
+        """Record activity closure/reopening beside the report-version audit trail."""
+        activity = await self._session.get(MaintenanceActivityRecord, activity_id)
+        if activity is None:
+            return
+        version = await self._latest_version(
+            activity.id,
+            report_kinds=self._main_report_kinds(activity),
+        )
+        self._session.add(
+            ReportAuditEventRecord(
+                maintenance_activity_id=activity.id,
+                report_version_id=version.id if version is not None else None,
+                event_type=event_type,
+                occurred_at=datetime.now(timezone.utc),
+                actor_user_id=actor_user_id,
+                details={"reason": reason} if reason else None,
+            )
+        )
 
     async def _asset_dto(self, asset: AssetRecord) -> ReportEditorAssetDTO:
         manufacturer = (

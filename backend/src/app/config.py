@@ -36,11 +36,7 @@ class Settings(BaseSettings):
     attachment_storage_path: str = "storage/attachments"
     attachment_max_bytes: int = 10_000_000
     report_storage_path: str = "storage/reports"
-    report_logo_path: str = "assets/Hitachi-Logo.png"
-    preventive_report_format_code: str = "ML2-STS-FOR-040-ES"
-    preventive_report_revision: str = "0"
-    corrective_report_format_code: str = "ML2-STS-FOR-041-ES"
-    corrective_report_revision: str = "0"
+    report_logo_path: str = "assets/Hitachi-Logo-v2.png"
     calibration_report_file_prefix: str = "Report_Calibration"
 
     @property

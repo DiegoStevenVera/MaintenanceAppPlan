@@ -856,6 +856,8 @@ class PostgresMaintenanceRepository:
             payload.get("installed_asset_snapshot"),
         )
         return ComponentReplacementDTO(
+            source_kind=payload.get("source_kind", "WAREHOUSE"),
+            donor_parent_asset_id=payload.get("donor_parent_asset_id"),
             parent_asset_id=payload["parent_asset_id"],
             parent_asset_name=parent.get("name"),
             removed_asset_id=payload["removed_asset_id"],

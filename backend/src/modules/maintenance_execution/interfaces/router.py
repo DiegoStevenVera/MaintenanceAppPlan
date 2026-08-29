@@ -392,6 +392,20 @@ async def _transition_maintenance_activity(
                 activity_id=activity_id,
                 user_id=current_user.id,
             )
+        if found and command in {
+            MaintenanceLifecycleCommand.CLOSE,
+            MaintenanceLifecycleCommand.REOPEN,
+        }:
+            await PostgresReportWriter(session).record_lifecycle_audit_event(
+                activity_id=activity_id,
+                event_type=(
+                    "MAINTENANCE_CLOSED"
+                    if command == MaintenanceLifecycleCommand.CLOSE
+                    else "MAINTENANCE_REOPENED"
+                ),
+                actor_user_id=current_user.id,
+                reason=reason,
+            )
     except MaintenanceLifecyclePermissionError as error:
         await session.rollback()
         raise HTTPException(status_code=403, detail=str(error)) from error

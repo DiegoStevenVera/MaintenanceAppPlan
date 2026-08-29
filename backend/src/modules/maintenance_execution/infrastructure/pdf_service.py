@@ -16,6 +16,7 @@ from modules.maintenance_execution.infrastructure.postgres.report_models import 
     GeneratedReportRecord,
     MaintenanceActivityRecord,
     MaintenanceReportRecord,
+    ReportFormatRecord,
     ReportSignatureRecord,
     ReportParticipantRecord,
     ReportVersionRecord,
@@ -54,6 +55,41 @@ class PreventivePDFService:
             loader=FileSystemLoader(self.template_dir),
             autoescape=select_autoescape(["html", "xml"]),
         )
+
+    async def _format_context(
+        self,
+        version: ReportVersionRecord,
+        report_kind: str,
+    ) -> tuple[str, str, str]:
+        format_code = version.format_code_snapshot
+        revision = version.format_revision_snapshot
+        template_name = version.format_template_snapshot
+        if not (format_code and revision and template_name):
+            report_format = await self._session.scalar(
+                select(ReportFormatRecord)
+                .where(
+                    ReportFormatRecord.report_kind == report_kind,
+                    ReportFormatRecord.status == "ACTIVE",
+                )
+                .limit(1)
+            )
+            if report_format is None:
+                raise ReportValidationError(
+                    f"No existe un formato activo para el reporte {report_kind}."
+                )
+            format_code = report_format.format_code
+            revision = report_format.revision
+            template_name = report_format.template_name
+
+        if Path(template_name).name != template_name:
+            raise ReportValidationError("La plantilla configurada no es válida.")
+        return format_code, revision, template_name
+
+    @staticmethod
+    def _formatted_report_code(format_code: str, revision: str) -> str:
+        normalized = revision.strip()
+        suffix = normalized.zfill(2) if normalized.isdigit() else normalized
+        return f"{format_code}-{suffix}"
 
     async def generate(
         self,
@@ -138,7 +174,11 @@ class PreventivePDFService:
 
         photos = await self._photos(detail)
         signatures = await self._signatures(version.id)
-        report_code = settings.preventive_report_format_code
+        format_code, revision, template_name = await self._format_context(
+            version,
+            "PREVENTIVE",
+        )
+        report_code = self._formatted_report_code(format_code, revision)
         activity_duration = self._duration(
             detail.preventive_report.activity_started_at,
             detail.preventive_report.activity_ended_at,
@@ -147,7 +187,7 @@ class PreventivePDFService:
             "report_code": report_code,
             "report_title": detail.activity.title,
             "report_number": detail.activity.internal_code,
-            "revision": settings.preventive_report_revision,
+            "revision": revision,
             "generated_at": self._format_datetime(datetime.now(timezone.utc)),
             "activity_date": self._format_date(detail.preventive_report.actual_date),
             "activity_time": self._time_range(
@@ -165,7 +205,7 @@ class PreventivePDFService:
             "signatures": signatures,
             "logo_data_uri": self._data_uri(settings.resolved_report_logo),
         }
-        template = self._templates.get_template("preventive_report.html")
+        template = self._templates.get_template(template_name)
         rendered_html = template.render(**context)
         pdf_bytes = HTML(
             string=rendered_html,
@@ -423,13 +463,17 @@ class CorrectivePDFService(PreventivePDFService):
             if maintenance_report and maintenance_report.report_year
             else generated_at.year
         )
-        report_code = settings.corrective_report_format_code
+        format_code, revision, template_name = await self._format_context(
+            version,
+            "CORRECTIVE",
+        )
+        report_code = self._formatted_report_code(format_code, revision)
         photos = await self._photos(detail)
         signatures = await self._signatures(version.id)
         event = await self._session.get(CorrectiveEventRecord, detail.activity.event_id)
         context = {
             "report_code": report_code,
-            "revision": settings.corrective_report_revision,
+            "revision": revision,
             "report_number": (
                 f"{detail.report_number:04d}/{number_year % 100:02d}"
             ),
@@ -449,7 +493,7 @@ class CorrectivePDFService(PreventivePDFService):
             "logo_data_uri": self._data_uri(settings.resolved_report_logo),
             "format_datetime": self._format_datetime,
         }
-        template = self._templates.get_template("corrective_report.html")
+        template = self._templates.get_template(template_name)
         rendered_html = template.render(**context)
         pdf_bytes = HTML(
             string=rendered_html,

@@ -341,6 +341,12 @@ class AssetReplacementRecord(OperationalRecordMixin, Base):
     )
     position_snapshot: Mapped[str] = mapped_column(String(200), nullable=False)
     source_description: Mapped[str] = mapped_column(Text, nullable=False)
+    source_kind: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="WAREHOUSE"
+    )
+    donor_parent_asset_id: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("assets.id"), index=True
+    )
     destination_description: Mapped[str] = mapped_column(Text, nullable=False)
     replaced_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     responsible_user_id: Mapped[str] = mapped_column(

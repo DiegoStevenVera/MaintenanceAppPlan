@@ -148,6 +148,8 @@ class CalibrationReportDTO(BaseModel):
 
 
 class ComponentReplacementDTO(BaseModel):
+    source_kind: str = "WAREHOUSE"
+    donor_parent_asset_id: str | None = None
     parent_asset_id: str
     parent_asset_name: str | None = None
     removed_asset_id: str
@@ -336,6 +338,8 @@ class CalibrationReportWriteDTO(BaseModel):
 
 
 class ComponentReplacementWriteDTO(BaseModel):
+    source_kind: str = "WAREHOUSE"
+    donor_parent_asset_id: str | None = None
     parent_asset_id: str
     removed_asset_id: str
     installed_asset_id: str

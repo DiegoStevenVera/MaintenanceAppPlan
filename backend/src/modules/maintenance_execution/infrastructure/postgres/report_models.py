@@ -227,6 +227,33 @@ class MaintenanceReportRecord(OperationalRecordMixin, Base):
     )
 
 
+class ReportFormatRecord(OperationalRecordMixin, Base):
+    """Versioned definition of an official report format."""
+
+    __tablename__ = "report_formats"
+    __table_args__ = (
+        UniqueConstraint(
+            "report_kind",
+            "format_code",
+            "revision",
+            name="uq_report_formats_kind_code_revision",
+        ),
+        Index(
+            "uq_report_formats_active_kind",
+            "report_kind",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+    )
+
+    report_kind: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    format_code: Mapped[str] = mapped_column(String(80), nullable=False)
+    revision: Mapped[str] = mapped_column(String(20), nullable=False)
+    template_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
+    notes: Mapped[str | None] = mapped_column(Text)
+
+
 class ReportVersionRecord(OperationalRecordMixin, Base):
     __tablename__ = "report_versions"
     __table_args__ = (
@@ -250,6 +277,14 @@ class ReportVersionRecord(OperationalRecordMixin, Base):
     summary: Mapped[str | None] = mapped_column(Text)
     stop_after_block_order: Mapped[int | None] = mapped_column(Integer)
     source_version_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("report_versions.id"))
+    report_format_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("report_formats.id"),
+        index=True,
+    )
+    format_code_snapshot: Mapped[str | None] = mapped_column(String(80))
+    format_revision_snapshot: Mapped[str | None] = mapped_column(String(20))
+    format_template_snapshot: Mapped[str | None] = mapped_column(String(160))
     created_by_user_id: Mapped[str] = mapped_column(
         String(80),
         ForeignKey("users.id"),
@@ -258,6 +293,45 @@ class ReportVersionRecord(OperationalRecordMixin, Base):
     finalized_by_user_id: Mapped[str | None] = mapped_column(String(80), ForeignKey("users.id"))
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     data_snapshot: Mapped[dict | None] = mapped_column(JSONB)
+
+
+class ReportAuditEventRecord(OperationalRecordMixin, Base):
+    """Append-only internal traceability for report versions and their lifecycle."""
+
+    __tablename__ = "report_audit_events"
+    __table_args__ = (
+        Index(
+            "ix_report_audit_events_activity_occurred_at",
+            "maintenance_activity_id",
+            "occurred_at",
+        ),
+        Index(
+            "ix_report_audit_events_version_occurred_at",
+            "report_version_id",
+            "occurred_at",
+        ),
+    )
+
+    maintenance_activity_id: Mapped[UUID] = mapped_column(
+        Uuid,
+        ForeignKey("maintenance_activities.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    report_version_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("report_versions.id", ondelete="SET NULL"),
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    actor_user_id: Mapped[str] = mapped_column(
+        String(80),
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True,
+    )
+    details: Mapped[dict | None] = mapped_column(JSONB)
 
 
 class ReportVersionAssetRecord(OperationalRecordMixin, Base):
