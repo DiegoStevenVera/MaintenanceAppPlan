@@ -303,7 +303,7 @@ Cloud/on-premise production deployment remains pending approval.
 
 ## 11. PCON Annual and Weekly Planning Flow
 
-1. Every authenticated role can open `Plan anual` and inspect the hierarchy
+1. Administrators can open `Plan anual` and inspect the hierarchy
    `Subsystem -> Equipment category -> Geographic location -> Equipment ->
    Equipment maintenance`.
 2. The twelve month columns contain quantities of planned maintenance
@@ -322,20 +322,24 @@ Cloud/on-premise production deployment remains pending approval.
    occurrences, moving an untouched occurrence to another month, deleting an
    untouched occurrence, or cancelling a confirmed future occurrence with a
    reason. Every operation is added to annual plan history.
-6. In `Programación semanal`, the editor chooses an unscheduled occurrence and
+6. After changing a monthly quantity, the same cell dialog may optionally
+   capture a tentative start/end range for every newly created occurrence.
+   These entries use the exact same weekly draft proposals described below;
+   they remain unconfirmed until the weekly block is validated.
+7. In `Programación semanal`, the editor chooses an unscheduled occurrence and
    records its exact start/end
    range. This creates or updates a `PROPOSED` schedule revision; it does not
    alter the maintenance activity yet.
-7. A previously confirmed activity can be proposed again only with a reason.
-8. The weekly screen accumulates proposals in one draft session.
-9. `Confirmar semana` validates every proposal, the weekly date boundary,
+8. A previously confirmed activity can be proposed again only with a reason.
+9. The weekly screen accumulates proposals in one draft session.
+10. `Confirmar semana` validates every proposal, the weekly date boundary,
    activity status, required reprogramming reasons, and overlapping activities
    for the same primary equipment.
-10. If any validation fails, the transaction rolls back and no activity date
+11. If any validation fails, the transaction rolls back and no activity date
    changes.
-11. If all validations pass, every activity receives its confirmed start/end
+12. If all validations pass, every activity receives its confirmed start/end
    range, revisions become `CONFIRMED`, prior revisions become `SUPERSEDED`,
    and the session becomes `CONFIRMED`.
-12. The toolbar history separates annual administrative changes from weekly
+13. The toolbar history separates annual administrative changes from weekly
     schedule revisions and exposes actor, reason, timestamp, and prior/replacement
     information as applicable.

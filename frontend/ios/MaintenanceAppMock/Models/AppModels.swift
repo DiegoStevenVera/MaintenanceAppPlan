@@ -20,7 +20,7 @@ enum UserRole: String, CaseIterable, Identifiable, Codable {
 
     var label: String {
         switch self {
-        case .maintenanceEngineer: return "Ingeniero de Mantenimiento"
+        case .maintenanceEngineer: return "Ingeniero de Mantenimiento de Sistemas de Señalización"
         case .coordinator: return "Coordinador"
         case .boss: return "Jefe"
         case .administrator: return "Administrador"
@@ -38,7 +38,7 @@ enum UserRole: String, CaseIterable, Identifiable, Codable {
 
     var canEditMaintenance: Bool { self != .boss }
     var canCloseMaintenance: Bool { self == .coordinator || self == .administrator }
-    var canEditPlanning: Bool { self == .coordinator || self == .administrator }
+    var canEditPlanning: Bool { self == .administrator }
 }
 
 struct AppUser: Identifiable, Codable {

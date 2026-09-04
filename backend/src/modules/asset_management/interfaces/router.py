@@ -13,6 +13,7 @@ from modules.asset_management.interfaces.schemas import (
     StockAssetDTO,
 )
 from modules.identity_access.interfaces.dependencies import get_current_user, require_roles
+from modules.identity_access.interfaces.schemas import UserDTO
 from shared_kernel.schemas import Page, UserRole
 
 router = APIRouter(
@@ -63,6 +64,7 @@ async def list_stock_assets(
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     session: AsyncSession = Depends(get_session),
+    _: UserDTO = Depends(require_roles(UserRole.ADMINISTRATOR)),
 ) -> Page[StockAssetDTO]:
     if not uses_postgres():
         return Page(items=[], total=0, limit=limit, offset=offset)

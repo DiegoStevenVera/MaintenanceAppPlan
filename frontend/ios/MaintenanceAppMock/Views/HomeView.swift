@@ -3,6 +3,7 @@ import SwiftUI
 struct HomeView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
+    @EnvironmentObject private var offlineStore: OfflineReportStore
     @State private var selectedMetric: DashboardMetric?
 
     private enum DashboardMetric: String {
@@ -42,7 +43,10 @@ struct HomeView: View {
                     }
                 }
 
-                LazyVGrid(columns: metricColumns, spacing: AppSpacing.md) {
+                if isOfflineMode {
+                    offlineWorkSection
+                } else {
+                    LazyVGrid(columns: metricColumns, spacing: AppSpacing.md) {
                     metricButton(
                         metric: .preventiveToday,
                         title: "Preventivos de hoy",
@@ -67,36 +71,36 @@ struct HomeView: View {
                         tint: BrandColor.green,
                         statusText: "Listos para cierre"
                     )
-                }
+                    }
 
-                if selectedMetric == nil || selectedMetric == .preventiveToday {
+                    if selectedMetric == nil || selectedMetric == .preventiveToday {
                     dashboardSection(
                         title: "Preventivos de hoy",
                         subtitle: "Actividades con fecha especifica para el turno",
-                        activities: activityStore.dashboard?.preventiveToday ?? [],
+                        activities: (activityStore.dashboard?.preventiveToday ?? []).map(offlineStore.displayActivity),
                         emptyMessage: "No hay preventivos con fecha especifica para hoy."
                     )
-                }
+                    }
 
-                if selectedMetric == nil || selectedMetric == .activeCorrectives {
+                    if selectedMetric == nil || selectedMetric == .activeCorrectives {
                     dashboardSection(
                         title: "Correctivos",
                         subtitle: "Actividades programadas y en progreso",
-                        activities: activityStore.dashboard?.activeCorrectives ?? [],
+                        activities: (activityStore.dashboard?.activeCorrectives ?? []).map(offlineStore.displayActivity),
                         emptyMessage: "No hay correctivos activos."
                     )
-                }
+                    }
 
-                if selectedMetric == .pendingClosure {
+                    if selectedMetric == .pendingClosure {
                     dashboardSection(
                         title: "Pendientes de cierre",
                         subtitle: "Actividades completadas que esperan cierre",
-                        activities: activityStore.dashboard?.pendingClosure ?? [],
+                        activities: (activityStore.dashboard?.pendingClosure ?? []).map(offlineStore.displayActivity),
                         emptyMessage: "No hay mantenimientos pendientes de cierre."
                     )
-                }
+                    }
 
-                if let error = activityStore.dashboardError {
+                    if let error = activityStore.dashboardError {
                     ContentUnavailableView {
                         Label("No se pudo cargar Inicio", systemImage: "wifi.exclamationmark")
                     } description: {
@@ -104,10 +108,11 @@ struct HomeView: View {
                     } actions: {
                         Button("Reintentar") { Task { await loadDashboard() } }
                     }
-                } else if activityStore.isLoadingDashboard && activityStore.dashboard == nil {
+                    } else if activityStore.isLoadingDashboard && activityStore.dashboard == nil {
                     ProgressView("Cargando indicadores")
                         .frame(maxWidth: .infinity)
                         .padding(AppSpacing.xl)
+                    }
                 }
             }
             .padding(AppSpacing.lg)
@@ -121,10 +126,53 @@ struct HomeView: View {
     }
 
     private func loadDashboard() async {
+        guard !isOfflineMode else { return }
         let calendar = Calendar.current
         let start = calendar.startOfDay(for: Date())
         guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return }
         await activityStore.loadDashboard(dayFrom: start, dayTo: end, session: session)
+    }
+
+    private var isOfflineMode: Bool { !offlineStore.isNetworkAvailable }
+
+    private var offlineActivities: [APIActivity] {
+        offlineStore.workPackagesByActivity.values
+            .map { APIActivity(detail: $0.activityDetail) }
+            .sorted { ($0.scheduledAt ?? .distantFuture) < ($1.scheduledAt ?? .distantFuture) }
+    }
+
+    @ViewBuilder
+    private var offlineWorkSection: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            SectionHeaderText(
+                title: "Trabajo descargado",
+                subtitle: "\(offlineActivities.count) actividad(es) disponibles sin conexión"
+            )
+            if offlineActivities.isEmpty {
+                GlassPanel {
+                    Text("No hay actividades descargadas en este iPad.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                LazyVStack(spacing: AppSpacing.sm) {
+                    ForEach(offlineActivities) { activity in
+                        NavigationLink {
+                            if activity.activityType == "CORRECTIVE" {
+                                CorrectiveDetailView(eventID: activity.id)
+                            } else {
+                                PreventiveDetailView(activityID: activity.id)
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                                APIActivityCard(activity: activity)
+                                OfflineActivityDownloadMetadata(activity: activity)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
     }
 
     private func metricButton(
@@ -195,6 +243,7 @@ struct HomeView_Previews: PreviewProvider {
             HomeView()
                 .environmentObject(SessionStore())
                 .environmentObject(MaintenanceActivityStore())
+                .environmentObject(OfflineReportStore())
         }
     }
 }

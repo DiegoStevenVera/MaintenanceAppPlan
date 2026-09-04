@@ -133,6 +133,7 @@ Estados PCON importantes:
 | `maintenance_activity_assignments` | Asignaciones de usuarios a una actividad y rol de asignación | `tbl_Workers_Activity` |
 | `maintenance_status_history` | Historial de cambios de estado y motivo | `APP` / ciclo de vida |
 | `maintenance_reopen_records` | Auditoría de reaperturas por coordinador/administrador | `APP` |
+| `report_audit_events` | Bitácora interna inmutable de creación/finalización de versiones y cierre/reapertura del mantenimiento, con fecha, actor y motivo cuando aplica | `APP` |
 | `corrective_events` | Aviso correctivo, SAP, severidad, activo afectado, ubicación, estado y respuesta | `tbl_WorkMaintenanceCorrective` + `tbl_CorrectiveReports_Detail` |
 | `corrective_event_comments` | Comentarios propios de una incidencia correctiva | `APP` / interfaz actual |
 | `maintenance_knowledge_comments` | Comentarios reutilizables para futuras ejecuciones preventivas por plantilla o equipo | `APP` / interfaz actual |
@@ -144,6 +145,7 @@ Estados PCON importantes:
 |---|---|---|
 | `maintenance_reports` | Reporte lógico por actividad y tipo, número anual correctivo y estado | `Maintenance_Storage` / reportes legacy |
 | `report_versions` | Versiones editables/finalizadas, snapshot JSON, creador y fecha de finalización | `Maintenance_Storage` / `tbl_Reports` |
+| `report_formats` | Formatos oficiales versionados por tipo de reporte: código, revisión, HTML activo y vigencia lógica | `APP` / control documental |
 | `report_version_assets` | Snapshot inmutable de activos que aparecieron en una versión | `DERIVED` |
 | `report_participants` | Participantes seleccionados y rol congelado para una versión | `tbl_Workers_Activity` |
 | `report_signatures` | Firma dibujada o archivo de firma del participante | `tbl_Workers_Activity` / `APP` |

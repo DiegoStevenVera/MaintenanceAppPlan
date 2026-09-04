@@ -397,12 +397,14 @@ struct CorrectiveReportFormView: View {
                         Label("Guardar borrador", systemImage: "square.and.arrow.down.fill")
                     }
                     .buttonStyle(ActionTileButtonStyle())
-                    Button {
-                        Task { await save(finalize: true) }
-                    } label: {
-                        Label("Finalizar versión", systemImage: "checkmark.seal.fill")
+                    if offlineStore.isNetworkAvailable {
+                        Button {
+                            Task { await save(finalize: true) }
+                        } label: {
+                            Label("Finalizar versión", systemImage: "checkmark.seal.fill")
+                        }
+                        .buttonStyle(ActionTileButtonStyle(prominent: true))
                     }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
                 }
                 .disabled(isSaving)
                 if isSaving { ProgressView("Guardando reporte") }
@@ -525,10 +527,14 @@ struct CorrectiveReportFormView: View {
         errorMessage = nil
         successMessage = nil
         let payload = currentPayload
-        await persistOffline(payload: payload, queueForSync: true)
-        if finalize && !offlineStore.isNetworkAvailable {
-            successMessage = "Borrador protegido en este iPad."
-            errorMessage = "La versión solo puede finalizarse cuando vuelva la conexión."
+        await persistOffline(
+            payload: payload,
+            queueForSync: true
+        )
+        if !offlineStore.isNetworkAvailable {
+            lastAutosavedPayload = payload
+            successMessage = "Borrador guardado en este iPad. Finaliza la versión al recuperar conexión."
+            dismiss()
             isSaving = false
             return
         }
@@ -544,7 +550,8 @@ struct CorrectiveReportFormView: View {
             await offlineStore.markSynchronized(
                 activityID: eventID,
                 synchronizedPayload: payload,
-                reportVersionID: result.versionID
+                reportVersionID: result.versionID,
+                announce: false
             )
             baseReportVersionID = result.versionID
             lastAutosavedPayload = currentPayload
@@ -552,6 +559,9 @@ struct CorrectiveReportFormView: View {
                 ? "Versión \(result.versionNumber) finalizada."
                 : "Borrador guardado."
             await activityStore.loadDetail(id: eventID, session: session, force: true)
+            if let detail = activityStore.details[eventID] {
+                await offlineStore.reconcileWorkPackage(with: detail)
+            }
             if finalize {
                 didFinalize = true
                 dismiss()
@@ -691,6 +701,8 @@ struct CorrectiveReportFormView: View {
     ) -> Binding<APIComponentReplacementWrite> {
         Binding {
             activity.wrappedValue.replacement ?? APIComponentReplacementWrite(
+                sourceKind: "WAREHOUSE",
+                donorParentAssetID: nil,
                 parentAssetID: "",
                 removedAssetID: "",
                 installedAssetID: "",
@@ -779,6 +791,22 @@ private struct ComponentReplacementEditor: View {
         stockAssets.first { $0.id == replacement.installedAssetID }
     }
 
+    private var sourceKind: String {
+        replacement.sourceKind ?? "WAREHOUSE"
+    }
+
+    private var sourceModeTitle: String {
+        switch sourceKind {
+        case "EQUIPMENT_TRANSFER": return "Transferencia desde otro equipo"
+        case "EQUIPMENT_SWAP": return "Intercambio entre equipos"
+        default: return "Desde almacén"
+        }
+    }
+
+    private var sourceSelectionTitle: String {
+        sourceKind == "WAREHOUSE" ? "Seleccionar de stock" : "Seleccionar componente donante"
+    }
+
     private var locations: [String] {
         Array(Set(inventoryLocations + stockAssets.map(\.path)))
             .filter { !$0.isEmpty }
@@ -786,7 +814,15 @@ private struct ComponentReplacementEditor: View {
     }
 
     private var availableStock: [APIEditorAsset] {
-        stockAssets.filter { $0.path == replacement.sourceDescription }
+        stockAssets.filter {
+            normalizedLocation($0.path) == normalizedLocation(replacement.sourceDescription)
+        }
+    }
+
+    private func normalizedLocation(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     var body: some View {
@@ -865,10 +901,34 @@ private struct ComponentReplacementEditor: View {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(
                     title: "Componente a reponer",
-                    subtitle: "Seleccione primero el almacén de origen"
+                    subtitle: "Defina el origen del componente de reposición"
                 )
 
-                Picker("Se obtiene de", selection: $replacement.sourceDescription) {
+                Picker(
+                    "Origen del componente",
+                    selection: Binding(
+                        get: { sourceKind },
+                        set: { mode in
+                            replacement.sourceKind = mode
+                            replacement.installedAssetID = ""
+                            replacement.donorParentAssetID = nil
+                        }
+                    )
+                ) {
+                    Text("Desde almacén").tag("WAREHOUSE")
+                    Text("Transferencia desde otro equipo").tag("EQUIPMENT_TRANSFER")
+                    Text("Intercambio entre equipos").tag("EQUIPMENT_SWAP")
+                }
+                .pickerStyle(.menu)
+
+                Text(sourceModeTitle)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+
+                Picker(
+                    sourceKind == "WAREHOUSE" ? "Se obtiene de" : "Equipo / ubicación donante",
+                    selection: $replacement.sourceDescription
+                ) {
                     ForEach(locations, id: \.self) { Text($0).tag($0) }
                 }
                 .pickerStyle(.menu)
@@ -883,10 +943,11 @@ private struct ComponentReplacementEditor: View {
                     isSelectingStock = true
                 } label: {
                     ReplacementSelectionButtonLabel(
-                        title: selectedInstalledAsset?.name ?? "Seleccionar de stock",
+                        title: selectedInstalledAsset?.name ?? sourceSelectionTitle,
                         subtitle: selectedInstalledAsset?.serialNumber
                             ?? replacement.sourceDescription,
-                        systemImage: "shippingbox.fill"
+                        systemImage: sourceKind == "WAREHOUSE"
+                            ? "shippingbox.fill" : "arrow.left.arrow.right"
                     )
                 }
                 .buttonStyle(.plain)
@@ -948,7 +1009,8 @@ private struct ComponentReplacementEditor: View {
                 assets: equipmentAssets,
                 searchText: $removedSearch,
                 selectedAssetID: replacement.removedAssetID,
-                showsHierarchy: true
+                showsHierarchy: true,
+                requiresStockAvailability: false
             ) { asset in
                 if replacement.removedAssetID != asset.id {
                     replacement.removedPartNumber = nil
@@ -969,7 +1031,8 @@ private struct ComponentReplacementEditor: View {
                 assets: availableStock,
                 searchText: $stockSearch,
                 selectedAssetID: replacement.installedAssetID,
-                showsHierarchy: false
+                showsHierarchy: false,
+                requiresStockAvailability: sourceKind == "WAREHOUSE"
             ) { asset in
                 if replacement.installedAssetID != asset.id {
                     replacement.installedPartNumber = nil
@@ -979,6 +1042,8 @@ private struct ComponentReplacementEditor: View {
                 }
                 replacement.installedAssetID = asset.id
                 replacement.sourceDescription = asset.path
+                replacement.donorParentAssetID = sourceKind == "WAREHOUSE"
+                    ? nil : asset.parentID
                 isSelectingStock = false
             }
             .presentationDetents([.medium, .large])
@@ -1119,6 +1184,7 @@ private struct ReplacementAssetSelectionSheet: View {
     @Binding var searchText: String
     let selectedAssetID: String
     let showsHierarchy: Bool
+    let requiresStockAvailability: Bool
     let onSelect: (APIEditorAsset) -> Void
     @State private var expandedAssetIDs: Set<String> = []
 
@@ -1179,6 +1245,8 @@ private struct ReplacementAssetSelectionSheet: View {
                                     expandedAssetIDs: $expandedAssetIDs,
                                     query: normalizedQuery,
                                     rootAssetIDs: rootAssetIDs,
+                                    allowsRootSelection: !showsHierarchy,
+                                    requiresStockAvailability: requiresStockAvailability,
                                     onSelect: onSelect
                                 )
                             }
@@ -1258,6 +1326,8 @@ private struct ReplacementAssetTreeBranchView: View {
     @Binding var expandedAssetIDs: Set<String>
     let query: String
     let rootAssetIDs: Set<String>
+    let allowsRootSelection: Bool
+    let requiresStockAvailability: Bool
     let onSelect: (APIEditorAsset) -> Void
 
     private var visibleChildren: [ReplacementAssetBranch] {
@@ -1266,7 +1336,15 @@ private struct ReplacementAssetTreeBranchView: View {
     }
 
     private var canSelect: Bool {
-        branch.asset.selectable && !rootAssetIDs.contains(branch.asset.id)
+        branch.asset.selectable
+            && (allowsRootSelection || !rootAssetIDs.contains(branch.asset.id))
+            && (!requiresStockAvailability || isAvailableInStock)
+    }
+
+    private var isAvailableInStock: Bool {
+        branch.asset.status
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "EN STOCK"
     }
 
     var body: some View {
@@ -1282,6 +1360,8 @@ private struct ReplacementAssetTreeBranchView: View {
                             expandedAssetIDs: $expandedAssetIDs,
                             query: query,
                             rootAssetIDs: rootAssetIDs,
+                            allowsRootSelection: allowsRootSelection,
+                            requiresStockAvailability: requiresStockAvailability,
                             onSelect: onSelect
                         )
                         .padding(.leading, AppSpacing.lg)
@@ -1322,6 +1402,11 @@ private struct ReplacementAssetTreeBranchView: View {
                     Text(branch.asset.serialNumber ?? branch.asset.partNumber ?? branch.asset.path)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if requiresStockAvailability {
+                        Text(isAvailableInStock ? "Estado: En stock" : "Estado: \(branch.asset.status)")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(isAvailableInStock ? BrandColor.green : BrandColor.amber)
+                    }
                 }
                 Spacer()
                 if branch.asset.id == selectedAssetID {
@@ -1330,6 +1415,9 @@ private struct ReplacementAssetTreeBranchView: View {
                 } else if canSelect {
                     Image(systemName: "circle")
                         .foregroundStyle(.tertiary)
+                } else if requiresStockAvailability {
+                    Image(systemName: "lock.fill")
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(AppSpacing.md)

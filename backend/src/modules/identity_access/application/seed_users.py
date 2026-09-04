@@ -7,14 +7,14 @@ SEED_USERS = [
         name="Diego Vera",
         email="diego@maintenance.local",
         role=UserRole.MAINTENANCE_ENGINEER,
-        role_label="Ingeniero de Mantenimiento",
+        role_label="Ingeniero de Mantenimiento de Sistemas de Señalización",
     ),
     UserDTO(
         id="user-joab",
         name="Joab Apaza",
         email="joab@maintenance.local",
         role=UserRole.MAINTENANCE_ENGINEER,
-        role_label="Ingeniero de Mantenimiento",
+        role_label="Ingeniero de Mantenimiento de Sistemas de Señalización",
     ),
     UserDTO(
         id="user-fredy",

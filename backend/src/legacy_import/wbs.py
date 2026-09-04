@@ -1541,4 +1541,4 @@ class WBSImporter:
             return "BOSS", "Jefe"
         if boolean(values.get("Coordinator")):
             return "COORDINATOR", "Coordinador"
-        return "MAINTENANCE_ENGINEER", "Ingeniero de Mantenimiento"
+        return "MAINTENANCE_ENGINEER", "Ingeniero de Mantenimiento de Sistemas de Señalización"

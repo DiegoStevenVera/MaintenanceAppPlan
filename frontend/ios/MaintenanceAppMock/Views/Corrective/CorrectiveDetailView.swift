@@ -10,18 +10,27 @@ struct CorrectiveDetailView: View {
     @State private var commentText = ""
     @State private var isSendingComment = false
     @State private var commentError: String?
-    @State private var isDownloadingOfflineWork = false
-    @State private var offlineWorkMessage: String?
+
+    private var downloadedDetail: APIActivityDetail? {
+        offlineStore.workPackage(for: eventID)?.activityDetail
+    }
+
+    private var displayedDetail: APIActivityDetail? {
+        if offlineStore.hasPendingWork(for: eventID), let downloadedDetail {
+            return downloadedDetail
+        }
+        return activityStore.details[eventID] ?? downloadedDetail
+    }
 
     var body: some View {
         Group {
-            if let detail = activityStore.details[eventID] {
+            if let detail = displayedDetail {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AppSpacing.xl) {
                         header(detail)
-                        offlineWorkPanel(detail)
                         lifecycleActions(detail)
                         reportActions(detail)
+                        offlineReportState
                         statusPanel(detail)
                         eventData(detail)
                         correctiveReport(detail)
@@ -33,6 +42,7 @@ struct CorrectiveDetailView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .refreshable {
+                    guard offlineStore.isNetworkAvailable else { return }
                     await activityStore.loadDetail(id: eventID, session: session, force: true)
                     await loadComments()
                 }
@@ -56,8 +66,28 @@ struct CorrectiveDetailView: View {
         .background(MaintenanceScreenBackground())
         .navigationTitle("Detalle correctivo")
         .task {
-            await activityStore.loadDetail(id: eventID, session: session)
+            if let downloadedDetail {
+                activityStore.cacheDetail(downloadedDetail)
+                await offlineStore.markWorkPackageOpened(activityID: eventID)
+            }
+            if offlineStore.isNetworkAvailable {
+                await activityStore.loadDetail(id: eventID, session: session, force: true)
+                if let detail = activityStore.details[eventID] {
+                    await offlineStore.reconcileWorkPackage(with: detail)
+                }
+            }
+            guard offlineStore.isNetworkAvailable else { return }
             await loadComments()
+        }
+        .onChange(of: offlineStore.lastSyncEvent?.id) { _, _ in
+            guard offlineStore.lastSyncEvent?.activityID == eventID,
+                  offlineStore.isNetworkAvailable else { return }
+            Task {
+                await activityStore.loadDetail(id: eventID, session: session, force: true)
+                if let detail = activityStore.details[eventID] {
+                    await offlineStore.reconcileWorkPackage(with: detail)
+                }
+            }
         }
     }
 
@@ -73,55 +103,18 @@ struct CorrectiveDetailView: View {
         )
     }
 
-    private func offlineWorkPanel(_ detail: APIActivityDetail) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Trabajo offline", subtitle: "Paquete del correctivo para trabajo en campo")
-                Text(offlineStore.workPackage(for: eventID) == nil
-                    ? "Descarga el formulario, activos, stock disponible y participantes antes de perder conexión."
-                    : "Este correctivo ya está disponible en este iPad.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                ActionButtonGrid {
-                    Button { Task { await downloadOfflineWork(detail) } } label: {
-                        if isDownloadingOfflineWork { ProgressView() }
-                        else { Label(offlineStore.workPackage(for: eventID) == nil ? "Descargar trabajo" : "Actualizar descarga", systemImage: "arrow.down.circle.fill") }
-                    }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
-                    .disabled(isDownloadingOfflineWork || !offlineStore.isNetworkAvailable)
-                    if offlineStore.workPackage(for: eventID) != nil {
-                        Button { Task { await offlineStore.removeWorkPackage(activityID: eventID) } } label: {
-                            Label("Eliminar descarga", systemImage: "trash")
-                        }
-                        .buttonStyle(ActionTileButtonStyle())
-                    }
-                }
-                if let offlineWorkMessage { Text(offlineWorkMessage).font(.caption).foregroundStyle(.secondary) }
-            }
-        }
-    }
-
     @MainActor
     private func loadComments() async {
+        guard offlineStore.isNetworkAvailable else {
+            comments = offlineStore.workPackage(for: eventID)?.editor.comments ?? []
+            return
+        }
         do {
             comments = try await session.withValidAccessToken { token in
                 try await reportService.comments(activityID: eventID, accessToken: token)
             }
         } catch {
             commentError = error.localizedDescription
-        }
-    }
-
-    @MainActor
-    private func downloadOfflineWork(_ detail: APIActivityDetail) async {
-        isDownloadingOfflineWork = true
-        offlineWorkMessage = nil
-        defer { isDownloadingOfflineWork = false }
-        do {
-            try await offlineStore.downloadWorkPackage(activityID: eventID, detail: detail, session: session)
-            offlineWorkMessage = "Trabajo descargado y protegido en este iPad."
-        } catch {
-            offlineWorkMessage = error.localizedDescription
         }
     }
 
@@ -176,7 +169,9 @@ struct CorrectiveDetailView: View {
                         CorrectiveReportFormView(eventID: eventID)
                     } label: {
                         Label(
-                            detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte",
+                            offlineStore.draft(for: eventID) != nil
+                                ? "Seguir editando"
+                                : (detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte"),
                             systemImage: "wrench.and.screwdriver.fill"
                         )
                     }
@@ -203,6 +198,28 @@ struct CorrectiveDetailView: View {
                         Label("Generar PDF", systemImage: "doc.badge.plus")
                     }
                     .buttonStyle(ActionTileButtonStyle(prominent: true))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var offlineReportState: some View {
+        if offlineStore.draft(for: eventID) != nil {
+            GlassPanel {
+                Label(
+                    "Borrador del reporte protegido en este iPad.",
+                    systemImage: "externaldrive.fill"
+                )
+                .foregroundStyle(.secondary)
+                if offlineStore.isNetworkAvailable {
+                    Button("Sincronizar ahora") {
+                        Task {
+                            await offlineStore.retry(activityID: eventID)
+                            await activityStore.loadDetail(id: eventID, session: session, force: true)
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
         }
@@ -255,6 +272,7 @@ struct CorrectiveDetailView: View {
             MaintenanceLifecycleActionPanel(
                 status: detail.status,
                 role: role,
+                completionAllowed: detail.reports.contains { $0.documentStatus == "FINALIZED" },
                 isWorking: activityStore.transitioningIDs.contains(eventID),
                 errorMessage: activityStore.transitionErrors[eventID],
                 onClearError: {
@@ -266,6 +284,9 @@ struct CorrectiveDetailView: View {
                             await activityStore.performLifecycle(
                                 id: eventID, command: command, reason: reason, session: session
                             )
+                            if let updated = activityStore.details[eventID] {
+                                await offlineStore.reconcileWorkPackage(with: updated)
+                            }
                         } else {
                             await offlineStore.queueLifecycle(
                                 activityID: eventID, command: command, reason: reason
@@ -427,7 +448,10 @@ struct CorrectiveDetailView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Versiones del reporte", subtitle: "Historial normalizado")
-                if detail.reports.isEmpty {
+                if offlineStore.draft(for: eventID) != nil {
+                    localDraftRow
+                }
+                if detail.reports.isEmpty && offlineStore.draft(for: eventID) == nil {
                     Text("Aun no hay versiones generadas.").foregroundStyle(.secondary)
                 } else {
                     ForEach(detail.reports) { report in
@@ -443,7 +467,7 @@ struct CorrectiveDetailView: View {
                                         .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Text(report.documentStatus)
+                                Text(report.documentStatus == "DRAFT" ? "Borrador" : report.documentStatus)
                                     .font(.caption.weight(.bold))
                                     .foregroundStyle(BrandColor.green)
                                 Image(systemName: "chevron.right")
@@ -457,6 +481,21 @@ struct CorrectiveDetailView: View {
                 }
             }
         }
+    }
+
+    private var localDraftRow: some View {
+        HStack(spacing: AppSpacing.md) {
+            Image(systemName: "externaldrive.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Correctivo · Borrador local").font(.headline)
+                Text("Protegido en este iPad; pendiente de sincronización")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("Borrador").font(.caption.weight(.bold)).foregroundStyle(.orange)
+        }
+        .padding(.vertical, AppSpacing.xs)
     }
 
     private static let dateFormatter: DateFormatter = {

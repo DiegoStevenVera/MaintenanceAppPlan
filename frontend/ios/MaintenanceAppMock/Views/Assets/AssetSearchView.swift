@@ -60,6 +60,27 @@ struct EquipmentTreeNodeDTO: Identifiable, Codable {
         case selectable
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        category = try container.decode(String.self, forKey: .category)
+        assetType = try container.decode(String.self, forKey: .assetType)
+        status = try container.decode(String.self, forKey: .status)
+        serialNumber = try container.decodeIfPresent(String.self, forKey: .serialNumber)
+        partNumber = try container.decodeIfPresent(String.self, forKey: .partNumber)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        manufacturer = try container.decodeIfPresent(String.self, forKey: .manufacturer)
+        parentID = try container.decodeIfPresent(String.self, forKey: .parentID)
+        depth = try container.decodeIfPresent(Int.self, forKey: .depth) ?? 0
+        slotPath = try container.decodeIfPresent(String.self, forKey: .slotPath)
+        position = try container.decodeIfPresent(String.self, forKey: .position)
+        // DEV/QA may still expose the first tree contract. Keep it readable
+        // while servers are rolled forward with the physical-node fields.
+        nodeKind = try container.decodeIfPresent(String.self, forKey: .nodeKind) ?? "ASSET"
+        selectable = try container.decodeIfPresent(Bool.self, forKey: .selectable) ?? true
+    }
+
     init(
         id: String,
         name: String,

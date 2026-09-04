@@ -23,6 +23,9 @@ struct OfflineReportDraft: Codable, Identifiable {
     var attemptCount: Int
     var nextRetryAt: Date?
     var lastError: String?
+    /// Kept only to decode drafts created by older app versions. New drafts are
+    /// always synchronized as drafts and must be finalized while connected.
+    var finalizeWhenSynced: Bool?
 }
 
 /// Snapshot downloaded deliberately while connected. It lets a report form open
@@ -33,7 +36,7 @@ struct OfflineWorkPackage: Codable, Identifiable {
     let ownerUserID: String
     let environment: String
     let baseURL: String
-    let activityDetail: APIActivityDetail
+    var activityDetail: APIActivityDetail
     let editor: APIReportEditor
     let downloadedAt: Date
     var lastOpenedAt: Date?
@@ -108,6 +111,17 @@ struct OfflineSyncEvent: Identifiable {
     let activityID: String
     let reportVersionID: String
     let synchronizedAt: Date
+}
+
+struct OfflineActivityReconciliation: Identifiable {
+    let id = UUID()
+    let detail: APIActivityDetail
+}
+
+struct OfflineSynchronizationNotice: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 actor OfflineReportDiskStore {
@@ -232,6 +246,8 @@ final class OfflineReportStore: ObservableObject {
     @Published private(set) var isNetworkAvailable = false
     @Published private(set) var isSynchronizing = false
     @Published private(set) var lastSyncEvent: OfflineSyncEvent?
+    @Published private(set) var lastReconciledActivity: OfflineActivityReconciliation?
+    @Published private(set) var lastSynchronizationNotice: OfflineSynchronizationNotice?
 
     private let diskStore: OfflineReportDiskStore
     private let workDiskStore: OfflineWorkDiskStore
@@ -250,6 +266,24 @@ final class OfflineReportStore: ObservableObject {
                 || $0.state == .needsAttention
         }.count
         return reportCount + lifecycleOperations.count + commentOperations.count + correctiveOperations.count
+    }
+
+    var pendingLifecycleOperations: [OfflineLifecycleOperation] {
+        lifecycleOperations.filter {
+            $0.state == .pending || $0.state == .syncing || $0.state == .needsAttention
+        }
+    }
+
+    var pendingCommentOperations: [OfflineCommentOperation] {
+        commentOperations.filter {
+            $0.state == .pending || $0.state == .syncing || $0.state == .needsAttention
+        }
+    }
+
+    var pendingCorrectiveOperations: [OfflineCorrectiveOperation] {
+        correctiveOperations.filter {
+            $0.state == .pending || $0.state == .syncing || $0.state == .needsAttention
+        }
     }
 
     init(
@@ -292,6 +326,10 @@ final class OfflineReportStore: ObservableObject {
         await reloadWorkPackages()
         await reloadOperations()
         await synchronizePending()
+        await reconcileAcknowledgedLifecycleOperations()
+        if isNetworkAvailable {
+            await refreshDownloadedPackages()
+        }
     }
 
     func draft(for activityID: String) -> OfflineReportDraft? {
@@ -300,6 +338,20 @@ final class OfflineReportStore: ObservableObject {
 
     func workPackage(for activityID: String) -> OfflineWorkPackage? {
         workPackagesByActivity[activityID]
+    }
+
+    func displayActivity(_ serverActivity: APIActivity) -> APIActivity {
+        guard hasPendingWork(for: serverActivity.id),
+              let package = workPackagesByActivity[serverActivity.id] else {
+            return serverActivity
+        }
+        return APIActivity(detail: package.activityDetail)
+    }
+
+    func hasPendingWork(for activityID: String) -> Bool {
+        draftsByActivity[activityID] != nil
+            || lifecycleOperations.contains(where: { $0.activityID == activityID })
+            || commentOperations.contains(where: { $0.activityID == activityID })
     }
 
     func downloadWorkPackage(
@@ -381,6 +433,27 @@ final class OfflineReportStore: ObservableObject {
         try? await persistWorkPackages()
     }
 
+    /// Keeps a downloaded package aligned with the authoritative response once
+    /// connectivity returns. Finished work is removed only after there is no
+    /// local work left to upload, preventing stale copies from accumulating.
+    func reconcileWorkPackage(with detail: APIActivityDetail) async {
+        guard workPackagesByActivity[detail.id] != nil else { return }
+        lastReconciledActivity = OfflineActivityReconciliation(detail: detail)
+        let hasPendingLocalWork = hasPendingWork(for: detail.id)
+        let hasFinalizedReport = detail.reports.contains {
+            $0.documentStatus == "FINALIZED"
+        }
+        if ["COMPLETED", "CLOSED"].contains(detail.status),
+           hasFinalizedReport,
+           !hasPendingLocalWork {
+            workPackagesByActivity.removeValue(forKey: detail.id)
+        } else if var package = workPackagesByActivity[detail.id] {
+            package.activityDetail = detail
+            workPackagesByActivity[detail.id] = package
+        }
+        try? await persistWorkPackages()
+    }
+
     func queueLifecycle(
         activityID: String,
         command: MaintenanceLifecycleCommand,
@@ -389,13 +462,40 @@ final class OfflineReportStore: ObservableObject {
         guard let ownerUserID = currentUserID,
               let baseURL = currentBaseURL,
               let environment = currentEnvironment else { return }
-        lifecycleOperations.removeAll { $0.activityID == activityID }
-        lifecycleOperations.append(OfflineLifecycleOperation(
+        // Keep lifecycle commands in their original order. A report completed
+        // offline may depend on its queued start reaching the server first.
+        lifecycleOperations.removeAll {
+            $0.activityID == activityID && $0.command == command
+        }
+        let operation = OfflineLifecycleOperation(
             id: UUID(), activityID: activityID, command: command, reason: reason,
             ownerUserID: ownerUserID, environment: environment, baseURL: baseURL,
             state: .pending, createdAt: Date(), lastError: nil
-        ))
+        )
+        lifecycleOperations.append(operation)
+        await persistLocalLifecycle(
+            activityID: activityID,
+            command: command,
+            at: operation.createdAt
+        )
         try? await persistOperations()
+    }
+
+    private func persistLocalLifecycle(
+        activityID: String,
+        command: MaintenanceLifecycleCommand,
+        at date: Date = Date()
+    ) async {
+        if var package = workPackagesByActivity[activityID] {
+            package.activityDetail = package.activityDetail.applyingOfflineLifecycle(command, at: date)
+            workPackagesByActivity[activityID] = package
+            try? await persistWorkPackages()
+        }
+        if var draft = draftsByActivity[activityID] {
+            draft.activityDetail = draft.activityDetail.applyingOfflineLifecycle(command, at: date)
+            try? await diskStore.write(draft)
+            draftsByActivity[activityID] = draft
+        }
     }
 
     func queueComment(activityID: String, message: String) async {
@@ -491,7 +591,8 @@ final class OfflineReportStore: ObservableObject {
             updatedAt: now,
             attemptCount: queueForSync ? existing?.attemptCount ?? 0 : 0,
             nextRetryAt: nil,
-            lastError: nil
+            lastError: nil,
+            finalizeWhenSynced: false
         )
         if existing?.state == .needsAttention && !queueForSync {
             record.state = .localOnly
@@ -509,7 +610,8 @@ final class OfflineReportStore: ObservableObject {
     func markSynchronized(
         activityID: String,
         synchronizedPayload: APIReportDraftWrite,
-        reportVersionID: String
+        reportVersionID: String,
+        announce: Bool = true
     ) async {
         guard let record = draftsByActivity[activityID] else { return }
         guard record.payload == synchronizedPayload else {
@@ -529,6 +631,12 @@ final class OfflineReportStore: ObservableObject {
             reportVersionID: reportVersionID,
             synchronizedAt: Date()
         )
+        if announce {
+            lastSynchronizationNotice = OfflineSynchronizationNotice(
+                title: "Borrador sincronizado",
+                message: "\(record.activityDetail.title) ya se guardó en el servidor."
+            )
+        }
     }
 
     func markFailed(activityID: String, error: Error) async {
@@ -557,6 +665,17 @@ final class OfflineReportStore: ObservableObject {
         try? await diskStore.write(record)
         draftsByActivity[activityID] = record
         await synchronizePending(activityID: activityID)
+    }
+
+    func discardPendingWork(activityID: String) async {
+        if let draft = draftsByActivity.removeValue(forKey: activityID) {
+            try? await diskStore.delete(id: draft.id)
+        }
+        lifecycleOperations.removeAll { $0.activityID == activityID }
+        commentOperations.removeAll { $0.activityID == activityID }
+        workPackagesByActivity.removeValue(forKey: activityID)
+        try? await persistOperations()
+        try? await persistWorkPackages()
     }
 
     func retryAll() async {
@@ -610,6 +729,11 @@ final class OfflineReportStore: ObservableObject {
                     recordEnvironment: draft.baseURL,
                     currentEnvironment: currentEnvironment
                 ) {
+            if draft.finalizeWhenSynced == true {
+                // Finalization must always be explicitly confirmed online.
+                draft.finalizeWhenSynced = false
+                try? await diskStore.write(draft)
+            }
             if draft.state == .localOnly {
                 draft.state = .pending
                 draft.nextRetryAt = nil
@@ -630,8 +754,14 @@ final class OfflineReportStore: ObservableObject {
             collection: "packages"
         )) ?? []
         workPackagesByActivity = Dictionary(
-            uniqueKeysWithValues: packages.filter {
-                $0.ownerUserID == currentUserID && $0.environment == currentEnvironment
+            uniqueKeysWithValues: packages.filter { package in
+                // The URL fallback keeps a package usable when a local server
+                // changes from a numeric IP address to its Bonjour hostname.
+                package.ownerUserID == currentUserID
+                    && (package.environment == currentEnvironment
+                        || currentBaseURL.map { normalizedCurrentBaseURL in
+                            Self.normalizedBaseURL(package.baseURL) == normalizedCurrentBaseURL
+                        } ?? false)
             }.map { ($0.activityID, $0) }
         )
     }
@@ -666,6 +796,32 @@ final class OfflineReportStore: ObservableObject {
         )) ?? []).first {
             $0.ownerUserID == currentUserID && $0.environment == currentEnvironment
         }
+        await reconcilePendingLifecycleSnapshots()
+    }
+
+    private func reconcilePendingLifecycleSnapshots() async {
+        let pending = lifecycleOperations
+            .filter { $0.state == .pending || $0.state == .needsAttention }
+            .sorted { $0.createdAt < $1.createdAt }
+        guard !pending.isEmpty else { return }
+        for operation in pending {
+            if var package = workPackagesByActivity[operation.activityID] {
+                package.activityDetail = package.activityDetail.applyingOfflineLifecycle(
+                    operation.command,
+                    at: operation.createdAt
+                )
+                workPackagesByActivity[operation.activityID] = package
+            }
+            if var draft = draftsByActivity[operation.activityID] {
+                draft.activityDetail = draft.activityDetail.applyingOfflineLifecycle(
+                    operation.command,
+                    at: operation.createdAt
+                )
+                try? await diskStore.write(draft)
+                draftsByActivity[operation.activityID] = draft
+            }
+        }
+        try? await persistWorkPackages()
     }
 
     private func persistWorkPackages() async throws {
@@ -713,6 +869,31 @@ final class OfflineReportStore: ObservableObject {
         isNetworkAvailable = isAvailable
         if isAvailable {
             await synchronizePending()
+            await reconcileAcknowledgedLifecycleOperations()
+            await refreshDownloadedPackages()
+        }
+    }
+
+    /// Removes obsolete downloaded copies only after verifying that they carry
+    /// no unsynchronized work. This keeps a completed activity from lingering
+    /// in the offline list while protecting field data from accidental loss.
+    private func refreshDownloadedPackages() async {
+        guard let session else { return }
+        for package in workPackagesByActivity.values.sorted(by: { $0.downloadedAt < $1.downloadedAt }) {
+            guard !hasPendingWork(for: package.activityID) else { continue }
+            do {
+                let detail = try await session.withValidAccessToken { token in
+                    try await MaintenanceAPIService(baseURLString: package.baseURL).detail(
+                        id: package.activityID,
+                        accessToken: token
+                    )
+                }
+                await reconcileWorkPackage(with: detail)
+            } catch {
+                guard error.isMissingServerResource else { continue }
+                workPackagesByActivity.removeValue(forKey: package.activityID)
+                try? await persistWorkPackages()
+            }
         }
     }
 
@@ -748,6 +929,11 @@ final class OfflineReportStore: ObservableObject {
         isSynchronizing = true
         defer { isSynchronizing = false }
 
+        // A report cannot be created until a locally queued start/reopen has
+        // reached the server. Completion/closure deliberately remain after the
+        // report so component changes are validated first.
+        await synchronizeLifecycleOperations(commands: [.start, .reopen])
+
         for initialRecord in records {
             guard var record = draftsByActivity[initialRecord.activityID] else {
                 continue
@@ -770,7 +956,8 @@ final class OfflineReportStore: ObservableObject {
                 await markSynchronized(
                     activityID: record.activityID,
                     synchronizedPayload: record.payload,
-                    reportVersionID: result.versionID
+                    reportVersionID: result.versionID,
+                    announce: true
                 )
             } catch {
                 await markFailed(activityID: record.activityID, error: error)
@@ -785,26 +972,7 @@ final class OfflineReportStore: ObservableObject {
 
     private func synchronizeOperations() async {
         guard isNetworkAvailable, let session else { return }
-        for operation in lifecycleOperations where operation.state == .pending {
-            do {
-                _ = try await session.withValidAccessToken { token in
-                    try await MaintenanceAPIService(baseURLString: operation.baseURL).transition(
-                        id: operation.activityID,
-                        command: operation.command,
-                        reason: operation.reason,
-                        accessToken: token
-                    )
-                }
-                lifecycleOperations.removeAll { $0.id == operation.id }
-                try? await persistOperations()
-            } catch {
-                guard let index = lifecycleOperations.firstIndex(where: { $0.id == operation.id }) else { continue }
-                lifecycleOperations[index].state = .needsAttention
-                lifecycleOperations[index].lastError = error.localizedDescription
-                try? await persistOperations()
-                if error.isReportConnectivityFailure { return }
-            }
-        }
+        await synchronizeLifecycleOperations(commands: [.complete, .close])
 
         for operation in commentOperations where operation.state == .pending {
             do {
@@ -842,6 +1010,96 @@ final class OfflineReportStore: ObservableObject {
                 try? await persistOperations()
                 if error.isReportConnectivityFailure { return }
             }
+        }
+    }
+
+    private func synchronizeLifecycleOperations(
+        commands: Set<MaintenanceLifecycleCommand>
+    ) async {
+        guard isNetworkAvailable, let session else { return }
+        for operation in lifecycleOperations where operation.state == .pending {
+            guard commands.contains(operation.command) else { continue }
+            do {
+                let detail = try await session.withValidAccessToken { token in
+                    try await MaintenanceAPIService(baseURLString: operation.baseURL).transition(
+                        id: operation.activityID,
+                        command: operation.command,
+                        reason: operation.reason,
+                        accessToken: token
+                    )
+                }
+                lifecycleOperations.removeAll { $0.id == operation.id }
+                try? await persistOperations()
+                await reconcileWorkPackage(with: detail)
+                lastSynchronizationNotice = OfflineSynchronizationNotice(
+                    title: "Mantenimiento sincronizado",
+                    message: "\(detail.title) actualizó su estado en el servidor."
+                )
+            } catch {
+                if !error.isReportConnectivityFailure,
+                   let detail = try? await session.withValidAccessToken({ token in
+                       try await MaintenanceAPIService(baseURLString: operation.baseURL).detail(
+                           id: operation.activityID,
+                           accessToken: token
+                       )
+                   }),
+                   Self.lifecycle(operation.command, isSatisfiedBy: detail.status) {
+                    lifecycleOperations.removeAll { $0.id == operation.id }
+                    try? await persistOperations()
+                    await reconcileWorkPackage(with: detail)
+                    continue
+                }
+                guard let index = lifecycleOperations.firstIndex(where: { $0.id == operation.id }) else { continue }
+                lifecycleOperations[index].state = error.isReportConnectivityFailure
+                    ? .pending
+                    : .needsAttention
+                lifecycleOperations[index].lastError = error.isReportConnectivityFailure
+                    ? nil
+                    : error.localizedDescription
+                try? await persistOperations()
+                if error.isReportConnectivityFailure { return }
+            }
+        }
+    }
+
+    /// A request can reach the server while the client loses the response. On
+    /// the next connection, remove that local command if the server is already
+    /// at the requested state instead of leaving a misleading pending action.
+    private func reconcileAcknowledgedLifecycleOperations() async {
+        guard isNetworkAvailable, let session else { return }
+        for operation in lifecycleOperations {
+            do {
+                let detail = try await session.withValidAccessToken { token in
+                    try await MaintenanceAPIService(baseURLString: operation.baseURL).detail(
+                        id: operation.activityID,
+                        accessToken: token
+                    )
+                }
+                guard Self.lifecycle(operation.command, isSatisfiedBy: detail.status) else {
+                    continue
+                }
+                lifecycleOperations.removeAll { $0.id == operation.id }
+                try? await persistOperations()
+                await reconcileWorkPackage(with: detail)
+            } catch {
+                // Keep the operation: a later connection can reconcile it
+                // without losing work that was performed in the field.
+                continue
+            }
+        }
+    }
+
+    private static func lifecycle(
+        _ command: MaintenanceLifecycleCommand,
+        isSatisfiedBy status: String
+    ) -> Bool {
+        switch command {
+        case .start, .reopen:
+            return ["IN_PROGRESS", "COMPLETED", "CLOSED"].contains(status)
+        case .complete:
+            return ["COMPLETED", "CLOSED"].contains(status)
+        case .close:
+            return status == "CLOSED"
         }
     }
 
@@ -883,10 +1141,12 @@ enum OfflineWorkError: LocalizedError {
 struct OfflineStatusBar: View {
     @EnvironmentObject private var offlineStore: OfflineReportStore
     @State private var isShowingDrafts = false
+    @State private var synchronizationNotice: OfflineSynchronizationNotice?
 
     var body: some View {
-        if !offlineStore.isNetworkAvailable || offlineStore.pendingCount > 0 {
-            HStack(spacing: AppSpacing.sm) {
+        Group {
+            if !offlineStore.isNetworkAvailable || offlineStore.pendingCount > 0 {
+                HStack(spacing: AppSpacing.sm) {
                 Image(
                     systemName: offlineStore.isNetworkAvailable
                         ? "arrow.triangle.2.circlepath"
@@ -910,12 +1170,23 @@ struct OfflineStatusBar: View {
                     .buttonStyle(.bordered)
                 }
             }
-            .padding(.horizontal, AppSpacing.md)
-            .padding(.vertical, AppSpacing.sm)
-            .background(.regularMaterial)
-            .sheet(isPresented: $isShowingDrafts) {
-                OfflineDraftListView()
+                .padding(.horizontal, AppSpacing.md)
+                .padding(.vertical, AppSpacing.sm)
+                .background(.regularMaterial)
+                .sheet(isPresented: $isShowingDrafts) {
+                    OfflineDraftListView()
+                }
             }
+        }
+        .onChange(of: offlineStore.lastSynchronizationNotice?.id) { _, _ in
+            synchronizationNotice = offlineStore.lastSynchronizationNotice
+        }
+        .alert(item: $synchronizationNotice) { notice in
+            Alert(
+                title: Text(notice.title),
+                message: Text(notice.message),
+                dismissButton: .default(Text("Aceptar"))
+            )
         }
     }
 
@@ -923,7 +1194,7 @@ struct OfflineStatusBar: View {
         if !offlineStore.isNetworkAvailable {
             return "Los borradores permanecen protegidos en este iPad."
         }
-        return "\(offlineStore.pendingCount) borrador(es) por enviar."
+        return "\(offlineStore.pendingCount) cambio(s) por sincronizar."
     }
 }
 
@@ -939,39 +1210,87 @@ private struct OfflineDraftListView: View {
 
     var body: some View {
         NavigationStack {
-            List(drafts) { draft in
-                NavigationLink {
-                    if draft.editor.activityType == "PREVENTIVE" {
-                        PreventiveReportFormView(activityID: draft.activityID)
-                    } else {
-                        CorrectiveReportFormView(eventID: draft.activityID)
-                    }
-                } label: {
-                    HStack(spacing: AppSpacing.md) {
-                        Image(
-                            systemName: draft.editor.activityType == "PREVENTIVE"
-                                ? "checklist"
-                                : "wrench.and.screwdriver"
-                        )
-                        .foregroundStyle(BrandColor.red)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(draft.activityDetail.title)
-                                .font(.headline)
-                            Text(
-                                "Actualizado \(draft.updatedAt.formatted(date: .abbreviated, time: .shortened))"
-                            )
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            Text(stateLabel(draft.state))
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(
-                                    draft.state == .needsAttention
-                                        ? BrandColor.red
-                                        : .orange
-                                )
+            List {
+                if !drafts.isEmpty {
+                    Section("Reportes") {
+                        ForEach(drafts) { draft in
+                            NavigationLink {
+                                if draft.editor.activityType == "PREVENTIVE" {
+                                    PreventiveReportFormView(activityID: draft.activityID)
+                                } else {
+                                    CorrectiveReportFormView(eventID: draft.activityID)
+                                }
+                        } label: {
+                            draftRow(draft)
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                Task { await offlineStore.discardPendingWork(activityID: draft.activityID) }
+                            } label: {
+                                Label("Descartar", systemImage: "trash")
+                            }
+                        }
                         }
                     }
-                    .padding(.vertical, AppSpacing.xs)
+                }
+                if !offlineStore.pendingLifecycleOperations.isEmpty {
+                    Section("Estados de mantenimiento") {
+                        ForEach(offlineStore.pendingLifecycleOperations) { operation in
+                            operationRow(
+                                title: activityTitle(for: operation.activityID),
+                                label: operation.command.label,
+                                date: operation.createdAt,
+                                state: operation.state
+                            )
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    Task { await offlineStore.discardPendingWork(activityID: operation.activityID) }
+                                } label: {
+                                    Label("Descartar", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                }
+                if !offlineStore.pendingCommentOperations.isEmpty {
+                    Section("Comentarios") {
+                        ForEach(offlineStore.pendingCommentOperations) { operation in
+                            operationRow(
+                                title: activityTitle(for: operation.activityID),
+                                label: "Comentario pendiente",
+                                date: operation.createdAt,
+                                state: operation.state
+                            )
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    Task { await offlineStore.discardPendingWork(activityID: operation.activityID) }
+                                } label: {
+                                    Label("Descartar", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                }
+                if !offlineStore.pendingCorrectiveOperations.isEmpty {
+                    Section("Eventos correctivos") {
+                        ForEach(offlineStore.pendingCorrectiveOperations) { operation in
+                            operationRow(
+                                title: operation.localCode,
+                                label: "Crear correctivo",
+                                date: operation.createdAt,
+                                state: operation.state
+                            )
+                        }
+                    }
+                }
+                if drafts.isEmpty,
+                   offlineStore.pendingLifecycleOperations.isEmpty,
+                   offlineStore.pendingCommentOperations.isEmpty,
+                   offlineStore.pendingCorrectiveOperations.isEmpty {
+                    ContentUnavailableView(
+                        "No hay cambios pendientes",
+                        systemImage: "checkmark.circle",
+                        description: Text("Todos los datos locales ya están sincronizados."))
                 }
             }
             .navigationTitle("Borradores pendientes")
@@ -992,6 +1311,47 @@ private struct OfflineDraftListView: View {
                 }
             }
         }
+    }
+
+    private func draftRow(_ draft: OfflineReportDraft) -> some View {
+        HStack(spacing: AppSpacing.md) {
+            Image(systemName: draft.editor.activityType == "PREVENTIVE" ? "checklist" : "wrench.and.screwdriver")
+                .foregroundStyle(BrandColor.red)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(draft.activityDetail.title).font(.headline)
+                Text("Actualizado \(draft.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(stateLabel(draft.state))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(draft.state == .needsAttention ? BrandColor.red : .orange)
+            }
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private func operationRow(
+        title: String,
+        label: String,
+        date: Date,
+        state: OfflineOperationState
+    ) -> some View {
+        HStack(spacing: AppSpacing.md) {
+            Image(systemName: state == .needsAttention ? "exclamationmark.triangle.fill" : "arrow.triangle.2.circlepath")
+                .foregroundStyle(state == .needsAttention ? BrandColor.red : BrandColor.amber)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title).font(.headline)
+                Text(label).font(.subheadline)
+                Text(date.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private func activityTitle(for activityID: String) -> String {
+        offlineStore.draftsByActivity[activityID]?.activityDetail.title
+            ?? offlineStore.workPackagesByActivity[activityID]?.activityDetail.title
+            ?? "Mantenimiento \(activityID.prefix(8))"
     }
 
     private func stateLabel(_ state: OfflineDraftState) -> String {
@@ -1217,21 +1577,19 @@ struct OfflineActivityDownloadMetadata: View {
     let activity: APIActivity
 
     var body: some View {
-        HStack(spacing: AppSpacing.sm) {
+        if offlineStore.workPackage(for: activity.id) != nil {
+            HStack(spacing: AppSpacing.sm) {
             Label(estimatedSize, systemImage: "externaldrive")
-            Text(offlineStore.workPackage(for: activity.id) == nil
-                ? "Actualización: servidor"
-                : "Disponible sin conexión")
+            Text("Disponible sin conexión")
             Spacer()
-            if offlineStore.workPackage(for: activity.id) != nil {
-                Image(systemName: "checkmark.icloud.fill")
-                    .foregroundStyle(BrandColor.green)
+            Image(systemName: "checkmark.icloud.fill")
+                .foregroundStyle(BrandColor.green)
             }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, AppSpacing.sm)
+            .padding(.top, 2)
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, AppSpacing.sm)
-        .padding(.top, 2)
     }
 
     private var estimatedSize: String {
@@ -1296,5 +1654,19 @@ extension Error {
         default:
             return false
         }
+    }
+
+    var isMissingServerResource: Bool {
+        guard let apiError = self as? APIClient.APIError,
+              case let .serverError(message) = apiError else {
+            return false
+        }
+        let normalized = message.folding(
+            options: [.diacriticInsensitive, .caseInsensitive],
+            locale: Locale.current
+        )
+        return normalized.contains("no encontrada")
+            || normalized.contains("not found")
+            || normalized.contains("404")
     }
 }

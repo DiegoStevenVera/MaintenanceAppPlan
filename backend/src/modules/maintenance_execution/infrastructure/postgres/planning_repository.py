@@ -257,6 +257,9 @@ class PostgresPlanningRepository:
         ).scalar_one_or_none()
         is_virtual = annual_plan is None
         copied_from_year: int | None = None
+        imported_scope_year, imported_scope_ids = (
+            await self._scope_ids_from_imported_entries(year)
+        )
         if annual_plan is None:
             source_plan = (
                 await self.session.execute(
@@ -267,15 +270,30 @@ class PostgresPlanningRepository:
                 )
             ).scalar_one_or_none()
             if source_plan is None:
-                scope_ids: list[UUID] = []
+                # Imported annual activities predate the PCON administration
+                # tables. They remain the source of truth until an admin
+                # explicitly manages the year from the app.
+                scope_ids = imported_scope_ids
             else:
                 copied_from_year = source_plan.year
-                scope_ids = await self._annual_scope_ids(source_plan.id)
+                scope_ids = self._unique_scope_ids(
+                    await self._annual_scope_ids(source_plan.id),
+                    imported_scope_ids,
+                )
             plan_status = "DRAFT"
         else:
             copied_from_year = annual_plan.copied_from_year
-            scope_ids = await self._annual_scope_ids(annual_plan.id)
+            # Keep imported rows visible after the first administration
+            # action. Membership records augment the imported plan rather
+            # than replacing its already-existing scopes.
+            scope_ids = self._unique_scope_ids(
+                await self._annual_scope_ids(annual_plan.id),
+                imported_scope_ids,
+            )
             plan_status = annual_plan.status
+
+        if copied_from_year is None and imported_scope_year != year:
+            copied_from_year = imported_scope_year
 
         catalog_rows = await self._scope_catalog_rows(
             scope_ids=scope_ids,
@@ -529,11 +547,10 @@ class PostgresPlanningRepository:
             raise PlanningValidationError(
                 "Una ocurrencia iniciada o con fecha confirmada se reprograma desde la semana"
             )
-        has_revision = await self._has_schedule_revision(activity.id)
-        if has_revision:
-            raise PlanningValidationError(
-                "Retira primero la propuesta semanal antes de mover la ocurrencia"
-            )
+        # A tentative weekly proposal is only a planning window. Moving an
+        # annual occurrence invalidates that draft proposal; it is not a
+        # confirmed execution and must not block the annual-plan editor.
+        await self._remove_draft_schedule_revisions(activity.id)
         previous_year, previous_month = plan.year, plan.month
         annual_plan = await self._get_or_create_annual_plan(year, user_id)
         await self._ensure_annual_membership(
@@ -575,23 +592,9 @@ class PostgresPlanningRepository:
             )
         if await self._has_report(activity.id):
             raise PlanningValidationError("No se puede eliminar una actividad con reporte")
-        draft_revision = await self.session.scalar(
-            select(func.count(MaintenanceScheduleRevisionRecord.id))
-            .join(
-                WeeklyPlanningSessionRecord,
-                WeeklyPlanningSessionRecord.id
-                == MaintenanceScheduleRevisionRecord.weekly_planning_session_id,
-            )
-            .where(
-                MaintenanceScheduleRevisionRecord.maintenance_activity_id == activity.id,
-                MaintenanceScheduleRevisionRecord.status == "PROPOSED",
-                WeeklyPlanningSessionRecord.status == "DRAFT",
-            )
-        )
-        if draft_revision:
-            raise PlanningValidationError(
-                "Retira primero la actividad de la propuesta semanal"
-            )
+        # Deleting an unconfirmed annual occurrence also removes its pending
+        # tentative proposal, so users do not have to visit another screen.
+        await self._remove_draft_schedule_revisions(activity.id)
         if activity.scheduled_start_at:
             if not allow_confirmed_future:
                 raise PlanningValidationError(
@@ -1099,6 +1102,40 @@ class PostgresPlanningRepository:
                 )
             ).scalars()
         )
+
+    async def _scope_ids_from_imported_entries(
+        self,
+        year: int,
+    ) -> tuple[int | None, list[UUID]]:
+        """Return imported PCON scopes for a year, or the closest prior year.
+
+        Legacy imports populate ``maintenance_plan_entries`` but do not have
+        rows in ``pcon_annual_plans``. Falling back to the nearest prior year
+        also gives a future, still-empty annual plan its complete row skeleton.
+        """
+        source_year = await self.session.scalar(
+            select(MaintenancePlanEntryRecord.year)
+            .where(MaintenancePlanEntryRecord.year <= year)
+            .order_by(MaintenancePlanEntryRecord.year.desc())
+            .limit(1)
+        )
+        if source_year is None:
+            return None, []
+        scope_ids = list(
+            (
+                await self.session.execute(
+                    select(MaintenancePlanEntryRecord.maintenance_template_scope_id)
+                    .where(MaintenancePlanEntryRecord.year == source_year)
+                    .distinct()
+                    .order_by(MaintenancePlanEntryRecord.maintenance_template_scope_id)
+                )
+            ).scalars()
+        )
+        return source_year, scope_ids
+
+    @staticmethod
+    def _unique_scope_ids(*groups: list[UUID]) -> list[UUID]:
+        return list(dict.fromkeys(scope_id for group in groups for scope_id in group))
 
     async def _annual_plan_by_year(self, year: int) -> PCONAnnualPlanRecord | None:
         return (
@@ -1670,7 +1707,9 @@ class PostgresPlanningRepository:
                     f"La reprogramación de {activity.title} requiere un motivo"
                 )
 
-        await self._validate_equipment_conflicts(revisions, activities)
+        # Proposed hours are an availability window agreed in the weekly
+        # meeting, not a reservation of a technician or equipment. Several
+        # activities may therefore share the same range.
         confirmed_at = datetime.now(timezone.utc)
         for revision in revisions:
             activity = activities[revision.maintenance_activity_id]
@@ -1840,45 +1879,25 @@ class PostgresPlanningRepository:
             result.setdefault(row.maintenance_activity_id, row)
         return result
 
-    async def _validate_equipment_conflicts(
-        self,
-        revisions: list[MaintenanceScheduleRevisionRecord],
-        activities: dict[UUID, MaintenanceActivityRecord],
-    ) -> None:
-        asset_rows = (
+    async def _remove_draft_schedule_revisions(self, activity_id: UUID) -> None:
+        """Discard unconfirmed scheduling proposals for one annual occurrence."""
+        revisions = (
             await self.session.execute(
-                select(
-                    MaintenanceActivityAssetRecord.maintenance_activity_id,
-                    MaintenanceActivityAssetRecord.asset_id,
-                ).where(
-                    MaintenanceActivityAssetRecord.maintenance_activity_id.in_(
-                        list(activities)
-                    ),
-                    MaintenanceActivityAssetRecord.role.in_(
-                        ["PRIMARY", "PRIMARY_TARGET"]
-                    ),
+                select(MaintenanceScheduleRevisionRecord)
+                .join(
+                    WeeklyPlanningSessionRecord,
+                    WeeklyPlanningSessionRecord.id
+                    == MaintenanceScheduleRevisionRecord.weekly_planning_session_id,
+                )
+                .where(
+                    MaintenanceScheduleRevisionRecord.maintenance_activity_id == activity_id,
+                    MaintenanceScheduleRevisionRecord.status == "PROPOSED",
+                    WeeklyPlanningSessionRecord.status == "DRAFT",
                 )
             )
-        ).all()
-        assets = {activity_id: asset_id for activity_id, asset_id in asset_rows}
-        for index, left in enumerate(revisions):
-            for right in revisions[index + 1 :]:
-                if not assets.get(left.maintenance_activity_id):
-                    continue
-                overlaps = (
-                    left.proposed_start_at < right.proposed_end_at
-                    and right.proposed_start_at < left.proposed_end_at
-                )
-                if (
-                    assets[left.maintenance_activity_id]
-                    == assets.get(right.maintenance_activity_id)
-                    and overlaps
-                ):
-                    raise PlanningValidationError(
-                        "Dos actividades del mismo equipo se cruzan en horario: "
-                        f"{activities[left.maintenance_activity_id].title} y "
-                        f"{activities[right.maintenance_activity_id].title}"
-                    )
+        ).scalars().all()
+        for revision in revisions:
+            await self.session.delete(revision)
 
     @staticmethod
     def normalize_week_start(value: date) -> date:

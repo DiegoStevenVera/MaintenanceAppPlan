@@ -15,24 +15,34 @@ fila muestra un tamaño estimado, su estado de disponibilidad y si ya existe un
 paquete local. La descarga avanza de forma secuencial: un error en un trabajo
 no cancela los demás.
 
-También puede descargarse un único trabajo desde su detalle. El paquete contiene
-el detalle de la actividad, el formulario, pasos, pruebas, participantes,
-activos disponibles, stock que el editor ya expone y las evidencias existentes.
+La descarga solo se inicia desde las listas de Preventivos y Correctivos. El
+paquete contiene el detalle de la actividad, el formulario, pasos, pruebas,
+participantes, activos disponibles, stock que el editor ya expone y las
+evidencias existentes.
 
 Los paquetes se guardan en `Application Support/OfflineWorkPackages` del
 contenedor de la app, con protección
 `completeUntilFirstUserAuthentication`. Solo se muestran al mismo usuario y
 al mismo entorno compilado (`DEV`, `QA`, etc.). Cambiar la IP DHCP de la Mac no
-oculta ni borra el trabajo descargado.
+oculta ni borra el trabajo descargado. Al abrir la aplicación sin red, Inicio,
+Preventivos y Correctivos usan exclusivamente esos paquetes persistidos; no
+intentan sustituirlos con una respuesta incompleta del servidor.
 
 ## En campo
 
 - Un paquete descargado puede abrir el formulario sin API.
+- Al iniciar una actividad sin red, el paquete conserva inmediatamente el
+  estado `En progreso` y la hora local de inicio; el servidor recibe la misma
+  transición antes de guardar el reporte cuando vuelva la conexión.
 - Los cambios del reporte, firmas y evidencias se guardan localmente.
 - Los comentarios y transiciones de estado se agregan a una cola local.
-- La finalización oficial de una versión sigue requiriendo servidor: fuera de
-  red el reporte queda como borrador listo para sincronizar. Esto evita cerrar
-  una actividad sin que el backend valide su versión y sus reglas de negocio.
+- Sin conexión solo está disponible **Guardar borrador**. Al guardarlo, la
+  aplicación vuelve al detalle y muestra que el borrador está protegido y
+  pendiente de sincronización. La versión se finaliza explícitamente cuando el
+  iPad vuelve a tener conexión y el servidor puede aplicar sus validaciones.
+- Un cambio de componente desde almacén, transferencia o intercambio se ve de
+  forma provisional en el reporte local. El movimiento oficial se aplica solo
+  al completar la actividad en el servidor.
 - En **Perfil > Trabajo offline** se consultan y abren los paquetes disponibles.
 
 ## Nuevo correctivo offline
@@ -49,12 +59,25 @@ oficial ni versión de reporte del servidor.
 ## Sincronización y seguridad
 
 Al recuperar conectividad, la aplicación intenta enviar borradores, cambios de
-estado, comentarios y eventos correctivos pendientes. La banda superior y la
-pantalla **Trabajo offline** muestran el estado y permiten reintentar.
+estado, comentarios y eventos correctivos pendientes. El aviso compacto se
+ubica en el borde inferior para no bloquear la navegación adaptable del iPad,
+y la pantalla **Trabajo offline** muestra reportes, cambios de estado,
+comentarios y eventos pendientes, y permite reintentar o descartar un cambio
+de prueba obsoleto. El detalle de cada actividad también ofrece
+**Sincronizar ahora** cuando hay red.
+
+Un mantenimiento solo puede pasar a **Completado** cuando ya existe al menos
+una versión de reporte `FINALIZED` en el servidor. Esta validación se aplica
+en la interfaz y también en la API.
 
 No se elimina un paquete si conserva un borrador o una operación pendiente.
 Los registros que el servidor rechace pasan a **Necesita revisión** y permanecen
 en el iPad hasta que el usuario los corrija o reintente.
+
+Para una transferencia o intercambio, el servidor bloquea ambos activos al
+sincronizar y confirma que mantienen las posiciones descargadas. Si otro
+trabajo ya los movió, conserva el reporte y marca un conflicto de inventario;
+nunca sobrescribe la ubicación central sin validación.
 
 Para esta etapa los archivos se conservan hasta que el usuario elimine el
 paquete sin pendientes, cierre sesión, desinstale la app o el sistema borre el

@@ -332,6 +332,9 @@ No delivery tracking in v1.
 - Every monthly cell shows the quantity of maintenance executions. Parent rows
   display aggregate quantities. Selecting a maintenance cell opens its concrete
   occurrences and their month-only, proposed, confirmed, or executed states.
+  When the quantity creates new occurrences, the same dialog can optionally
+  collect each tentative start/end range and save it as an unconfirmed weekly
+  proposal.
 - Leaf-cell quantities use the state color directly instead of a separate dot:
   red for month-only, amber for proposed, green for confirmed, and graphite for
   executed. A visible legend accompanies the matrix. When a cell contains mixed

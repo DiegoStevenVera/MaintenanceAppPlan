@@ -151,7 +151,7 @@ def _role_to_backend(role: str) -> str:
 
 def _role_label(role: str) -> str:
     return {
-        "maintenanceEngineer": "Ingeniero de Mantenimiento",
+        "maintenanceEngineer": "Ingeniero de Mantenimiento de Sistemas de Señalización",
         "coordinator": "Coordinador",
         "boss": "Jefe",
         "administrator": "Administrador",

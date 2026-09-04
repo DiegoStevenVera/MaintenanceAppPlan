@@ -378,6 +378,10 @@ async def _transition_maintenance_activity(
         raise HTTPException(status_code=404, detail="Maintenance activity not found")
     repository = PostgresMaintenanceRepository(session)
     try:
+        if command == MaintenanceLifecycleCommand.COMPLETE:
+            await PostgresReportWriter(session).ensure_finalized_report(
+                activity_id=activity_id
+            )
         found = await repository.transition_activity(
             activity_id=activity_id,
             command=command,

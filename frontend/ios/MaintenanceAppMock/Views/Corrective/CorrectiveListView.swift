@@ -47,7 +47,7 @@ struct DatabaseCorrectiveListView: View {
                 section("Completados", statuses: ["COMPLETED"])
                 section("Cerrados", statuses: ["CLOSED"])
 
-                if let error = activityStore.correctiveError {
+                if !isOfflineMode, let error = activityStore.correctiveError {
                     ContentUnavailableView {
                         Label("No se pudieron cargar los correctivos", systemImage: "wifi.exclamationmark")
                     } description: {
@@ -55,12 +55,17 @@ struct DatabaseCorrectiveListView: View {
                     } actions: {
                         Button("Reintentar") { Task { await load() } }
                     }
-                } else if activityStore.isLoadingCorrectives && activityStore.correctiveActivities.isEmpty {
+                } else if !isOfflineMode && activityStore.isLoadingCorrectives && filteredActivities.isEmpty {
                     ProgressView("Cargando correctivos")
                         .frame(maxWidth: .infinity)
                         .padding(AppSpacing.xl)
-                } else if activityStore.correctiveActivities.isEmpty {
-                    GlassPanel { Text("No hay correctivos para este filtro.").foregroundStyle(.secondary) }
+                } else if filteredActivities.isEmpty {
+                    GlassPanel {
+                        Text(isOfflineMode
+                            ? "No hay correctivos descargados en este iPad."
+                            : "No hay correctivos para este filtro.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(AppSpacing.lg)
@@ -135,21 +140,33 @@ struct DatabaseCorrectiveListView: View {
                     .padding(AppSpacing.md)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                HStack(spacing: AppSpacing.md) {
-                    Picker("Estado", selection: $selectedStatus) {
+                ActionButtonGrid {
+                    Menu {
+                        Picker("Estado", selection: $selectedStatus) {
                         ForEach(["Todos", "SCHEDULED", "IN_PROGRESS", "COMPLETED", "CLOSED"], id: \.self) { value in
                             Text(statusLabel(value)).tag(value)
                         }
                     }
-                    .pickerStyle(.menu)
-                    Picker("Subsistema", selection: $selectedSubsystem) {
+                    } label: {
+                        Label("Estado: \(statusLabel(selectedStatus))", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: selectedStatus != "Todos"))
+                    Menu {
+                        Picker("Subsistema", selection: $selectedSubsystem) {
                         ForEach(subsystemOptions, id: \.self) { Text($0).tag($0) }
                     }
-                    .pickerStyle(.menu)
-                    Picker("Equipo", selection: $selectedEquipment) {
+                    } label: {
+                        Label("Subsistema: \(selectedSubsystem)", systemImage: "square.stack.3d.up")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: selectedSubsystem != "Todos"))
+                    Menu {
+                        Picker("Equipo", selection: $selectedEquipment) {
                         ForEach(equipmentOptions, id: \.self) { Text($0).tag($0) }
                     }
-                    .pickerStyle(.menu)
+                    } label: {
+                        Label("Equipo: \(selectedEquipment)", systemImage: "shippingbox")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: selectedEquipment != "Todos"))
                 }
                 HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -199,7 +216,20 @@ struct DatabaseCorrectiveListView: View {
         }
     }
 
+    private var isOfflineMode: Bool { !offlineStore.isNetworkAvailable }
+
+    private var activitySource: [APIActivity] {
+        if isOfflineMode {
+            return offlineStore.workPackagesByActivity.values
+                .map { APIActivity(detail: $0.activityDetail) }
+                .filter { $0.activityType == "CORRECTIVE" }
+                .sorted { ($0.scheduledAt ?? .distantFuture) < ($1.scheduledAt ?? .distantFuture) }
+        }
+        return activityStore.correctiveActivities.map(offlineStore.displayActivity)
+    }
+
     private func load() async {
+        guard !isOfflineMode else { return }
         let range = dateRange
         await activityStore.load(
             type: "CORRECTIVE",
@@ -211,7 +241,8 @@ struct DatabaseCorrectiveListView: View {
     }
 
     private var filteredActivities: [APIActivity] {
-        activityStore.correctiveActivities.filter { activity in
+        guard !isOfflineMode else { return activitySource }
+        return activitySource.filter { activity in
             (selectedStatus == "Todos" || activity.status == selectedStatus)
                 && (selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
                 && (selectedEquipment == "Todos" || activity.assets.contains { $0.name == selectedEquipment })
@@ -219,11 +250,11 @@ struct DatabaseCorrectiveListView: View {
     }
 
     private var subsystemOptions: [String] {
-        ["Todos"] + Array(Set(activityStore.correctiveActivities.map(\.subsystem))).sorted()
+        ["Todos"] + Array(Set(activitySource.map(\.subsystem))).sorted()
     }
 
     private var equipmentOptions: [String] {
-        ["Todos"] + Array(Set(activityStore.correctiveActivities.flatMap { $0.assets.map(\.name) })).sorted()
+        ["Todos"] + Array(Set(activitySource.flatMap { $0.assets.map(\.name) })).sorted()
     }
 
     private func toggleOfflineSelection(_ id: String) {
@@ -432,6 +463,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
     @State private var isCreating = false
     @State private var creationError: String?
     @State private var offlineTrees: [String: [EquipmentTreeNodeDTO]] = [:]
+    @State private var creationStep = 0
 
     private let subsystemOptions = ["ATS", "CBTC", "IXL"]
 
@@ -491,13 +523,45 @@ private struct DatabaseCorrectiveEventCreateView: View {
             && !isCreating
     }
 
+    private var canContinue: Bool {
+        selectedTarget != nil && !selectedAssetIDs.isEmpty && context != nil
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpacing.xl) {
                 header
-                assetSelector
-                contextPanel
-                sapPanel
+                creationProgress
+                if creationStep == 0 {
+                    assetSelector
+                    ActionButtonGrid {
+                        Button { creationStep = 1 } label: {
+                            Label("Continuar con datos del evento", systemImage: "arrow.right.circle.fill")
+                        }
+                        .buttonStyle(ActionTileButtonStyle(prominent: true))
+                        .disabled(!canContinue)
+                    }
+                } else {
+                    contextPanel
+                    sapPanel
+                    ActionButtonGrid {
+                        Button { creationStep = 0 } label: {
+                            Label("Volver al equipo", systemImage: "arrow.left.circle")
+                        }
+                        .buttonStyle(ActionTileButtonStyle())
+                        Button {
+                            Task { await createCorrective() }
+                        } label: {
+                            if isCreating {
+                                ProgressView()
+                            } else {
+                                Label("Crear Correctivo", systemImage: "plus.circle.fill")
+                            }
+                        }
+                        .buttonStyle(ActionTileButtonStyle(prominent: true))
+                        .disabled(!canCreate)
+                    }
+                }
 
                 if let creationError {
                     Label(creationError, systemImage: "exclamationmark.triangle")
@@ -506,19 +570,6 @@ private struct DatabaseCorrectiveEventCreateView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
 
-                ActionButtonGrid {
-                    Button {
-                        Task { await createCorrective() }
-                    } label: {
-                        if isCreating {
-                            ProgressView()
-                        } else {
-                            Label("Crear Correctivo", systemImage: "plus.circle.fill")
-                        }
-                    }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
-                    .disabled(!canCreate)
-                }
             }
             .padding(AppSpacing.lg)
             .frame(maxWidth: 900, alignment: .leading)
@@ -542,6 +593,8 @@ private struct DatabaseCorrectiveEventCreateView: View {
             selectedAssetIDs = []
             criticalAssetIDs = []
             let roots = selectedTarget.roots
+            creationStep = 0
+            offlineTrees = [:]
             if !offlineStore.isNetworkAvailable,
                let catalog = offlineStore.correctiveCatalog {
                 offlineTrees = Dictionary(uniqueKeysWithValues: roots.map {
@@ -550,17 +603,10 @@ private struct DatabaseCorrectiveEventCreateView: View {
                 context = roots.lazy.compactMap { catalog.contexts[$0.id] }.first
                 return
             }
-            async let treeTask: Void = withTaskGroup(of: Void.self) { group in
-                for root in roots {
-                    group.addTask {
-                        await assetStore.loadTree(id: root.id, session: session, force: true)
-                    }
-                }
+            for root in roots {
+                await assetStore.loadTree(id: root.id, session: session, force: true)
             }
-            async let contextTask: Void = loadContext(
-                equipmentID: roots.first?.id ?? ""
-            )
-            _ = await (treeTask, contextTask)
+            await loadContext(equipmentID: roots.first?.id ?? "")
         }
         .onChange(of: selectedSubsystem) { _, _ in
             equipmentSearchText = ""
@@ -568,6 +614,8 @@ private struct DatabaseCorrectiveEventCreateView: View {
             selectedAssetIDs = []
             criticalAssetIDs = []
             context = nil
+            offlineTrees = [:]
+            creationStep = 0
         }
     }
 
@@ -583,6 +631,18 @@ private struct DatabaseCorrectiveEventCreateView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
         }
+    }
+
+    private var creationProgress: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Label("1. Equipo afectado", systemImage: creationStep == 0 ? "1.circle.fill" : "1.circle")
+                .foregroundStyle(creationStep == 0 ? BrandColor.red : .secondary)
+            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            Label("2. Datos del evento", systemImage: creationStep == 1 ? "2.circle.fill" : "2.circle")
+                .foregroundStyle(creationStep == 1 ? BrandColor.red : .secondary)
+        }
+        .font(.subheadline.weight(.semibold))
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     private var assetSelector: some View {
@@ -1256,7 +1316,10 @@ private struct CorrectiveAPIActivityCard: View {
                     Text(activity.title).font(.headline).lineLimit(2)
                     Text(activity.eventCode ?? activity.internalCode).font(.caption.weight(.bold)).foregroundStyle(BrandColor.red)
                     Text(activity.assets.map(\.name).joined(separator: ", ")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                    Label(activity.locationPath ?? "Ubicacion no registrada", systemImage: "mappin.and.ellipse")
+                    Label(
+                        activity.locationPath?.activityLocationSummary ?? "Ubicacion no registrada",
+                        systemImage: "mappin.and.ellipse"
+                    )
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: AppSpacing.sm)

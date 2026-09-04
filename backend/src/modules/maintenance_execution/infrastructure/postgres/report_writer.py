@@ -107,6 +107,7 @@ from shared_kernel.storage import (
 SIGNALING_MAINTENANCE_WORK_AREA_ID = UUID(
     "006a0fb0-8fae-5ec6-88cb-4231d96d172a"
 )
+REPORT_ENGINEER_ROLE_LABEL = "Ingeniero de Mantenimiento de Sistemas de Señalización"
 
 
 class ReportWriteError(Exception):
@@ -1327,7 +1328,9 @@ class PostgresReportWriter:
             participant = ReportParticipantRecord(
                 report_version_id=version.id,
                 user_id=user.id,
-                role_snapshot=user.role_label,
+                # Application permissions do not alter the real operational
+                # position printed on preventive and corrective reports.
+                role_snapshot=REPORT_ENGINEER_ROLE_LABEL,
                 selected=item.selected,
             )
             self._session.add(participant)
@@ -1393,6 +1396,25 @@ class PostgresReportWriter:
             payload=payload,
             user_id=user_id,
         )
+
+    async def ensure_finalized_report(self, *, activity_id: str) -> None:
+        finalized_version_id = await self._session.scalar(
+            select(ReportVersionRecord.id)
+            .join(
+                MaintenanceReportRecord,
+                MaintenanceReportRecord.id
+                == ReportVersionRecord.maintenance_report_id,
+            )
+            .where(
+                MaintenanceReportRecord.maintenance_activity_id == activity_id,
+                ReportVersionRecord.document_status == "FINALIZED",
+            )
+            .limit(1)
+        )
+        if finalized_version_id is None:
+            raise ReportValidationError(
+                "No se puede finalizar el mantenimiento sin al menos una versión de reporte finalizada."
+            )
 
     async def _apply_component_replacements(
         self,

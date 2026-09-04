@@ -257,12 +257,13 @@ struct PreventiveReportFormView: View {
                                 }
                                 .pickerStyle(.menu)
                                 .frame(maxWidth: .infinity, alignment: .leading)
+                                /**
                                 TextField(
                                     "Notas",
                                     text: Binding($test.notes, replacingNilWith: ""),
                                     axis: .vertical
                                 )
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(.roundedBorder)*/
                             }
                             .padding(AppSpacing.sm)
                             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
@@ -525,12 +526,14 @@ struct PreventiveReportFormView: View {
                         Label("Guardar borrador", systemImage: "square.and.arrow.down.fill")
                     }
                     .buttonStyle(ActionTileButtonStyle())
-                    Button {
-                        Task { await save(finalize: true) }
-                    } label: {
-                        Label("Finalizar versión", systemImage: "checkmark.seal.fill")
+                    if offlineStore.isNetworkAvailable {
+                        Button {
+                            Task { await save(finalize: true) }
+                        } label: {
+                            Label("Finalizar versión", systemImage: "checkmark.seal.fill")
+                        }
+                        .buttonStyle(ActionTileButtonStyle(prominent: true))
                     }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
                 }
                 .disabled(isSaving)
                 if isSaving { ProgressView("Guardando reporte") }
@@ -604,10 +607,14 @@ struct PreventiveReportFormView: View {
         errorMessage = nil
         successMessage = nil
         let payload = currentPayload
-        await persistOffline(payload: payload, queueForSync: true)
-        if finalize && !offlineStore.isNetworkAvailable {
-            successMessage = "Borrador protegido en este iPad."
-            errorMessage = "La versión solo puede finalizarse cuando vuelva la conexión."
+        await persistOffline(
+            payload: payload,
+            queueForSync: true
+        )
+        if !offlineStore.isNetworkAvailable {
+            lastAutosavedPayload = payload
+            successMessage = "Borrador guardado en este iPad. Finaliza la versión al recuperar conexión."
+            dismiss()
             isSaving = false
             return
         }
@@ -623,7 +630,8 @@ struct PreventiveReportFormView: View {
             await offlineStore.markSynchronized(
                 activityID: activityID,
                 synchronizedPayload: payload,
-                reportVersionID: result.versionID
+                reportVersionID: result.versionID,
+                announce: false
             )
             baseReportVersionID = result.versionID
             lastAutosavedPayload = currentPayload
@@ -631,6 +639,9 @@ struct PreventiveReportFormView: View {
                 ? "Versión \(result.versionNumber) finalizada."
                 : "Borrador guardado."
             await activityStore.loadDetail(id: activityID, session: session, force: true)
+            if let detail = activityStore.details[activityID] {
+                await offlineStore.reconcileWorkPackage(with: detail)
+            }
             if finalize {
                 didFinalize = true
                 dismiss()

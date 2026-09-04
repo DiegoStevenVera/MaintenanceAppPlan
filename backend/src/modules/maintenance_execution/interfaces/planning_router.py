@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session, uses_postgres
-from modules.identity_access.interfaces.dependencies import get_current_user, require_roles
+from modules.identity_access.interfaces.dependencies import require_roles
 from modules.identity_access.interfaces.schemas import UserDTO
 from modules.maintenance_execution.infrastructure.postgres.planning_repository import (
     PlanningNotFoundError,
@@ -37,9 +37,9 @@ from shared_kernel.schemas import UserRole
 router = APIRouter(
     prefix="/pcon",
     tags=["pcon"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(require_roles(UserRole.ADMINISTRATOR))],
 )
-planning_editors = require_roles(UserRole.COORDINATOR, UserRole.ADMINISTRATOR)
+planning_editors = require_roles(UserRole.ADMINISTRATOR)
 
 
 def _require_postgres() -> None:

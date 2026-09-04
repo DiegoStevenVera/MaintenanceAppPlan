@@ -185,7 +185,7 @@
           <span class="bold">{{ step.title }}</span>
           {% if step.manual_page %}<span class="muted"> (Manual pág. {{ step.manual_page }})</span>{% endif %}
         </td>
-        <td class="{{ 'approval' if step.is_completed else 'center' }}">{{ "OK" if step.is_completed else "Pendiente" }}</td>
+        <td class="{{ 'approval' if step.is_completed else 'center' }}">{{ "OK" if step.is_completed else "No aplica" }}</td>
         <td class="result-lines center" colspan="2">
           {% if step.tests %}
             {% for test in step.tests %}
@@ -215,7 +215,7 @@
           <span class="bold">{{ participant.name }}</span>
         </td>
         <td colspan="4">
-          <span class="label">{{ "Rol del Líder de turno:" if loop.first else "Rol del Personal Técnico:" }}</span><br>
+          <span class="label">{{ "Rol del Líder de turno:" if loop.first else "Rol del Personal:" }}</span><br>
           {{ participant.role }}
         </td>
         <td class="signature-cell" colspan="2">

@@ -201,6 +201,8 @@ struct APICalibrationReport: Decodable {
 }
 
 struct APIComponentReplacementWrite: Codable, Equatable {
+    var sourceKind: String? = "WAREHOUSE"
+    var donorParentAssetID: String?
     var parentAssetID: String
     var removedAssetID: String
     var installedAssetID: String
@@ -222,6 +224,8 @@ struct APIComponentReplacementWrite: Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case reason
+        case sourceKind = "source_kind"
+        case donorParentAssetID = "donor_parent_asset_id"
         case parentAssetID = "parent_asset_id"
         case removedAssetID = "removed_asset_id"
         case installedAssetID = "installed_asset_id"
@@ -414,6 +418,21 @@ struct APIEditorAsset: Codable, Identifiable {
         case serialNumber = "serial_number"
         case nodeKind = "node_kind"
         case selectable
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        path = try container.decode(String.self, forKey: .path)
+        parentID = try container.decodeIfPresent(String.self, forKey: .parentID)
+        partNumber = try container.decodeIfPresent(String.self, forKey: .partNumber)
+        serialNumber = try container.decodeIfPresent(String.self, forKey: .serialNumber)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        manufacturer = try container.decodeIfPresent(String.self, forKey: .manufacturer)
+        status = try container.decode(String.self, forKey: .status)
+        nodeKind = try container.decodeIfPresent(String.self, forKey: .nodeKind) ?? "ASSET"
+        selectable = try container.decodeIfPresent(Bool.self, forKey: .selectable) ?? true
     }
 }
 

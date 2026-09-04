@@ -228,6 +228,33 @@ struct APIActivity: Identifiable, Codable {
     }
 }
 
+extension APIActivity {
+    init(detail: APIActivityDetail) {
+        id = detail.id
+        activityType = detail.activityType
+        status = detail.status
+        title = detail.title
+        internalCode = detail.internalCode
+        sapOrder = detail.sapOrder
+        project = detail.project
+        stage = detail.stage
+        system = detail.system
+        subsystem = detail.subsystem
+        site = detail.site
+        locationPath = detail.locationPath
+        scheduledAt = detail.scheduledAt
+        plannedYear = detail.plannedYear
+        plannedMonth = detail.plannedMonth
+        actualStartAt = detail.actualStartAt
+        actualEndAt = detail.actualEndAt
+        assets = detail.assets
+        reportVersionCount = detail.reportVersionCount
+        eventID = detail.eventID
+        eventCode = detail.eventCode
+        severity = detail.severity
+    }
+}
+
 struct APIActivityDetail: Identifiable, Codable {
     let id: String
     let activityType: String
@@ -283,6 +310,36 @@ struct APIActivityDetail: Identifiable, Codable {
         case responseAt = "response_at"
         case affectedAssets = "affected_assets"
         case isCritical = "is_critical"
+    }
+}
+
+extension APIActivityDetail {
+    func applyingOfflineLifecycle(
+        _ command: MaintenanceLifecycleCommand,
+        at date: Date = Date()
+    ) -> APIActivityDetail {
+        let status: String
+        switch command {
+        case .start, .reopen: status = "IN_PROGRESS"
+        case .complete: status = "COMPLETED"
+        case .close: status = "CLOSED"
+        }
+        return APIActivityDetail(
+            id: id, activityType: activityType, status: status,
+            title: title, internalCode: internalCode, sapOrder: sapOrder,
+            project: project, stage: stage, system: system, subsystem: subsystem,
+            site: site, locationPath: locationPath, scheduledAt: scheduledAt,
+            plannedYear: plannedYear, plannedMonth: plannedMonth,
+            actualStartAt: command == .start || command == .reopen ? date : actualStartAt,
+            actualEndAt: command == .complete || command == .close ? date : actualEndAt,
+            assets: assets, reportVersionCount: reportVersionCount,
+            eventID: eventID, eventCode: eventCode, severity: severity,
+            isCritical: isCritical, reports: reports,
+            preventiveReport: preventiveReport, correctiveReport: correctiveReport,
+            sapEventName: sapEventName, sapNotification: sapNotification,
+            noticeCreatedAt: noticeCreatedAt, responseAt: responseAt,
+            affectedAssets: affectedAssets
+        )
     }
 }
 
@@ -481,6 +538,7 @@ final class MaintenanceActivityStore: ObservableObject {
 
     func cacheDetail(_ detail: APIActivityDetail) {
         details[detail.id] = detail
+        updateCachedActivity(from: detail)
     }
 
     func load(
@@ -567,7 +625,7 @@ final class MaintenanceActivityStore: ObservableObject {
                 )
             }
             guard !Task.isCancelled else { return }
-            details[id] = detail
+            cacheDetail(detail)
         } catch {
             guard !Task.isCancelled else { return }
             detailErrors[id] = error.localizedDescription
@@ -621,31 +679,7 @@ final class MaintenanceActivityStore: ObservableObject {
         command: MaintenanceLifecycleCommand
     ) {
         guard let detail = details[id] else { return }
-        let now = Date()
-        let status: String
-        switch command {
-        case .start: status = "IN_PROGRESS"
-        case .complete: status = "COMPLETED"
-        case .close: status = "CLOSED"
-        case .reopen: status = "IN_PROGRESS"
-        }
-        let updated = APIActivityDetail(
-            id: detail.id, activityType: detail.activityType, status: status,
-            title: detail.title, internalCode: detail.internalCode, sapOrder: detail.sapOrder,
-            project: detail.project, stage: detail.stage, system: detail.system,
-            subsystem: detail.subsystem, site: detail.site, locationPath: detail.locationPath,
-            scheduledAt: detail.scheduledAt, plannedYear: detail.plannedYear,
-            plannedMonth: detail.plannedMonth,
-            actualStartAt: command == .start || command == .reopen ? now : detail.actualStartAt,
-            actualEndAt: command == .complete || command == .close ? now : detail.actualEndAt,
-            assets: detail.assets, reportVersionCount: detail.reportVersionCount,
-            eventID: detail.eventID, eventCode: detail.eventCode, severity: detail.severity,
-            isCritical: detail.isCritical, reports: detail.reports,
-            preventiveReport: detail.preventiveReport, correctiveReport: detail.correctiveReport,
-            sapEventName: detail.sapEventName, sapNotification: detail.sapNotification,
-            noticeCreatedAt: detail.noticeCreatedAt, responseAt: detail.responseAt,
-            affectedAssets: detail.affectedAssets
-        )
+        let updated = detail.applyingOfflineLifecycle(command)
         details[id] = updated
         updateCachedActivity(from: updated)
     }
@@ -710,15 +744,26 @@ struct PreventiveListView: View {
     @State private var selectedYear = Calendar.current.component(.year, from: Date())
     @State private var selectedStatus = "Todos"
     @State private var selectedSubsystem = "Todos"
-    @State private var selectedEquipment = "Todos"
     @State private var isSelectingOfflineWork = false
     @State private var selectedOfflineIDs: Set<String> = []
 
+    private var isOfflineMode: Bool { !offlineStore.isNetworkAvailable }
+
+    private var activitySource: [APIActivity] {
+        if isOfflineMode {
+            return offlineStore.workPackagesByActivity.values
+                .map { APIActivity(detail: $0.activityDetail) }
+                .filter { $0.activityType == "PREVENTIVE" }
+                .sorted { ($0.scheduledAt ?? .distantFuture) < ($1.scheduledAt ?? .distantFuture) }
+        }
+        return activityStore.preventiveActivities.map(offlineStore.displayActivity)
+    }
+
     private var visibleActivities: [APIActivity] {
-        activityStore.preventiveActivities.filter { activity in
+        guard !isOfflineMode else { return activitySource }
+        return activitySource.filter { activity in
             (selectedStatus == "Todos" || activity.status == selectedStatus)
                 && (selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
-                && (selectedEquipment == "Todos" || activity.assets.contains { $0.name == selectedEquipment })
         }
     }
 
@@ -736,7 +781,7 @@ struct PreventiveListView: View {
                 }
                 activitySection("Preventivos", subtitle: filterSubtitle, activities: visibleActivities)
 
-                if let error = activityStore.preventiveError {
+                if !isOfflineMode, let error = activityStore.preventiveError {
                     ContentUnavailableView {
                         Label("No se pudieron cargar los preventivos", systemImage: "wifi.exclamationmark")
                     } description: {
@@ -744,12 +789,17 @@ struct PreventiveListView: View {
                     } actions: {
                         Button("Reintentar") { Task { await load() } }
                     }
-                } else if activityStore.isLoadingPreventives && visibleActivities.isEmpty {
+                } else if !isOfflineMode && activityStore.isLoadingPreventives && visibleActivities.isEmpty {
                     ProgressView("Cargando preventivos")
                         .frame(maxWidth: .infinity)
                         .padding(AppSpacing.xl)
                 } else if visibleActivities.isEmpty {
-                    GlassPanel { Text("No hay preventivos para este filtro.").foregroundStyle(.secondary) }
+                    GlassPanel {
+                        Text(isOfflineMode
+                            ? "No hay preventivos descargados en este iPad."
+                            : "No hay preventivos para este filtro.")
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .padding(AppSpacing.lg)
@@ -803,21 +853,25 @@ struct PreventiveListView: View {
                     .padding(AppSpacing.md)
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
-                HStack(spacing: AppSpacing.md) {
-                    Picker("Estado", selection: $selectedStatus) {
+                ActionButtonGrid {
+                    Menu {
+                        Picker("Estado", selection: $selectedStatus) {
                         ForEach(["Todos", "SCHEDULED", "IN_PROGRESS", "COMPLETED", "CLOSED"], id: \.self) { value in
                             Text(statusLabel(value)).tag(value)
                         }
                     }
-                    .pickerStyle(.menu)
-                    Picker("Subsistema", selection: $selectedSubsystem) {
+                    } label: {
+                        Label("Estado: \(statusLabel(selectedStatus))", systemImage: "line.3.horizontal.decrease.circle")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: selectedStatus != "Todos"))
+                    Menu {
+                        Picker("Subsistema", selection: $selectedSubsystem) {
                         ForEach(subsystemOptions, id: \.self) { Text($0).tag($0) }
                     }
-                    .pickerStyle(.menu)
-                    Picker("Equipo", selection: $selectedEquipment) {
-                        ForEach(equipmentOptions, id: \.self) { Text($0).tag($0) }
+                    } label: {
+                        Label("Subsistema: \(selectedSubsystem)", systemImage: "square.stack.3d.up")
                     }
-                    .pickerStyle(.menu)
+                    .buttonStyle(ActionTileButtonStyle(prominent: selectedSubsystem != "Todos"))
                 }
                 HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -871,11 +925,7 @@ struct PreventiveListView: View {
     }
 
     private var subsystemOptions: [String] {
-        ["Todos"] + Array(Set(activityStore.preventiveActivities.map(\.subsystem))).sorted()
-    }
-
-    private var equipmentOptions: [String] {
-        ["Todos"] + Array(Set(activityStore.preventiveActivities.flatMap { $0.assets.map(\.name) })).sorted()
+        ["Todos"] + Array(Set(activitySource.map(\.subsystem))).sorted()
     }
 
     private func toggleOfflineSelection(_ id: String) {
@@ -900,6 +950,7 @@ struct PreventiveListView: View {
     }
 
     private func load() async {
+        guard !isOfflineMode else { return }
         let range = dateRange(for: selectedFilter)
         let plannedPeriod = plannedPeriod(for: selectedFilter)
         await activityStore.load(
@@ -998,7 +1049,10 @@ struct APIActivityCard: View {
                 VStack(alignment: .leading, spacing: 5) {
                     Text(activity.title).font(.headline).lineLimit(2)
                     Text(activity.assets.map(\.name).joined(separator: ", ")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                    Label(activity.locationPath ?? "Ubicacion no registrada", systemImage: "mappin.and.ellipse")
+                    Label(
+                        activity.locationPath?.activityLocationSummary ?? "Ubicacion no registrada",
+                        systemImage: "mappin.and.ellipse"
+                    )
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: AppSpacing.sm)

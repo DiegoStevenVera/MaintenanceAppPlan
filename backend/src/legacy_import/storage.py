@@ -346,7 +346,9 @@ class StorageImporter:
                 "subsystem_id": template["subsystem_id"],
                 "geographic_location_id": scope["geographic_location_id"],
                 "maintenance_template_id": scope["maintenance_template_id"],
-                "title": scope["display_name"],
+                # The activity title must remain the template's canonical
+                # maintenance name. The scope identifies the equipment/group.
+                "title": template["activity_n3_summary"] or scope["display_name"],
                 "internal_code": f"LEGACY-PREV-{row.key}",
                 "scheduled_start_at": scheduled_at,
                 "scheduled_end_at": scheduled_at,
@@ -385,7 +387,7 @@ class StorageImporter:
             "preventive_schedules",
             {
                 "id": bridge_id,
-                "name": scope["display_name"],
+                "name": template["activity_n3_summary"] or scope["display_name"],
                 "template_name": template["activity_n3_summary"] or template["report_code"],
                 "asset_ids": [scope["asset_id"]],
                 "asset_names": [asset_name],
@@ -969,7 +971,7 @@ class StorageImporter:
                 "legacy_id": None,
                 "report_version_id": version_id,
                 "user_id": user_id,
-                "role_snapshot": user.role_label,
+                "role_snapshot": "Ingeniero de Mantenimiento de Sistemas de Señalización",
                 "selected": True,
             },
         )
@@ -1745,7 +1747,7 @@ class StorageImporter:
                 "name": name_value or synthetic_email,
                 "email": synthetic_email,
                 "role": "MAINTENANCE_ENGINEER",
-                "role_label": "Ingeniero de Mantenimiento",
+                "role_label": "Ingeniero de Mantenimiento de Sistemas de Señalización",
                 "password_hash": "!legacy-import-disabled!",
                 "legacy_id": None,
                 "work_area_id": None,

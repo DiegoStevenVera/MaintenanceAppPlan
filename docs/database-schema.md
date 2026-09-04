@@ -1,8 +1,9 @@
 # Database Schema
 
-**Version:** 0.5
-**Migration head:** `20260730_0010`
-**Status:** Normalized schema, legacy importer, PCON annual administration, and audit implemented; local import executed
+**Version:** 0.6
+**Migration head:** `20260828_0015`
+**Status:** Normalized schema, legacy importer, PCON annual administration, report audit,
+offline synchronization support, and database-managed report formats implemented.
 
 ## 1. Language and Scope
 
@@ -90,12 +91,18 @@ and the transitional `preventive_schedules` rows in one database transaction.
 Weekly planning was introduced by `20260730_0009`; annual administration,
 membership, logical cancellation, and audit were added by `20260730_0010`.
 
+Imported `maintenance_plan_entries` are also a valid PCON source. When an
+annual administration record has not yet been created, the app derives the
+visible row hierarchy from those imported entries; for a future empty year it
+uses the closest preceding year's scopes as an editable zero-count skeleton.
+PCON is currently restricted to Administrators.
+
 ### Maintenance Execution
 
 - `maintenance_activities`: common preventive/corrective lifecycle.
 - `maintenance_activity_assets`: one or many targets with explicit roles.
 - `maintenance_activity_assignments`
-- `maintenance_status_history`, `maintenance_reopen_records`
+- `maintenance_status_history`, `maintenance_reopen_records`, `report_audit_events`
 - `corrective_events`: transitional corrective read model linked to the common activity.
 - `corrective_event_comments`
 - `maintenance_knowledge_comments`: reusable preventive/template/equipment knowledge.
@@ -109,6 +116,12 @@ The four operational states remain `SCHEDULED`, `IN_PROGRESS`, `COMPLETED`, and 
   unique index `uq_corrective_reports_year_number` prevents two corrective
   reports from receiving the same `NNNN/YY` identifier.
 - `report_versions`: corrections/versions of the same logical report.
+- `report_formats`: active and retired official formats. The active initial records are
+  `ML2-STS-FOR-040-ES` revision `1` for preventive reports and
+  `ML2-STS-FOR-041-ES` revision `2` for corrective reports. PDF rendering exposes the
+  full code as `format_code-revision` with a two-digit revision suffix, for example
+  `ML2-STS-FOR-040-ES-01`.
+- `report_audit_events`: append-only internal audit trail for version creation/finalization and maintenance closure/reopening.
 - `report_version_assets`: immutable asset-scope snapshots for each version.
 - `preventive_report_details`, `preventive_step_results`, `preventive_test_results`
 - `corrective_report_details`, `corrective_report_blocks`, `corrective_activities`
@@ -118,6 +131,10 @@ The four operational states remain `SCHEDULED`, `IN_PROGRESS`, `COMPLETED`, and 
 The logical-report layer allows one preventive activity to own its main preventive report and,
 when required, an additional calibration report. Corrective activities can own one report per
 shift. `stop_after_block_order` controls PDF visibility and does not create a new lifecycle state.
+
+When a draft version is created, `report_versions` snapshots the selected format, revision and
+HTML template. Later changes to the active format affect only new versions; historical PDFs and
+versions remain traceable to the exact approved revision used at creation time.
 
 ### Track Circuit Calibration
 

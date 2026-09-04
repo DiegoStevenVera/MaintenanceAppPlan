@@ -15,21 +15,30 @@ struct PreventiveDetailView: View {
     @State private var guideError: String?
     @State private var isLoadingMoreHistory = false
     @State private var historyLoadError: String?
-    @State private var isDownloadingOfflineWork = false
-    @State private var offlineWorkMessage: String?
 
     private let previousReportsPageSize = 10
 
+    private var downloadedDetail: APIActivityDetail? {
+        offlineStore.workPackage(for: activityID)?.activityDetail
+    }
+
+    private var displayedDetail: APIActivityDetail? {
+        if offlineStore.hasPendingWork(for: activityID), let downloadedDetail {
+            return downloadedDetail
+        }
+        return activityStore.details[activityID] ?? downloadedDetail
+    }
+
     var body: some View {
         Group {
-            if let detail = activityStore.details[activityID] {
+            if let detail = displayedDetail {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AppSpacing.xl) {
                         header(detail)
                         photoPanel(detail)
-                        offlineWorkPanel(detail)
                         lifecycleActions(detail)
                         reportActions(detail)
+                        offlineReportState
                         statusPanel(detail)
                         generalData(detail)
                         preventiveGuide
@@ -42,6 +51,7 @@ struct PreventiveDetailView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .refreshable {
+                    guard offlineStore.isNetworkAvailable else { return }
                     await activityStore.loadDetail(id: activityID, session: session, force: true)
                     async let commentsTask: Void = loadComments()
                     async let guideTask: Void = loadGuide()
@@ -67,10 +77,33 @@ struct PreventiveDetailView: View {
         .background(MaintenanceScreenBackground())
         .navigationTitle("Detalle preventivo")
         .task {
-            await activityStore.loadDetail(id: activityID, session: session)
+            if let downloadedDetail {
+                activityStore.cacheDetail(downloadedDetail)
+                await offlineStore.markWorkPackageOpened(activityID: activityID)
+            }
+            guard offlineStore.isNetworkAvailable else {
+                await loadGuide()
+                return
+            }
+            if offlineStore.isNetworkAvailable {
+                await activityStore.loadDetail(id: activityID, session: session, force: true)
+                if let detail = activityStore.details[activityID] {
+                    await offlineStore.reconcileWorkPackage(with: detail)
+                }
+            }
             async let commentsTask: Void = loadComments()
             async let guideTask: Void = loadGuide()
             _ = await (commentsTask, guideTask)
+        }
+        .onChange(of: offlineStore.lastSyncEvent?.id) { _, _ in
+            guard offlineStore.lastSyncEvent?.activityID == activityID,
+                  offlineStore.isNetworkAvailable else { return }
+            Task {
+                await activityStore.loadDetail(id: activityID, session: session, force: true)
+                if let detail = activityStore.details[activityID] {
+                    await offlineStore.reconcileWorkPackage(with: detail)
+                }
+            }
         }
     }
 
@@ -86,60 +119,12 @@ struct PreventiveDetailView: View {
         )
     }
 
-    private func offlineWorkPanel(_ detail: APIActivityDetail) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Trabajo offline",
-                    subtitle: "Descarga este mantenimiento antes de salir de la oficina"
-                )
-                if let package = offlineStore.workPackage(for: activityID) {
-                    Label(
-                        "Disponible en este iPad desde \(package.downloadedAt.formatted(date: .abbreviated, time: .shortened))",
-                        systemImage: "checkmark.icloud.fill"
-                    )
-                    .font(.subheadline)
-                    .foregroundStyle(BrandColor.green)
-                } else {
-                    Text("Incluye formulario, pasos, participantes, activos y evidencias del reporte.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                ActionButtonGrid {
-                    Button {
-                        Task { await downloadOfflineWork(detail) }
-                    } label: {
-                        if isDownloadingOfflineWork { ProgressView() }
-                        else {
-                            Label(
-                                offlineStore.workPackage(for: activityID) == nil
-                                    ? "Descargar trabajo" : "Actualizar descarga",
-                                systemImage: "arrow.down.circle.fill"
-                            )
-                        }
-                    }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
-                    .disabled(isDownloadingOfflineWork || !offlineStore.isNetworkAvailable)
-                    if offlineStore.workPackage(for: activityID) != nil {
-                        Button {
-                            Task { await offlineStore.removeWorkPackage(activityID: activityID) }
-                        } label: {
-                            Label("Eliminar descarga", systemImage: "trash")
-                        }
-                        .buttonStyle(ActionTileButtonStyle())
-                    }
-                }
-                if let offlineWorkMessage {
-                    Text(offlineWorkMessage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-        }
-    }
-
     @MainActor
     private func loadComments() async {
+        guard offlineStore.isNetworkAvailable else {
+            comments = offlineStore.workPackage(for: activityID)?.editor.comments ?? []
+            return
+        }
         do {
             comments = try await session.withValidAccessToken { token in
                 try await reportService.comments(activityID: activityID, accessToken: token)
@@ -150,22 +135,20 @@ struct PreventiveDetailView: View {
     }
 
     @MainActor
-    private func downloadOfflineWork(_ detail: APIActivityDetail) async {
-        isDownloadingOfflineWork = true
-        offlineWorkMessage = nil
-        defer { isDownloadingOfflineWork = false }
-        do {
-            try await offlineStore.downloadWorkPackage(
-                activityID: activityID, detail: detail, session: session
-            )
-            offlineWorkMessage = "Trabajo descargado y protegido en este iPad."
-        } catch {
-            offlineWorkMessage = error.localizedDescription
-        }
-    }
-
-    @MainActor
     private func loadGuide() async {
+        guard offlineStore.isNetworkAvailable else {
+            if let package = offlineStore.workPackage(for: activityID) {
+                guide = APIPreventiveGuide(
+                    activityID: activityID,
+                    templateName: nil,
+                    templateSteps: package.editor.templateSteps,
+                    previousReports: [],
+                    previousReportsHasMore: false,
+                    previousReportsOffset: 0
+                )
+            }
+            return
+        }
         guard !isLoadingGuide else { return }
         isLoadingGuide = true
         guideError = nil
@@ -187,6 +170,7 @@ struct PreventiveDetailView: View {
 
     @MainActor
     private func loadMorePreviousReports() async {
+        guard offlineStore.isNetworkAvailable else { return }
         guard let guide, guide.previousReportsHasMore, !isLoadingMoreHistory else {
             return
         }
@@ -275,7 +259,9 @@ struct PreventiveDetailView: View {
                         PreventiveReportFormView(activityID: activityID)
                     } label: {
                         Label(
-                            detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte",
+                            offlineStore.draft(for: activityID) != nil
+                                ? "Seguir editando"
+                                : (detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte"),
                             systemImage: "doc.text.fill"
                         )
                     }
@@ -302,6 +288,28 @@ struct PreventiveDetailView: View {
                         Label("Generar PDF", systemImage: "doc.badge.plus")
                     }
                     .buttonStyle(ActionTileButtonStyle(prominent: true))
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var offlineReportState: some View {
+        if offlineStore.draft(for: activityID) != nil {
+            GlassPanel {
+                Label(
+                    "Borrador del reporte protegido en este iPad.",
+                    systemImage: "externaldrive.fill"
+                )
+                .foregroundStyle(.secondary)
+                if offlineStore.isNetworkAvailable {
+                    Button("Sincronizar ahora") {
+                        Task {
+                            await offlineStore.retry(activityID: activityID)
+                            await activityStore.loadDetail(id: activityID, session: session, force: true)
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 }
             }
         }
@@ -376,6 +384,7 @@ struct PreventiveDetailView: View {
             MaintenanceLifecycleActionPanel(
                 status: detail.status,
                 role: role,
+                completionAllowed: detail.reports.contains { $0.documentStatus == "FINALIZED" },
                 isWorking: activityStore.transitioningIDs.contains(activityID),
                 errorMessage: activityStore.transitionErrors[activityID],
                 onClearError: {
@@ -387,6 +396,9 @@ struct PreventiveDetailView: View {
                             await activityStore.performLifecycle(
                                 id: activityID, command: command, reason: reason, session: session
                             )
+                            if let updated = activityStore.details[activityID] {
+                                await offlineStore.reconcileWorkPackage(with: updated)
+                            }
                         } else {
                             await offlineStore.queueLifecycle(
                                 activityID: activityID, command: command, reason: reason
@@ -430,7 +442,10 @@ struct PreventiveDetailView: View {
                     title: "Versiones del reporte",
                     subtitle: "Versiones vinculadas a esta actividad programada"
                 )
-                if detail.reports.isEmpty {
+                if offlineStore.draft(for: activityID) != nil {
+                    localDraftRow
+                }
+                if detail.reports.isEmpty && offlineStore.draft(for: activityID) == nil {
                     Text("Aun no hay versiones generadas.").foregroundStyle(.secondary)
                 } else {
                     ForEach(detail.reports) { report in
@@ -452,7 +467,7 @@ struct PreventiveDetailView: View {
                                         .foregroundStyle(.secondary)
                                 }
                                 Spacer()
-                                Text(report.documentStatus)
+                                Text(report.documentStatus == "DRAFT" ? "Borrador" : report.documentStatus)
                                     .font(.caption.weight(.bold))
                                     .foregroundStyle(BrandColor.green)
                                 Image(systemName: "chevron.right")
@@ -466,6 +481,21 @@ struct PreventiveDetailView: View {
                 }
             }
         }
+    }
+
+    private var localDraftRow: some View {
+        HStack(spacing: AppSpacing.md) {
+            Image(systemName: "externaldrive.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Preventivo · Borrador local").font(.headline)
+                Text("Protegido en este iPad; pendiente de sincronización")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Text("Borrador").font(.caption.weight(.bold)).foregroundStyle(.orange)
+        }
+        .padding(.vertical, AppSpacing.xs)
     }
 
     @ViewBuilder

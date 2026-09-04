@@ -29,6 +29,17 @@ enum AppSpacing {
     static let xl: CGFloat = 32
 }
 
+extension String {
+    /// Keeps activity summaries scannable without changing the full location
+    /// retained in the database or shown in detailed report views.
+    var activityLocationSummary: String {
+        let levels = split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        return levels.prefix(2).joined(separator: " / ")
+    }
+}
+
 struct MaintenanceScreenBackground: View {
     @Environment(\.colorScheme) private var colorScheme
 
@@ -191,6 +202,7 @@ struct ActionTileButtonStyle: ButtonStyle {
 struct MaintenanceLifecycleActionPanel: View {
     let status: String
     let role: UserRole
+    var completionAllowed = true
     let isWorking: Bool
     let errorMessage: String?
     let onClearError: () -> Void
@@ -228,10 +240,20 @@ struct MaintenanceLifecycleActionPanel: View {
                                     : BrandColor.red
                             )
                         )
-                        .disabled(isWorking)
-                        .opacity(isWorking ? 0.55 : 1)
+                        .disabled(isWorking || (command == .complete && !completionAllowed))
+                        .opacity(isWorking || (command == .complete && !completionAllowed) ? 0.55 : 1)
                         .accessibilityHint(command.accessibilityHint)
                     }
+                }
+
+                if Self.commands(status: status, role: role).contains(.complete),
+                   !completionAllowed {
+                    Label(
+                        "Finaliza al menos una versión del reporte antes de completar el mantenimiento.",
+                        systemImage: "doc.badge.exclamationmark"
+                    )
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
                 }
 
                 if isWorking {
@@ -439,19 +461,6 @@ struct ReportParticipantsPanel: View {
                     subtitle: "\(selectedIndices.count) seleccionado(s)"
                 )
 
-                if selectedIndices.isEmpty {
-                    Label(
-                        "Seleccione al menos un participante",
-                        systemImage: "person.crop.circle.badge.exclamationmark"
-                    )
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, AppSpacing.sm)
-                }
-
-                ForEach(selectedIndices, id: \.self) { index in
-                    selectedParticipant(participant: $participants[index])
-                }
-
                 if !unselectedIndices.isEmpty {
                     DisclosureGroup(
                         isExpanded: $showsUnselected
@@ -485,6 +494,19 @@ struct ReportParticipantsPanel: View {
                         .background.opacity(0.58),
                         in: RoundedRectangle(cornerRadius: 10)
                     )
+                }
+
+                if selectedIndices.isEmpty {
+                    Label(
+                        "Seleccione al menos un participante",
+                        systemImage: "person.crop.circle.badge.exclamationmark"
+                    )
+                    .foregroundStyle(.secondary)
+                    .padding(.vertical, AppSpacing.sm)
+                }
+
+                ForEach(selectedIndices, id: \.self) { index in
+                    selectedParticipant(participant: $participants[index])
                 }
             }
         }

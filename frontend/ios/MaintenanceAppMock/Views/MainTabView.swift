@@ -1,6 +1,10 @@
 import SwiftUI
 
 struct MainTabView: View {
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var activityStore: MaintenanceActivityStore
+    @EnvironmentObject private var offlineStore: OfflineReportStore
+
     var body: some View {
         TabView {
             NavigationStack {
@@ -23,13 +27,15 @@ struct MainTabView: View {
             .tabItem {
                 Label("Correctivos", systemImage: "wrench.and.screwdriver")
             }
-            /** TODO: COMPLETE
-            NavigationStack {
-                PCONPlanningView()
+
+            if session.currentUser?.role == .administrator {
+                NavigationStack {
+                    PCONPlanningView()
+                }
+                .tabItem {
+                    Label("PCON", systemImage: "calendar.badge.clock")
+                }
             }
-            .tabItem {
-                Label("PCON", systemImage: "calendar.badge.clock")
-            }*/
 
             NavigationStack {
                 AssetSearchView()
@@ -38,11 +44,13 @@ struct MainTabView: View {
                 Label("Equipos", systemImage: "square.stack.3d.up")
             }
 
-            NavigationStack {
-                StockListView()
-            }
-            .tabItem {
-                Label("Stock", systemImage: "shippingbox.fill")
+            if session.currentUser?.role == .administrator {
+                NavigationStack {
+                    StockListView()
+                }
+                .tabItem {
+                    Label("Stock", systemImage: "shippingbox.fill")
+                }
             }
 
             NavigationStack {
@@ -52,9 +60,23 @@ struct MainTabView: View {
                 Label("Perfil", systemImage: "person.crop.circle")
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
+        // Keep the connectivity notice away from iPadOS's adaptive tab bar.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             OfflineStatusBar()
         }
+        .onChange(of: offlineStore.lastReconciledActivity?.id) { _, _ in
+            guard let reconciliation = offlineStore.lastReconciledActivity else { return }
+            activityStore.cacheDetail(reconciliation.detail)
+            guard offlineStore.isNetworkAvailable else { return }
+            Task { await refreshDashboard() }
+        }
+    }
+
+    private func refreshDashboard() async {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: Date())
+        guard let end = calendar.date(byAdding: .day, value: 1, to: start) else { return }
+        await activityStore.loadDashboard(dayFrom: start, dayTo: end, session: session)
     }
 }
 

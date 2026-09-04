@@ -651,6 +651,22 @@ private struct AnnualCellSelection: Identifiable {
     var id: String { "\(row.id)-\(month.month)" }
 }
 
+private struct TentativeScheduleRequest: Identifiable {
+    let item: PCONPlanItem
+    let start: Date
+    let end: Date
+
+    var id: UUID { item.planEntryID }
+}
+
+private struct AnnualTentativeBatch: Identifiable {
+    let items: [PCONPlanItem]
+    let year: Int
+    let month: Int
+
+    var id: String { "\(year)-\(month)-\(items.map(\.id.uuidString).joined(separator: ","))" }
+}
+
 private struct HierarchyGroup: Identifiable {
     let key: String
     let label: String
@@ -758,6 +774,9 @@ struct PCONPlanningView: View {
                 canEdit: canEdit,
                 onSave: { count in
                     await setAnnualCount(selection: selection, count: count)
+                },
+                onSchedule: { requests in
+                    await saveAnnualTentativeProposals(requests)
                 },
                 onMove: { item, month, reason in
                     await moveOccurrence(item, month: month, reason: reason)
@@ -1203,7 +1222,7 @@ struct PCONPlanningView: View {
     private var weeklyHierarchy: some View {
         let subsystems = Dictionary(grouping: availableWeeklyItems, by: \.subsystemCode)
         return ForEach(subsystems.keys.sorted(), id: \.self) { subsystem in
-            GlassPanel {
+            ContentGlassPanel {
                 DisclosureGroup {
                     let equipment = Dictionary(
                         grouping: subsystems[subsystem, default: []],
@@ -1248,7 +1267,7 @@ struct PCONPlanningView: View {
             VStack(alignment: .leading, spacing: 5) {
                 Text(item.maintenanceName)
                     .font(.headline)
-                Text(item.locationName)
+                Text(item.locationName.activityLocationSummary)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
@@ -1349,7 +1368,7 @@ struct PCONPlanningView: View {
         for row in rows {
             let subsystem = "s|\(row.subsystemCode)"
             let category = "\(subsystem)|c|\(row.equipmentCategory)"
-            let location = "\(category)|l|\(row.locationName)"
+            let location = "\(category)|l|\(row.locationName.activityLocationSummary)"
             let equipment = "\(location)|e|\(row.equipmentID ?? row.equipmentName)"
             keys.formUnion([subsystem, category, location, equipment])
         }
@@ -1386,7 +1405,10 @@ struct PCONPlanningView: View {
                 )
                 guard expandedGroups.contains(categoryKey) else { continue }
 
-                let locations = Dictionary(grouping: categoryRows, by: \.locationName)
+                let locations = Dictionary(
+                    grouping: categoryRows,
+                    by: { $0.locationName.activityLocationSummary }
+                )
                 for location in locations.keys.sorted() {
                     let locationRows = locations[location, default: []]
                     let locationKey = "\(categoryKey)|l|\(location)"
@@ -1492,7 +1514,7 @@ struct PCONPlanningView: View {
     private func setAnnualCount(
         selection: AnnualCellSelection,
         count: Int
-    ) async -> Bool {
+    ) async -> [PCONPlanItem]? {
         do {
             _ = try await withService { service, token in
                 try await service.setCount(
@@ -1502,6 +1524,55 @@ struct PCONPlanningView: View {
                     count: count,
                     token: token
                 )
+            }
+            await loadAnnual()
+            return annualPlan?.rows
+                .first { $0.maintenanceTemplateScopeID == selection.row.maintenanceTemplateScopeID }?
+                .months
+                .first { $0.month == selection.month.month }?
+                .occurrences
+                .filter { $0.proposedStartAt == nil && $0.scheduledStartAt == nil }
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    @MainActor
+    private func saveAnnualTentativeProposals(
+        _ requests: [TentativeScheduleRequest]
+    ) async -> Bool {
+        guard !requests.isEmpty else { return true }
+        do {
+            try await withService { service, token in
+                var sessions: [String: PCONWeekDetail] = [:]
+                for request in requests {
+                    let week = Self.startOfWeek(request.start)
+                    let weekKey = Self.apiDate(week)
+                    let detail: PCONWeekDetail
+                    if let cached = sessions[weekKey] {
+                        detail = cached
+                    } else {
+                        do {
+                            let current = try await service.currentWeek(weekKey, token: token)
+                            detail = current.session.status == "DRAFT"
+                                ? current
+                                : try await service.createWeek(weekKey, token: token)
+                        } catch {
+                            detail = try await service.createWeek(weekKey, token: token)
+                        }
+                        sessions[weekKey] = detail
+                    }
+                    let updated = try await service.saveProposal(
+                        sessionID: detail.session.id,
+                        item: request.item,
+                        start: request.start,
+                        end: request.end,
+                        reason: "Propuesta creada desde el plan anual",
+                        token: token
+                    )
+                    sessions[weekKey] = updated
+                }
             }
             await loadAnnual()
             return true
@@ -1775,19 +1846,22 @@ private struct AnnualCountSheet: View {
     let selection: AnnualCellSelection
     let year: Int
     let canEdit: Bool
-    let onSave: (Int) async -> Bool
+    let onSave: (Int) async -> [PCONPlanItem]?
+    let onSchedule: ([TentativeScheduleRequest]) async -> Bool
     let onMove: (PCONPlanItem, Int, String) async -> Bool
     let onRemove: (PCONPlanItem, String) async -> Bool
 
     @State private var count: Int
     @State private var isSaving = false
     @State private var selectedOccurrence: PCONPlanItem?
+    @State private var tentativeBatch: AnnualTentativeBatch?
 
     init(
         selection: AnnualCellSelection,
         year: Int,
         canEdit: Bool,
-        onSave: @escaping (Int) async -> Bool,
+        onSave: @escaping (Int) async -> [PCONPlanItem]?,
+        onSchedule: @escaping ([TentativeScheduleRequest]) async -> Bool,
         onMove: @escaping (PCONPlanItem, Int, String) async -> Bool,
         onRemove: @escaping (PCONPlanItem, String) async -> Bool
     ) {
@@ -1795,6 +1869,7 @@ private struct AnnualCountSheet: View {
         self.year = year
         self.canEdit = canEdit
         self.onSave = onSave
+        self.onSchedule = onSchedule
         self.onMove = onMove
         self.onRemove = onRemove
         _count = State(initialValue: selection.month.count)
@@ -1818,8 +1893,16 @@ private struct AnnualCountSheet: View {
                         Button("Guardar") {
                             Task {
                                 isSaving = true
-                                if await onSave(count) {
-                                    dismiss()
+                                if let items = await onSave(count) {
+                                    if items.isEmpty {
+                                        dismiss()
+                                    } else {
+                                        tentativeBatch = AnnualTentativeBatch(
+                                            items: items,
+                                            year: year,
+                                            month: selection.month.month
+                                        )
+                                    }
                                 }
                                 isSaving = false
                             }
@@ -1836,11 +1919,29 @@ private struct AnnualCountSheet: View {
                 currentMonth: selection.month.month,
                 year: year,
                 onMove: { month, reason in
-                    await onMove(item, month, reason)
+                    let changed = await onMove(item, month, reason)
+                    if changed { dismiss() }
+                    return changed
                 },
                 onRemove: { reason in
-                    await onRemove(item, reason)
+                    let changed = await onRemove(item, reason)
+                    if changed { dismiss() }
+                    return changed
+                },
+                onSchedule: { start, end in
+                    let changed = await onSchedule([
+                        TentativeScheduleRequest(item: item, start: start, end: end)
+                    ])
+                    if changed { dismiss() }
+                    return changed
                 }
+            )
+        }
+        .sheet(item: $tentativeBatch) { batch in
+            AnnualTentativeScheduleSheet(
+                batch: batch,
+                onSave: onSchedule,
+                onFinish: { dismiss() }
             )
         }
     }
@@ -1849,7 +1950,10 @@ private struct AnnualCountSheet: View {
         Section("Mantenimiento del equipo") {
             LabeledContent("Subsistema", value: selection.row.subsystemCode)
             LabeledContent("Categoría", value: selection.row.equipmentCategory)
-            LabeledContent("Ubicación", value: selection.row.locationName)
+            LabeledContent(
+                "Ubicación",
+                value: selection.row.locationName.activityLocationSummary
+            )
             LabeledContent("Equipo", value: selection.row.equipmentName)
             LabeledContent("Mantenimiento", value: selection.row.maintenanceName)
         }
@@ -1928,6 +2032,123 @@ private struct AnnualCountSheet: View {
     }
 }
 
+private struct AnnualTentativeScheduleSheet: View {
+    @Environment(\.dismiss) private var dismiss
+
+    let batch: AnnualTentativeBatch
+    let onSave: ([TentativeScheduleRequest]) async -> Bool
+    let onFinish: () -> Void
+
+    @State private var entries: [TentativeScheduleEntry]
+    @State private var isSaving = false
+
+    init(
+        batch: AnnualTentativeBatch,
+        onSave: @escaping ([TentativeScheduleRequest]) async -> Bool,
+        onFinish: @escaping () -> Void
+    ) {
+        self.batch = batch
+        self.onSave = onSave
+        self.onFinish = onFinish
+        let calendar = Calendar(identifier: .iso8601)
+        let defaultEntries = batch.items.enumerated().map { index, item in
+            var components = DateComponents()
+            components.year = batch.year
+            components.month = batch.month
+            components.day = min(index + 1, 28)
+            components.hour = 8
+            let start = calendar.date(from: components) ?? Date()
+            let duration = max(item.estimatedMinutes ?? 60, 15)
+            let end = calendar.date(byAdding: .minute, value: duration, to: start) ?? start
+            return TentativeScheduleEntry(item: item, start: start, end: end)
+        }
+        _entries = State(initialValue: defaultEntries)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Text("Estas fechas crean propuestas de la semana. Podrás validarlas o modificarlas después desde Programación semanal antes de confirmarlas.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Text("Programación tentativa")
+                }
+
+                ForEach($entries) { $entry in
+                    Section("Ejecución \(entries.firstIndex(where: { $0.id == entry.id }).map { $0 + 1 } ?? 1)") {
+                        Text(entry.item.maintenanceName)
+                            .font(.headline)
+                        Text(entry.item.equipmentName)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        DatePicker(
+                            "Inicio tentativo",
+                            selection: $entry.start,
+                            in: monthRange,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        DatePicker(
+                            "Fin tentativo",
+                            selection: $entry.end,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                    }
+                }
+            }
+            .navigationTitle("Fechas tentativas")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Omitir por ahora") {
+                        onFinish()
+                        dismiss()
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button {
+                        Task {
+                            isSaving = true
+                            let requests = entries.map {
+                                TentativeScheduleRequest(item: $0.item, start: $0.start, end: $0.end)
+                            }
+                            if await onSave(requests) {
+                                onFinish()
+                                dismiss()
+                            }
+                            isSaving = false
+                        }
+                    } label: {
+                        isSaving ? AnyView(ProgressView()) : AnyView(Text("Guardar propuestas"))
+                    }
+                    .disabled(isSaving || entries.contains { $0.end <= $0.start })
+                }
+            }
+        }
+        .presentationDetents([.large])
+    }
+
+    private var monthRange: ClosedRange<Date> {
+        let calendar = Calendar(identifier: .iso8601)
+        var components = DateComponents()
+        components.year = batch.year
+        components.month = batch.month
+        components.day = 1
+        let start = calendar.date(from: components) ?? Date()
+        let end = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: start) ?? start
+        return start...end
+    }
+}
+
+private struct TentativeScheduleEntry: Identifiable {
+    let item: PCONPlanItem
+    var start: Date
+    var end: Date
+
+    var id: UUID { item.planEntryID }
+}
+
 private struct OccurrenceEditorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
@@ -1936,25 +2157,41 @@ private struct OccurrenceEditorSheet: View {
     let year: Int
     let onMove: (Int, String) async -> Bool
     let onRemove: (String) async -> Bool
+    let onSchedule: (Date, Date) async -> Bool
 
     @State private var destinationMonth: Int
     @State private var reason = ""
     @State private var isSaving = false
     @State private var isConfirmingRemoval = false
+    @State private var tentativeStart: Date
+    @State private var tentativeEnd: Date
 
     init(
         item: PCONPlanItem,
         currentMonth: Int,
         year: Int,
         onMove: @escaping (Int, String) async -> Bool,
-        onRemove: @escaping (String) async -> Bool
+        onRemove: @escaping (String) async -> Bool,
+        onSchedule: @escaping (Date, Date) async -> Bool
     ) {
         self.item = item
         self.currentMonth = currentMonth
         self.year = year
         self.onMove = onMove
         self.onRemove = onRemove
+        self.onSchedule = onSchedule
         _destinationMonth = State(initialValue: currentMonth)
+        let calendar = Calendar(identifier: .iso8601)
+        var components = DateComponents()
+        components.year = year
+        components.month = currentMonth
+        components.day = 1
+        components.hour = 8
+        let defaultStart = calendar.date(from: components) ?? Date()
+        _tentativeStart = State(initialValue: item.proposedStartAt ?? defaultStart)
+        _tentativeEnd = State(initialValue: item.proposedEndAt
+            ?? calendar.date(byAdding: .minute, value: max(item.estimatedMinutes ?? 60, 15), to: defaultStart)
+            ?? defaultStart.addingTimeInterval(3600))
     }
 
     var body: some View {
@@ -1964,6 +2201,38 @@ private struct OccurrenceEditorSheet: View {
                     LabeledContent("Mantenimiento", value: item.maintenanceName)
                     LabeledContent("Equipo", value: item.equipmentName)
                     LabeledContent("Estado", value: item.planningState.label)
+                }
+                if item.scheduledStartAt == nil {
+                    Section("Fecha tentativa") {
+                        Text("Este rango es una ventana propuesta para la reunión semanal; puede coincidir con otras actividades.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        DatePicker(
+                            "Inicio tentativo",
+                            selection: $tentativeStart,
+                            in: monthRange,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        DatePicker(
+                            "Fin tentativo",
+                            selection: $tentativeEnd,
+                            in: monthRange,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
+                        Button {
+                            Task {
+                                isSaving = true
+                                if await onSchedule(tentativeStart, tentativeEnd) {
+                                    dismiss()
+                                }
+                                isSaving = false
+                            }
+                        } label: {
+                            Label("Guardar fecha tentativa", systemImage: "calendar.badge.clock")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .disabled(isSaving || tentativeEnd <= tentativeStart)
+                    }
                 }
                 Section("Mover dentro del plan anual") {
                     Picker("Mes destino", selection: $destinationMonth) {
@@ -2045,6 +2314,17 @@ private struct OccurrenceEditorSheet: View {
         } message: {
             Text("El cambio quedará registrado en el historial de PCON.")
         }
+    }
+
+    private var monthRange: ClosedRange<Date> {
+        let calendar = Calendar(identifier: .iso8601)
+        var components = DateComponents()
+        components.year = year
+        components.month = currentMonth
+        components.day = 1
+        let start = calendar.date(from: components) ?? Date()
+        let end = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: start) ?? start
+        return start...end
     }
 }
 
@@ -2263,7 +2543,10 @@ private struct ScheduleProposalSheet: View {
                 Section("Actividad") {
                     LabeledContent("Mantenimiento", value: item.maintenanceName)
                     LabeledContent("Equipo", value: item.equipmentName)
-                    LabeledContent("Ubicación", value: item.locationName)
+                    LabeledContent(
+                        "Ubicación",
+                        value: item.locationName.activityLocationSummary
+                    )
                 }
                 Section("Fecha y rango horario") {
                     DatePicker(
