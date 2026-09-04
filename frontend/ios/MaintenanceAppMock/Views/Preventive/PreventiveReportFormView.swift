@@ -197,32 +197,31 @@ struct PreventiveReportFormView: View {
                 SectionHeaderText(title: "Datos generales", subtitle: "Datos definidos por la programación")
                 DetailTile(title: "Actividad", value: detail.title)
                 if editor.sapOrderEditable {
-                    VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                        Text("Orden SAP")
-                            .font(.caption.weight(.bold))
-                            .textCase(.uppercase)
-                            .foregroundStyle(.secondary)
-                        TextField("Ingresar Orden SAP", text: $sapOrder)
-                            .textFieldStyle(.roundedBorder)
-                    }
+                    MaintenanceTextField(
+                        title: "Orden SAP",
+                        placeholder: "Ingresar Orden SAP",
+                        text: $sapOrder,
+                        systemImage: "number",
+                        autocapitalization: .characters,
+                        disablesAutocorrection: true
+                    )
                 } else if let sapOrder = editor.sapOrder, !sapOrder.isEmpty {
                     DetailTile(title: "Orden SAP", value: sapOrder)
                 }
-                DetailTile(title: "Equipos", value: detail.assets.map(\.name).joined(separator: ", "))
-                DetailTile(title: "Sede", value: detail.site ?? "No registrada")
-                DetailTile(title: "Proyecto", value: detail.project ?? "No registrado")
-                DetailTile(title: "Etapa", value: detail.stage ?? "No registrada")
-                DetailTile(title: "Sistema", value: detail.system ?? "No registrado")
-                DetailTile(title: "Subsistema", value: detail.subsystem)
-                DetailTile(title: "Fecha", value: editor.actualDate)
-                DetailTile(title: "Hora de inicio", value: Self.dateTimeFormatter.string(from: editor.activityStartedAt))
-                DatePicker(
-                    "Hora fin de la actividad",
-                    selection: $endTime,
-                    displayedComponents: [.date, .hourAndMinute]
+                MaintenanceFieldGrid {
+                    DetailTile(title: "Equipos", value: detail.assets.map(\.name).joined(separator: ", "))
+                    DetailTile(title: "Sede", value: detail.site ?? "No registrada")
+                    DetailTile(title: "Proyecto", value: detail.project ?? "No registrado")
+                    DetailTile(title: "Etapa", value: detail.stage ?? "No registrada")
+                    DetailTile(title: "Sistema", value: detail.system ?? "No registrado")
+                    DetailTile(title: "Subsistema", value: detail.subsystem)
+                    DetailTile(title: "Fecha", value: editor.actualDate)
+                    DetailTile(title: "Hora de inicio", value: Self.dateTimeFormatter.string(from: editor.activityStartedAt))
+                }
+                MaintenanceDateTimeField(
+                    title: "Hora fin de la actividad",
+                    selection: $endTime
                 )
-                .padding(AppSpacing.md)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
                 DetailTile(title: "Ubicación física", value: detail.locationPath ?? "No registrada")
             }
         }
@@ -241,22 +240,18 @@ struct PreventiveReportFormView: View {
                                 .font(.subheadline)
                                 .foregroundStyle(BrandColor.red)
                         }
-                        TextField(
-                            "Comentario del paso",
-                            text: Binding($step.comment, replacingNilWith: ""),
-                            axis: .vertical
-                        )
-                        .textFieldStyle(.roundedBorder)
                         ForEach($step.tests) { $test in
                             VStack(alignment: .leading, spacing: AppSpacing.xs) {
                                 Text(test.name).font(.subheadline.weight(.semibold))
-                                Picker("Resultado", selection: $test.selectedResult) {
+                                MaintenanceChoiceField(
+                                    "Resultado",
+                                    systemImage: "checkmark.circle",
+                                    selection: $test.selectedResult
+                                ) {
                                     ForEach(resultOptions(for: test), id: \.self) { option in
                                         Text(option).tag(option)
                                     }
                                 }
-                                .pickerStyle(.menu)
-                                .frame(maxWidth: .infinity, alignment: .leading)
                                 /**
                                 TextField(
                                     "Notas",
@@ -268,6 +263,14 @@ struct PreventiveReportFormView: View {
                             .padding(AppSpacing.sm)
                             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
                         }
+                        MaintenanceTextArea(
+                            title: "Comentario del paso",
+                            placeholder: "Registrar hallazgos u observaciones",
+                            text: Binding($step.comment, replacingNilWith: ""),
+                            systemImage: "text.alignleft",
+                            minimumLines: 2,
+                            maximumLines: 3
+                        )
                     }
                     .padding(AppSpacing.md)
                     .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
@@ -393,20 +396,22 @@ struct PreventiveReportFormView: View {
                     subtitle: "Genera un reporte de calibración independiente"
                 )
 
-                LabeledContent("Frecuencia del circuito de vía") {
-                    HStack(spacing: AppSpacing.xs) {
-                        TextField("0", text: $calibrationFrequency)
-                            .multilineTextAlignment(.trailing)
-                            .keyboardType(.decimalPad)
-                            .frame(minWidth: 120)
-                        Text("Hz").foregroundStyle(.secondary)
-                    }
+                MaintenanceFieldGrid {
+                    MaintenanceTextField(
+                        title: "Frecuencia del circuito de vía (Hz)",
+                        placeholder: "0",
+                        text: $calibrationFrequency,
+                        systemImage: "waveform.path.ecg",
+                        disablesAutocorrection: true
+                    )
+                    .keyboardType(.decimalPad)
+                    MaintenanceTextField(
+                        title: "Jumpers del transmisor",
+                        placeholder: "Registrar jumpers",
+                        text: $transmitterJumpers,
+                        systemImage: "cable.connector"
+                    )
                 }
-                .padding(AppSpacing.md)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-
-                TextField("Jumpers del transmisor", text: $transmitterJumpers)
-                    .textFieldStyle(.roundedBorder)
 
                 Stepper(
                     "Cantidad de receptores: \(receiverCount)",
@@ -436,37 +441,28 @@ struct PreventiveReportFormView: View {
                         .font(.headline)
                         .foregroundStyle(BrandColor.red)
 
-                        TextField(
-                            "Jumpers del receptor \(selectedReceiver)",
-                            text: $calibrationReceivers[index].jumpers
-                        )
-                        .textFieldStyle(.roundedBorder)
-
-                        TextField(
-                            "TCA9 del receptor \(selectedReceiver)",
-                            text: $calibrationReceivers[index].tca9
-                        )
-                        .textFieldStyle(.roundedBorder)
-
-                        LabeledContent(
-                            "Corriente de riel del receptor \(selectedReceiver)"
-                        ) {
-                            HStack(spacing: AppSpacing.xs) {
-                                TextField(
-                                    "0",
-                                    text: $calibrationReceivers[index].railCurrent
-                                )
-                                .multilineTextAlignment(.trailing)
-                                .keyboardType(.decimalPad)
-                                .frame(minWidth: 120)
-                                Text("mA").foregroundStyle(.secondary)
-                            }
+                        MaintenanceFieldGrid {
+                            MaintenanceTextField(
+                                title: "Jumpers del receptor \(selectedReceiver)",
+                                placeholder: "Registrar jumpers",
+                                text: $calibrationReceivers[index].jumpers,
+                                systemImage: "cable.connector"
+                            )
+                            MaintenanceTextField(
+                                title: "TCA9 del receptor \(selectedReceiver)",
+                                placeholder: "Registrar TCA9",
+                                text: $calibrationReceivers[index].tca9,
+                                systemImage: "dot.radiowaves.left.and.right"
+                            )
+                            MaintenanceTextField(
+                                title: "Corriente de riel del receptor \(selectedReceiver) (mA)",
+                                placeholder: "0",
+                                text: $calibrationReceivers[index].railCurrent,
+                                systemImage: "bolt",
+                                disablesAutocorrection: true
+                            )
+                            .keyboardType(.decimalPad)
                         }
-                        .padding(AppSpacing.md)
-                        .background(
-                            .regularMaterial,
-                            in: RoundedRectangle(cornerRadius: 10)
-                        )
                     }
                     .padding(AppSpacing.md)
                     .background(
@@ -491,19 +487,23 @@ struct PreventiveReportFormView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Conclusiones")
-                Picker("Estado final del equipo", selection: $conclusion) {
+                MaintenanceChoiceField(
+                    "Estado final del equipo",
+                    systemImage: "checkmark.seal",
+                    selection: $conclusion
+                ) {
                     Text("Equipo operativo").tag("Equipo operativo")
                     Text("Equipo no operativo").tag("Equipo no operativo")
                     Text("Equipo medio operativo").tag("Equipo medio operativo")
                 }
-                .pickerStyle(.menu)
-                TextField(
-                    "Comentarios adicionales del mantenimiento",
+                MaintenanceTextArea(
+                    title: "Comentarios adicionales del mantenimiento",
+                    placeholder: "Registrar conclusiones, restricciones u observaciones",
                     text: $additionalComments,
-                    axis: .vertical
+                    systemImage: "text.bubble",
+                    minimumLines: 3,
+                    maximumLines: 5
                 )
-                .lineLimit(3, reservesSpace: true)
-                .textFieldStyle(.roundedBorder)
             }
         }
     }

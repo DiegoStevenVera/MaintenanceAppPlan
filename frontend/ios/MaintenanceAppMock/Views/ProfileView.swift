@@ -29,7 +29,7 @@ struct ProfileView: View {
                             Text(session.currentUser?.email ?? "")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
-                            Text("Foto de perfil real o avatar por defecto en la app final")
+                            Text("Foto de perfil")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

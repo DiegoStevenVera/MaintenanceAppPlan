@@ -190,17 +190,19 @@ struct CorrectiveReportFormView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Datos del evento", subtitle: "Información registrada en el aviso")
-                DetailTile(title: "Proyecto", value: detail.project ?? "No registrado")
-                DetailTile(title: "Etapa", value: detail.stage ?? "No registrada")
-                DetailTile(title: "Sistema", value: detail.system ?? "No registrado")
-                DetailTile(title: "Subsistema", value: detail.subsystem)
-                DetailTile(title: "Asset afectado", value: detail.assets.map(\.name).joined(separator: ", "))
-                DetailTile(title: "Ubicación física", value: detail.locationPath ?? "No registrada")
-                if let startedAt = detail.actualStartAt {
-                    DetailTile(
-                        title: "Hora de inicio del correctivo",
-                        value: Self.dateTimeFormatter.string(from: startedAt)
-                    )
+                MaintenanceFieldGrid {
+                    DetailTile(title: "Proyecto", value: detail.project ?? "No registrado")
+                    DetailTile(title: "Etapa", value: detail.stage ?? "No registrada")
+                    DetailTile(title: "Sistema", value: detail.system ?? "No registrado")
+                    DetailTile(title: "Subsistema", value: detail.subsystem)
+                    DetailTile(title: "Asset afectado", value: detail.assets.map(\.name).joined(separator: ", "))
+                    DetailTile(title: "Ubicación física", value: detail.locationPath ?? "No registrada")
+                    if let startedAt = detail.actualStartAt {
+                        DetailTile(
+                            title: "Hora de inicio del correctivo",
+                            value: Self.dateTimeFormatter.string(from: startedAt)
+                        )
+                    }
                 }
             }
         }
@@ -210,18 +212,32 @@ struct CorrectiveReportFormView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Descripción de falla e impacto")
-                TextField("Síntoma registrado", text: $symptom, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Descripción técnica detallada", text: $technicalDescription, axis: .vertical)
-                    .lineLimit(4, reservesSpace: true)
-                    .textFieldStyle(.roundedBorder)
-                Picker("Impacto operacional", selection: $operationalImpact) {
+                MaintenanceTextArea(
+                    title: "Síntoma registrado",
+                    placeholder: "Describir el síntoma observado",
+                    text: $symptom,
+                    systemImage: "exclamationmark.bubble",
+                    minimumLines: 2,
+                    maximumLines: 3
+                )
+                MaintenanceTextArea(
+                    title: "Descripción técnica detallada",
+                    placeholder: "Registrar diagnóstico y condición técnica",
+                    text: $technicalDescription,
+                    systemImage: "doc.text.magnifyingglass",
+                    minimumLines: 3,
+                    maximumLines: 5
+                )
+                MaintenanceChoiceField(
+                    "Impacto operacional",
+                    systemImage: "chart.bar.xaxis",
+                    selection: $operationalImpact
+                ) {
                     Text("Sin impacto").tag("Sin impacto")
                     Text("Degradado").tag("Degradado")
                     Text("Interrupción parcial").tag("Interrupción parcial")
                     Text("Interrupción total").tag("Interrupción total")
                 }
-                .pickerStyle(.menu)
             }
         }
     }
@@ -230,12 +246,14 @@ struct CorrectiveReportFormView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Análisis de la falla")
-                Picker("Tipo de falla", selection: $failureAnalysis) {
+                MaintenanceSegmentedChoiceField(
+                    "Tipo de falla",
+                    selection: $failureAnalysis
+                ) {
                     ForEach(["Funcional", "Hardware", "Software", "Comunicaciones", "Energía"], id: \.self) {
                         Text($0).tag($0)
                     }
                 }
-                .pickerStyle(.segmented)
             }
         }
     }
@@ -246,8 +264,12 @@ struct CorrectiveReportFormView: View {
                 SectionHeaderText(title: "Actividades realizadas")
                 ForEach($activities) { $activity in
                     VStack(alignment: .leading, spacing: AppSpacing.md) {
-                        HStack {
-                            Picker("Tipo de actividad", selection: $activity.actionTypeCode) {
+                        HStack(alignment: .top, spacing: AppSpacing.md) {
+                            MaintenanceChoiceField(
+                                "Tipo de actividad",
+                                systemImage: "wrench.and.screwdriver",
+                                selection: $activity.actionTypeCode
+                            ) {
                                 ForEach(editor.actionTypes) { item in
                                     Text(item.name).tag(item.code)
                                 }
@@ -263,15 +285,32 @@ struct CorrectiveReportFormView: View {
                                 activities.removeAll { $0.id == activity.id }
                             } label: {
                                 Image(systemName: "trash")
+                                    .frame(width: 44, height: 44)
                             }
+                            .accessibilityLabel("Eliminar actividad \(activity.name)")
+                            .accessibilityHint("Elimina esta actividad del reporte")
                         }
-                        DatePicker(
-                            "Inicio",
-                            selection: $activity.startedAt,
-                            displayedComponents: [.date, .hourAndMinute]
+                        MaintenanceFieldGrid {
+                            MaintenanceDateTimeField(
+                                title: "Inicio de actividad",
+                                selection: $activity.startedAt
+                            )
+                            MaintenanceDateTimeField(
+                                title: "Fin de actividad",
+                                selection: Binding(
+                                    get: { activity.endedAt ?? activity.startedAt },
+                                    set: { activity.endedAt = $0 }
+                                )
+                            )
+                        }
+                        MaintenanceTextArea(
+                            title: "Descripción de la actividad",
+                            placeholder: "Describir el trabajo realizado",
+                            text: $activity.description,
+                            systemImage: "text.alignleft",
+                            minimumLines: 2,
+                            maximumLines: 4
                         )
-                        TextField("Descripción", text: $activity.description, axis: .vertical)
-                            .textFieldStyle(.roundedBorder)
                         if activity.actionTypeCode == "CAMBIO_DE_COMPONENTE_CON_UNO_EXTERNO" {
                             ComponentReplacementEditor(
                                 replacement: replacementBinding(for: $activity),
@@ -280,14 +319,6 @@ struct CorrectiveReportFormView: View {
                                 inventoryLocations: editor.inventoryLocations
                             )
                         }
-                        DatePicker(
-                            "Fin",
-                            selection: Binding(
-                                get: { activity.endedAt ?? activity.startedAt },
-                                set: { activity.endedAt = $0 }
-                            ),
-                            displayedComponents: [.date, .hourAndMinute]
-                        )
                     }
                     .padding(AppSpacing.md)
                     .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
@@ -312,23 +343,35 @@ struct CorrectiveReportFormView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Pruebas y validación")
-                TextField("Pruebas funcionales realizadas", text: $functionalTests, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                Picker("Resultado", selection: $validationResult) {
+                MaintenanceTextArea(
+                    title: "Pruebas funcionales realizadas",
+                    placeholder: "Registrar pruebas y verificaciones realizadas",
+                    text: $functionalTests,
+                    systemImage: "checklist",
+                    minimumLines: 3,
+                    maximumLines: 5
+                )
+                MaintenanceSegmentedChoiceField("Resultado", selection: $validationResult) {
                     Text("Conforme").tag("Conforme")
                     Text("No Conforme").tag("No Conforme")
                 }
-                .pickerStyle(.segmented)
-                Toggle("Liberación para servicio", isOn: $serviceReleased)
+                MaintenanceToggleField(
+                    "Liberación para servicio",
+                    systemImage: "checkmark.seal",
+                    isOn: $serviceReleased
+                )
                 if serviceReleased {
-                    DatePicker(
-                        "Fecha de liberación",
-                        selection: $serviceReleasedAt,
-                        displayedComponents: [.date, .hourAndMinute]
+                    MaintenanceDateTimeField(
+                        title: "Fecha de liberación",
+                        selection: $serviceReleasedAt
                     )
                 }
-                TextField("Responsable de validación", text: $validationResponsible)
-                    .textFieldStyle(.roundedBorder)
+                MaintenanceTextField(
+                    title: "Responsable de validación",
+                    placeholder: "Nombre del responsable",
+                    text: $validationResponsible,
+                    systemImage: "person.crop.circle"
+                )
             }
         }
     }
@@ -372,15 +415,23 @@ struct CorrectiveReportFormView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Conclusiones / Comentarios")
-                Picker("Estado técnico del equipo", selection: $technicalStatus) {
+                MaintenanceChoiceField(
+                    "Estado técnico del equipo",
+                    systemImage: "stethoscope",
+                    selection: $technicalStatus
+                ) {
                     Text("Operativo").tag("Operativo")
                     Text("Operativo con restricciones").tag("Operativo con restricciones")
                     Text("Inoperativo").tag("Inoperativo")
                 }
-                .pickerStyle(.menu)
-                TextField("Observaciones / comentarios", text: $observations, axis: .vertical)
-                    .lineLimit(4, reservesSpace: true)
-                    .textFieldStyle(.roundedBorder)
+                MaintenanceTextArea(
+                    title: "Observaciones / comentarios",
+                    placeholder: "Registrar conclusiones y recomendaciones",
+                    text: $observations,
+                    systemImage: "text.bubble",
+                    minimumLines: 3,
+                    maximumLines: 5
+                )
             }
         }
     }
@@ -878,8 +929,9 @@ private struct ComponentReplacementEditor: View {
                     )
                 }
 
-                Picker(
+                MaintenanceChoiceField(
                     "Estado del componente",
+                    systemImage: "checkmark.circle",
                     selection: Binding(
                         get: { replacement.removedCondition ?? "Inoperativo" },
                         set: { replacement.removedCondition = $0 }
@@ -888,23 +940,24 @@ private struct ComponentReplacementEditor: View {
                     Text("Operativo").tag("Operativo")
                     Text("Inoperativo").tag("Inoperativo")
                 }
-                .pickerStyle(.menu)
-
-                Picker("Se enviará a", selection: $replacement.destinationDescription) {
+                MaintenanceChoiceField(
+                    "Se enviará a",
+                    systemImage: "arrowshape.turn.up.right",
+                    selection: $replacement.destinationDescription
+                ) {
                     ForEach(locations, id: \.self) { Text($0).tag($0) }
                 }
-                .pickerStyle(.menu)
-
-                TextField(
-                    "Notas adicionales del componente retirado",
+                MaintenanceTextArea(
+                    title: "Notas adicionales del componente retirado",
+                    placeholder: "Registrar condición, embalaje u observaciones",
                     text: Binding(
                         get: { replacement.removedNotes ?? "" },
                         set: { replacement.removedNotes = $0.isEmpty ? nil : $0 }
                     ),
-                    axis: .vertical
+                    systemImage: "note.text",
+                    minimumLines: 2,
+                    maximumLines: 3
                 )
-                .lineLimit(2, reservesSpace: true)
-                .textFieldStyle(.roundedBorder)
             }
             .padding(AppSpacing.md)
             .background(
@@ -918,8 +971,9 @@ private struct ComponentReplacementEditor: View {
                     subtitle: "Defina el origen del componente de reposición"
                 )
 
-                Picker(
+                MaintenanceChoiceField(
                     "Origen del componente",
+                    systemImage: "arrow.left.arrow.right",
                     selection: Binding(
                         get: { sourceKind },
                         set: { mode in
@@ -933,19 +987,18 @@ private struct ComponentReplacementEditor: View {
                     Text("Transferencia desde otro equipo").tag("EQUIPMENT_TRANSFER")
                     Text("Intercambio entre equipos").tag("EQUIPMENT_SWAP")
                 }
-                .pickerStyle(.menu)
 
                 Text(sourceModeTitle)
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
 
-                Picker(
+                MaintenanceChoiceField(
                     sourceKind == "WAREHOUSE" ? "Se obtiene de" : "Equipo / ubicación donante",
+                    systemImage: "shippingbox",
                     selection: $replacement.sourceDescription
                 ) {
                     ForEach(locations, id: \.self) { Text($0).tag($0) }
                 }
-                .pickerStyle(.menu)
                 .onChange(of: replacement.sourceDescription) { _, source in
                     guard let selectedInstalledAsset,
                           selectedInstalledAsset.path != source else { return }
@@ -981,8 +1034,9 @@ private struct ComponentReplacementEditor: View {
                     )
                 }
 
-                Picker(
+                MaintenanceChoiceField(
                     "Estado del componente",
+                    systemImage: "checkmark.circle",
                     selection: Binding(
                         get: { replacement.installedCondition ?? "Operativo" },
                         set: { replacement.installedCondition = $0 }
@@ -991,18 +1045,17 @@ private struct ComponentReplacementEditor: View {
                     Text("Operativo").tag("Operativo")
                     Text("Inoperativo").tag("Inoperativo")
                 }
-                .pickerStyle(.menu)
-
-                TextField(
-                    "Notas adicionales del componente instalado",
+                MaintenanceTextArea(
+                    title: "Notas adicionales del componente instalado",
+                    placeholder: "Registrar condición u observaciones",
                     text: Binding(
                         get: { replacement.installedNotes ?? "" },
                         set: { replacement.installedNotes = $0.isEmpty ? nil : $0 }
                     ),
-                    axis: .vertical
+                    systemImage: "note.text",
+                    minimumLines: 2,
+                    maximumLines: 3
                 )
-                .lineLimit(2, reservesSpace: true)
-                .textFieldStyle(.roundedBorder)
             }
             .padding(AppSpacing.md)
             .background(
@@ -1010,9 +1063,14 @@ private struct ComponentReplacementEditor: View {
                 in: RoundedRectangle(cornerRadius: 12, style: .continuous)
             )
 
-            TextField("Motivo del reemplazo", text: $replacement.reason, axis: .vertical)
-                .lineLimit(2, reservesSpace: true)
-                .textFieldStyle(.roundedBorder)
+            MaintenanceTextArea(
+                title: "Motivo del reemplazo",
+                placeholder: "Registrar motivo del cambio",
+                text: $replacement.reason,
+                systemImage: "arrow.triangle.2.circlepath",
+                minimumLines: 2,
+                maximumLines: 3
+            )
         }
         .padding(AppSpacing.md)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
@@ -1165,22 +1223,15 @@ private struct ReplacementAssetMetadataEditor: View {
         if let storedValue, !storedValue.isEmpty {
             DetailTile(title: title, value: storedValue)
         } else {
-            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                Text(title)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                TextField(
-                    "Ingresar \(title.lowercased())",
-                    text: Binding(
-                        get: { value.wrappedValue ?? "" },
-                        set: {
-                            value.wrappedValue = $0.isEmpty ? nil : $0
-                        }
-                    )
-                )
-                .textFieldStyle(.roundedBorder)
-            }
-            .padding(AppSpacing.sm)
+            MaintenanceTextField(
+                title: title,
+                placeholder: "Ingresar \(title.lowercased())",
+                text: Binding(
+                    get: { value.wrappedValue ?? "" },
+                    set: { value.wrappedValue = $0.isEmpty ? nil : $0 }
+                ),
+                systemImage: "square.and.pencil"
+            )
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 BrandColor.amber.opacity(0.08),
@@ -1231,16 +1282,13 @@ private struct ReplacementAssetSelectionSheet: View {
                     GlassPanel {
                         VStack(alignment: .leading, spacing: AppSpacing.md) {
                             SectionHeaderText(title: title, subtitle: subtitle)
-                            HStack(spacing: AppSpacing.sm) {
-                                Image(systemName: "magnifyingglass")
-                                    .foregroundStyle(.secondary)
-                                TextField("Filtrar por nombre, serie o part number", text: $searchText)
-                                    .textInputAutocapitalization(.never)
-                            }
-                            .padding(AppSpacing.md)
-                            .background(
-                                .regularMaterial,
-                                in: RoundedRectangle(cornerRadius: 10)
+                            MaintenanceTextField(
+                                title: "Buscar componente",
+                                placeholder: "Filtrar por nombre, serie o part number",
+                                text: $searchText,
+                                systemImage: "magnifyingglass",
+                                autocapitalization: .never,
+                                disablesAutocorrection: true
                             )
                         }
                     }

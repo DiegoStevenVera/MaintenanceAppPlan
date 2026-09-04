@@ -118,7 +118,7 @@ private struct ReportEvidenceImageTile: View {
     let attachmentID: String?
     let onDelete: (() -> Void)?
 
-    @State private var imageData: Data?
+    @State private var loadedImage: UIImage?
     @State private var isLoading = false
     @State private var didFail = false
     @State private var isPresentingImage = false
@@ -127,7 +127,7 @@ private struct ReportEvidenceImageTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
             Button {
-                guard image != nil else {
+                guard loadedImage != nil else {
                     reloadID = UUID()
                     return
                 }
@@ -137,8 +137,8 @@ private struct ReportEvidenceImageTile: View {
                     RoundedRectangle(cornerRadius: 8, style: .continuous)
                         .fill(Color.primary.opacity(0.06))
 
-                    if let image {
-                        Image(uiImage: image)
+                    if let loadedImage {
+                        Image(uiImage: loadedImage)
                             .resizable()
                             .scaledToFill()
                             .frame(maxWidth: .infinity)
@@ -160,7 +160,7 @@ private struct ReportEvidenceImageTile: View {
                         .foregroundStyle(.secondary)
                     }
 
-                    if image != nil {
+                    if loadedImage != nil {
                         Image(systemName: "arrow.up.left.and.arrow.down.right")
                             .font(.caption.bold())
                             .foregroundStyle(.white)
@@ -202,9 +202,9 @@ private struct ReportEvidenceImageTile: View {
         .sheet(isPresented: $isPresentingImage) {
             NavigationStack {
                 Group {
-                    if let image {
+                    if let loadedImage {
                         ScrollView([.horizontal, .vertical]) {
-                            Image(uiImage: image)
+                            Image(uiImage: loadedImage)
                                 .resizable()
                                 .scaledToFit()
                                 .frame(maxWidth: .infinity, minHeight: 420)
@@ -226,16 +226,12 @@ private struct ReportEvidenceImageTile: View {
         }
     }
 
-    private var image: UIImage? {
-        imageData.flatMap(UIImage.init(data:))
-    }
-
     @MainActor
     private func loadImage() async {
         if let contentBase64,
            let localData = Data(base64Encoded: contentBase64),
-           UIImage(data: localData) != nil {
-            imageData = localData
+           let localImage = UIImage(data: localData) {
+            loadedImage = localImage
             didFail = false
             return
         }
@@ -257,11 +253,11 @@ private struct ReportEvidenceImageTile: View {
                     bearerToken: token
                 )
             }
-            guard UIImage(data: data) != nil else {
+            guard let remoteImage = UIImage(data: data) else {
                 didFail = true
                 return
             }
-            imageData = data
+            loadedImage = remoteImage
             didFail = false
         } catch {
             didFail = true

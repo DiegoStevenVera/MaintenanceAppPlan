@@ -104,7 +104,10 @@ struct GlassPanel<Content: View>: View {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
                     .stroke(BrandColor.glassStroke, lineWidth: 1)
             }
-            .glassEffect(.regular.tint(BrandColor.red.opacity(0.04)).interactive(), in: .rect(cornerRadius: 18))
+            // Large report sections are passive surfaces. Keeping the glass
+            // non-interactive here avoids making the whole scrolling region a
+            // live Liquid Glass sample; buttons keep the interactive effect.
+            .glassEffect(.regular.tint(BrandColor.red.opacity(0.04)), in: .rect(cornerRadius: 18))
             .shadow(color: BrandColor.signalInk.opacity(0.08), radius: 18, x: 0, y: 10)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -179,6 +182,7 @@ struct ActionButtonGrid<Content: View>: View {
 }
 
 struct ActionTileButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var prominent = false
     var prominentColor = BrandColor.red
 
@@ -194,8 +198,221 @@ struct ActionTileButtonStyle: ButtonStyle {
                 prominent ? prominentColor : BrandColor.red.opacity(configuration.isPressed ? 0.16 : 0.10),
                 in: RoundedRectangle(cornerRadius: 18, style: .continuous)
             )
-            .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
-            .animation(.snappy(duration: 0.18), value: configuration.isPressed)
+            .glassEffect(
+                .regular.tint((prominent ? prominentColor : BrandColor.red).opacity(0.10)).interactive(),
+                in: .rect(cornerRadius: 18)
+            )
+            .scaleEffect(reduceMotion || !configuration.isPressed ? 1.0 : 0.98)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
+/// Shared form-field surfaces. They intentionally keep the report bindings and
+/// persistence flow untouched while giving the operational forms a consistent,
+/// accessible label and focus treatment.
+private struct MaintenanceInputSurface: ViewModifier {
+    let isFocused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .padding(AppSpacing.md)
+            .background(
+                isFocused ? BrandColor.red.opacity(0.075) : Color.primary.opacity(0.035),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(
+                        isFocused ? BrandColor.red.opacity(0.80) : Color.primary.opacity(0.10),
+                        lineWidth: isFocused ? 1.5 : 1
+                    )
+            }
+            .animation(.easeOut(duration: 0.16), value: isFocused)
+    }
+}
+
+private extension View {
+    func maintenanceInputSurface(isFocused: Bool = false) -> some View {
+        modifier(MaintenanceInputSurface(isFocused: isFocused))
+    }
+}
+
+struct MaintenanceTextField: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+    var systemImage: String? = nil
+    var autocapitalization: TextInputAutocapitalization = .sentences
+    var disablesAutocorrection = false
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            MaintenanceFieldLabel(title: title, systemImage: systemImage)
+            TextField(placeholder, text: $text)
+                .textInputAutocapitalization(autocapitalization)
+                .autocorrectionDisabled(disablesAutocorrection)
+                .focused($isFocused)
+                .accessibilityLabel(title)
+        }
+        .maintenanceInputSurface(isFocused: isFocused)
+    }
+}
+
+struct MaintenanceTextArea: View {
+    let title: String
+    let placeholder: String
+    @Binding var text: String
+    var systemImage: String? = nil
+    var minimumLines = 2
+    var maximumLines = 4
+
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            MaintenanceFieldLabel(title: title, systemImage: systemImage)
+            TextField(placeholder, text: $text, axis: .vertical)
+                .lineLimit(maximumLines, reservesSpace: true)
+                .frame(minHeight: CGFloat(minimumLines) * 22)
+                .focused($isFocused)
+                .accessibilityLabel(title)
+        }
+        .maintenanceInputSurface(isFocused: isFocused)
+    }
+}
+
+struct MaintenanceChoiceField<Selection: Hashable, Content: View>: View {
+    let title: String
+    let systemImage: String?
+    @Binding var selection: Selection
+    @ViewBuilder let content: () -> Content
+
+    init(
+        _ title: String,
+        systemImage: String? = nil,
+        selection: Binding<Selection>,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        self.systemImage = systemImage
+        _selection = selection
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            MaintenanceFieldLabel(title: title, systemImage: systemImage)
+            Picker(title, selection: $selection, content: content)
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(title)
+        }
+        .maintenanceInputSurface()
+    }
+}
+
+struct MaintenanceSegmentedChoiceField<Selection: Hashable, Content: View>: View {
+    let title: String
+    @Binding var selection: Selection
+    @ViewBuilder let content: () -> Content
+
+    init(
+        _ title: String,
+        selection: Binding<Selection>,
+        @ViewBuilder content: @escaping () -> Content
+    ) {
+        self.title = title
+        _selection = selection
+        self.content = content
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            MaintenanceFieldLabel(title: title)
+            Picker(title, selection: $selection, content: content)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel(title)
+        }
+        .maintenanceInputSurface()
+    }
+}
+
+struct MaintenanceDateTimeField: View {
+    let title: String
+    @Binding var selection: Date
+    var displayedComponents: DatePickerComponents = [.date, .hourAndMinute]
+
+    var body: some View {
+        DatePicker(title, selection: $selection, displayedComponents: displayedComponents)
+            .datePickerStyle(.compact)
+            .font(.body.weight(.medium))
+            .maintenanceInputSurface()
+            .accessibilityLabel(title)
+    }
+}
+
+struct MaintenanceToggleField: View {
+    let title: String
+    let systemImage: String?
+    @Binding var isOn: Bool
+
+    init(_ title: String, systemImage: String? = nil, isOn: Binding<Bool>) {
+        self.title = title
+        self.systemImage = systemImage
+        _isOn = isOn
+    }
+
+    var body: some View {
+        Toggle(isOn: $isOn) {
+            MaintenanceFieldLabel(title: title, systemImage: systemImage)
+        }
+        .toggleStyle(.switch)
+        .maintenanceInputSurface()
+    }
+}
+
+struct MaintenanceFieldGrid<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 280), spacing: AppSpacing.md)],
+            alignment: .leading,
+            spacing: AppSpacing.md
+        ) {
+            content
+        }
+    }
+}
+
+private struct MaintenanceFieldLabel: View {
+    let title: String
+    let systemImage: String?
+
+    init(title: String, systemImage: String? = nil) {
+        self.title = title
+        self.systemImage = systemImage
+    }
+
+    var body: some View {
+        Label {
+            Text(title)
+                .font(.caption.weight(.bold))
+                .textCase(.uppercase)
+        } icon: {
+            if let systemImage {
+                Image(systemName: systemImage)
+            }
+        }
+        .foregroundStyle(.secondary)
     }
 }
 
@@ -802,9 +1019,14 @@ struct MaintenanceCommentsPanel: View {
                     }
                 }
 
-                TextField("Escribir comentario", text: $message, axis: .vertical)
-                    .lineLimit(3, reservesSpace: true)
-                    .textFieldStyle(.roundedBorder)
+                MaintenanceTextArea(
+                    title: "Nuevo comentario",
+                    placeholder: "Escribir comentario",
+                    text: $message,
+                    systemImage: "bubble.left.and.bubble.right",
+                    minimumLines: 2,
+                    maximumLines: 4
+                )
 
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
