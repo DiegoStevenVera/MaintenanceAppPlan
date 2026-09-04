@@ -189,7 +189,7 @@
         <td class="result-lines center" colspan="2">
           {% if step.tests %}
             {% for test in step.tests %}
-              <div><span class="bold">{{ test.name }}:</span> {{ test.selected_result }}{% if test.numeric_value %} · {{ test.numeric_value }}{% endif %}</div>
+              <div> <!--<span class="bold">{{ test.name }}:</span>-->{{ test.selected_result }}{% if test.numeric_value %} · {{ test.numeric_value }}{% endif %}</div>
             {% endfor %}
           {% else %}-{% endif %}
         </td>
