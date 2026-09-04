@@ -82,7 +82,9 @@ struct PreventiveDetailView: View {
                 await offlineStore.markWorkPackageOpened(activityID: activityID)
             }
             guard offlineStore.isNetworkAvailable else {
-                await loadGuide()
+                async let commentsTask: Void = loadComments()
+                async let guideTask: Void = loadGuide()
+                _ = await (commentsTask, guideTask)
                 return
             }
             if offlineStore.isNetworkAvailable {

@@ -87,6 +87,13 @@ class CorrectiveCreationContextDTO(BaseModel):
     physical_location: str
 
 
+class CorrectiveLocationOptionDTO(BaseModel):
+    id: str
+    name: str
+    level: int
+    parent_location_id: str | None = None
+
+
 class MaintenanceActivityAssetDTO(BaseModel):
     id: str
     name: str
@@ -230,6 +237,8 @@ class MaintenanceActivityDTO(BaseModel):
     report_version_count: int = 0
     event_id: str | None = None
     event_code: str | None = None
+    sap_notification: str | None = None
+    notice_created_at: datetime | None = None
     severity: Severity | None = None
 
 
@@ -243,6 +252,12 @@ class MaintenanceActivityDetailDTO(MaintenanceActivityDTO):
     response_at: datetime | None = None
     is_critical: bool = False
     affected_assets: list[CorrectiveAffectedAssetDTO] = Field(default_factory=list)
+
+
+class StartMaintenanceRequest(BaseModel):
+    """Client-recorded instant for a maintenance start, including offline work."""
+
+    started_at: datetime | None = None
 
 
 class MaintenanceDashboardDTO(BaseModel):

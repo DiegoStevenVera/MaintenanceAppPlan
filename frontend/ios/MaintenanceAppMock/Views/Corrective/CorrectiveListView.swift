@@ -325,6 +325,18 @@ struct CorrectiveCreationContext: Codable {
     }
 }
 
+struct CorrectiveLocationOption: Codable, Identifiable, Equatable {
+    let id: String
+    let name: String
+    let level: Int
+    let parentLocationID: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, level
+        case parentLocationID = "parent_location_id"
+    }
+}
+
 struct CorrectiveCreateRequest: Codable {
     let sapEventName: String
     let sapNotification: String
@@ -426,6 +438,13 @@ struct CorrectiveCreationAPIService {
         )
     }
 
+    func locationOptions(accessToken: String) async throws -> [CorrectiveLocationOption] {
+        try await client.get(
+            "api/v1/corrective-location-options",
+            bearerToken: accessToken
+        )
+    }
+
     func create(
         request: CorrectiveCreateRequest,
         accessToken: String
@@ -464,6 +483,9 @@ private struct DatabaseCorrectiveEventCreateView: View {
     @State private var creationError: String?
     @State private var offlineTrees: [String: [EquipmentTreeNodeDTO]] = [:]
     @State private var creationStep = 0
+    @State private var locationOptions: [CorrectiveLocationOption] = []
+    @State private var selectedLocationLevelOneID = ""
+    @State private var selectedLocationLevelTwoID = ""
 
     private let subsystemOptions = ["ATS", "CBTC", "IXL"]
 
@@ -520,6 +542,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
             && context != nil
             && !sapEventName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !sapNotification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!allowsVariableEventLocation || !selectedLocationLevelTwoID.isEmpty)
             && !isCreating
     }
 
@@ -583,6 +606,9 @@ private struct DatabaseCorrectiveEventCreateView: View {
         .task(id: selectedSubsystem) {
             await loadTargets()
         }
+        .task {
+            await loadLocationOptions()
+        }
         .task(id: selectedTargetID) {
             guard let selectedTarget else {
                 context = nil
@@ -601,6 +627,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
                     ($0.id, catalog.trees[$0.id] ?? [])
                 })
                 context = roots.lazy.compactMap { catalog.contexts[$0.id] }.first
+                configureEventLocation()
                 return
             }
             for root in roots {
@@ -616,7 +643,10 @@ private struct DatabaseCorrectiveEventCreateView: View {
             context = nil
             offlineTrees = [:]
             creationStep = 0
+            selectedLocationLevelOneID = ""
+            selectedLocationLevelTwoID = ""
         }
+        .onChange(of: locationOptions) { _, _ in configureEventLocation() }
     }
 
     private var header: some View {
@@ -750,9 +780,10 @@ private struct DatabaseCorrectiveEventCreateView: View {
                     DetailTile(title: "Sistema", value: context.system)
                     DetailTile(title: "Subsistema", value: context.subsystem)
                     DetailTile(
-                        title: "Ubicacion fisica",
+                        title: "Ubicación registrada del equipo",
                         value: context.physicalLocation
                     )
+                    eventLocationFields
                 } else if selectedTarget != nil {
                     ProgressView("Cargando contexto")
                         .frame(maxWidth: .infinity)
@@ -793,12 +824,57 @@ private struct DatabaseCorrectiveEventCreateView: View {
         }
     }
 
+    @ViewBuilder
+    private var eventLocationFields: some View {
+        let firstLevel = levelOneOptions
+        let secondLevel = levelTwoOptions
+        Text("Ubicación del evento")
+            .font(.headline)
+            .padding(.top, AppSpacing.sm)
+        Text(
+            allowsVariableEventLocation
+                ? "Selecciona dónde ocurrió el evento."
+                : "Ubicación fija según el equipo seleccionado."
+        )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+        if firstLevel.isEmpty {
+            DetailTile(title: "Nivel 1", value: locationLevelsFromContext.first ?? "No registrada")
+            DetailTile(title: "Nivel 2", value: locationLevelsFromContext.dropFirst().first ?? "No registrada")
+        } else {
+            Picker("Tipo de ubicación", selection: $selectedLocationLevelOneID) {
+                Text("Seleccionar").tag("")
+                ForEach(firstLevel) { location in
+                    Text(location.name).tag(location.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!allowsVariableEventLocation)
+            .onChange(of: selectedLocationLevelOneID) { _, _ in
+                if allowsVariableEventLocation {
+                    selectedLocationLevelTwoID = ""
+                }
+            }
+
+            Picker("Ubicación", selection: $selectedLocationLevelTwoID) {
+                Text("Seleccionar").tag("")
+                ForEach(secondLevel) { location in
+                    Text(location.name).tag(location.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(!allowsVariableEventLocation || selectedLocationLevelOneID.isEmpty)
+        }
+    }
+
     @MainActor
     private func loadContext(equipmentID: String) async {
         if !offlineStore.isNetworkAvailable,
            let context = offlineStore.correctiveCatalog?.contexts[equipmentID] {
             self.context = context
             responseAt = Date()
+            configureEventLocation()
             return
         }
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") else {
@@ -816,6 +892,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
                 )
             }
             responseAt = Date()
+            configureEventLocation()
         } catch {
             context = nil
             creationError = error.localizedDescription
@@ -851,6 +928,25 @@ private struct DatabaseCorrectiveEventCreateView: View {
     }
 
     @MainActor
+    private func loadLocationOptions() async {
+        if !offlineStore.isNetworkAvailable {
+            locationOptions = offlineStore.correctiveCatalog?.locationOptions ?? []
+            return
+        }
+        guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") else { return }
+        do {
+            locationOptions = try await session.withValidAccessToken { token in
+                try await CorrectiveCreationAPIService(baseURLString: baseURL).locationOptions(
+                    accessToken: token
+                )
+            }
+        } catch {
+            // The fixed equipment context remains sufficient when the location catalog is unavailable.
+            locationOptions = []
+        }
+    }
+
+    @MainActor
     private func createCorrective() async {
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL"),
               let selectedTarget,
@@ -870,7 +966,7 @@ private struct DatabaseCorrectiveEventCreateView: View {
             correctiveEquipmentGroupID: selectedTarget.kind == "GROUP" ? selectedTarget.id : nil,
             subsystem: context.subsystem, severity: severity.rawValue.uppercased(),
             isCritical: isCritical, noticeCreatedAt: noticeCreatedAt,
-            responseAt: Date(), physicalLocation: context.physicalLocation
+            responseAt: Date(), physicalLocation: eventPhysicalLocation
         )
         if !offlineStore.isNetworkAvailable {
             await offlineStore.queueCorrective(request: request)
@@ -906,6 +1002,66 @@ private struct DatabaseCorrectiveEventCreateView: View {
         formatter.locale = Locale(identifier: "es_PE")
         return formatter
     }()
+
+    private var allowsVariableEventLocation: Bool {
+        guard let selectedTarget else { return false }
+        let name = selectedTarget.name.uppercased()
+        return name.contains("SOFTWARE ATS PCON")
+            || name.contains("SOFTWARE ATS PCOE")
+            || selectedTarget.roots.contains {
+                $0.name.localizedCaseInsensitiveContains("tren")
+            }
+    }
+
+    private var levelOneOptions: [CorrectiveLocationOption] {
+        locationOptions.filter { $0.level == 1 }
+    }
+
+    private var levelTwoOptions: [CorrectiveLocationOption] {
+        locationOptions.filter {
+            $0.level == 2 && $0.parentLocationID == selectedLocationLevelOneID
+        }
+    }
+
+    private var locationLevelsFromContext: [String] {
+        guard let physicalLocation = context?.physicalLocation else { return [] }
+        return physicalLocation
+            .split(separator: "/")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var eventPhysicalLocation: String {
+        guard allowsVariableEventLocation,
+              let first = levelOneOptions.first(where: { $0.id == selectedLocationLevelOneID }),
+              let second = levelTwoOptions.first(where: { $0.id == selectedLocationLevelTwoID }) else {
+            return context?.physicalLocation ?? ""
+        }
+        return "\(first.name) / \(second.name)"
+    }
+
+    private func configureEventLocation() {
+        guard !allowsVariableEventLocation else {
+            selectedLocationLevelOneID = ""
+            selectedLocationLevelTwoID = ""
+            return
+        }
+        let levels = locationLevelsFromContext
+        guard let firstName = levels.first,
+              let first = levelOneOptions.first(where: {
+                  $0.name.compare(firstName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+              }) else {
+            return
+        }
+        selectedLocationLevelOneID = first.id
+        if let secondName = levels.dropFirst().first,
+           let second = locationOptions.first(where: {
+               $0.level == 2 && $0.parentLocationID == first.id
+                   && $0.name.compare(secondName, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame
+           }) {
+            selectedLocationLevelTwoID = second.id
+        }
+    }
 }
 
 private struct CorrectiveAssetTreeNode: Identifiable {
@@ -1314,7 +1470,9 @@ private struct CorrectiveAPIActivityCard: View {
                     .background(BrandColor.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 5) {
                     Text(activity.title).font(.headline).lineLimit(2)
-                    Text(activity.eventCode ?? activity.internalCode).font(.caption.weight(.bold)).foregroundStyle(BrandColor.red)
+                    Text("Notificación SAP: \(activity.sapNotification?.isEmpty == false ? activity.sapNotification! : "No registrada")")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(BrandColor.red)
                     Text(activity.assets.map(\.name).joined(separator: ", ")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     Label(
                         activity.locationPath?.activityLocationSummary ?? "Ubicacion no registrada",
@@ -1328,8 +1486,22 @@ private struct CorrectiveAPIActivityCard: View {
                     if let severity = activity.severity {
                         Text(severity).font(.caption.weight(.bold)).foregroundStyle(severity == "HIGH" ? BrandColor.red : BrandColor.amber)
                     }
+                    if let noticeCreatedAt = activity.noticeCreatedAt {
+                        Text(Self.dateFormatter.string(from: noticeCreatedAt))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.trailing)
+                    }
                 }
             }
         }
     }
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "es_PE")
+        return formatter
+    }()
 }

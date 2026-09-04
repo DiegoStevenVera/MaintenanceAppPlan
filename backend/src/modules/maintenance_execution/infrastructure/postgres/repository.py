@@ -49,6 +49,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     CorrectiveTargetDTO,
     CorrectiveTargetMemberDTO,
     CorrectiveCreationContextDTO,
+    CorrectiveLocationOptionDTO,
     CorrectiveAffectedAssetDTO,
     CorrectiveActivityDTO,
     ComponentReplacementDTO,
@@ -70,6 +71,9 @@ from modules.organizational_context.infrastructure.postgres.models import (
     StageRecord,
     SubsystemRecord,
     SystemRecord,
+)
+from modules.organizational_context.infrastructure.postgres.operational_models import (
+    GeographicLocationRecord,
 )
 from shared_kernel.schemas import MaintenanceStatus, Severity, TimelineEntryDTO, UserRole
 
@@ -162,6 +166,8 @@ class PostgresMaintenanceRepository:
             SiteRecord.name.label("site_name"),
             CorrectiveEventRecord.id.label("event_id"),
             CorrectiveEventRecord.code.label("event_code"),
+            CorrectiveEventRecord.sap_code.label("sap_notification"),
+            CorrectiveEventRecord.notice_created_at.label("notice_created_at"),
             CorrectiveEventRecord.severity.label("event_severity"),
             asset_ids.label("asset_ids"),
             asset_names.label("asset_names"),
@@ -199,6 +205,8 @@ class PostgresMaintenanceRepository:
             site_name,
             event_id,
             event_code,
+            sap_notification,
+            notice_created_at,
             event_severity,
             asset_ids,
             asset_names,
@@ -238,6 +246,10 @@ class PostgresMaintenanceRepository:
             report_version_count=report_count or 0,
             event_id=str(event_id) if event_id else None,
             event_code=event_code,
+            sap_notification=sap_notification,
+            notice_created_at=PostgresMaintenanceRepository._parse_optional_datetime(
+                notice_created_at
+            ),
             severity=Severity(event_severity) if event_severity else None,
         )
 
@@ -457,6 +469,7 @@ class PostgresMaintenanceRepository:
         user_id: str,
         user_role: UserRole,
         reason: str | None = None,
+        occurred_at: datetime | None = None,
     ) -> bool:
         activity = await self._session.scalar(
             select(MaintenanceActivityRecord)
@@ -472,7 +485,9 @@ class PostgresMaintenanceRepository:
             command=command,
             role=user_role,
         )
-        changed_at = datetime.now(timezone.utc)
+        changed_at = occurred_at or datetime.now(timezone.utc)
+        if changed_at.tzinfo is None:
+            changed_at = changed_at.replace(tzinfo=timezone.utc)
 
         activity.status = next_status.value
         if command == MaintenanceLifecycleCommand.START:
@@ -1044,6 +1059,7 @@ class PostgresMaintenanceRepository:
         identifier = uuid4().hex[:10].upper()
         event_id = f"cor-{uuid4()}"
         event_code = f"COR-{now.year}-{identifier}"
+        event_location = payload.physical_location.strip() or anchor.physical_location
         activity = MaintenanceActivityRecord(
             activity_type="CORRECTIVE",
             status=MaintenanceStatus.SCHEDULED.value,
@@ -1053,7 +1069,7 @@ class PostgresMaintenanceRepository:
             geographic_location_id=anchor.current_geographic_location_id,
             title=payload.sap_event_name.strip(),
             internal_code=event_code,
-            location_path_snapshot=anchor.physical_location,
+            location_path_snapshot=event_location,
             created_by_user_id=user_id,
         )
         self._session.add(activity)
@@ -1072,7 +1088,7 @@ class PostgresMaintenanceRepository:
             status=MaintenanceStatus.SCHEDULED.value,
             notice_created_at=payload.notice_created_at,
             response_at=payload.response_at,
-            physical_location=anchor.physical_location,
+            physical_location=event_location,
             report_version_count=0,
             timeline=[
                 {
@@ -1209,6 +1225,36 @@ class PostgresMaintenanceRepository:
             subsystem=subsystem.name,
             physical_location=anchor.physical_location,
         )
+
+    async def list_corrective_location_options(
+        self,
+    ) -> list[CorrectiveLocationOptionDTO]:
+        records = (
+            await self._session.scalars(
+                select(GeographicLocationRecord)
+                .where(
+                    GeographicLocationRecord.level.in_([1, 2]),
+                    GeographicLocationRecord.is_active.is_(True),
+                )
+                .order_by(
+                    GeographicLocationRecord.level,
+                    GeographicLocationRecord.full_path,
+                )
+            )
+        ).all()
+        return [
+            CorrectiveLocationOptionDTO(
+                id=str(record.id),
+                name=record.name,
+                level=record.level,
+                parent_location_id=(
+                    str(record.parent_location_id)
+                    if record.parent_location_id is not None
+                    else None
+                ),
+            )
+            for record in records
+        ]
 
     async def _corrective_creation_records(
         self,

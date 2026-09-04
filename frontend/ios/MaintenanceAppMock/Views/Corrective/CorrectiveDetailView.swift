@@ -76,7 +76,10 @@ struct CorrectiveDetailView: View {
                     await offlineStore.reconcileWorkPackage(with: detail)
                 }
             }
-            guard offlineStore.isNetworkAvailable else { return }
+            guard offlineStore.isNetworkAvailable else {
+                await loadComments()
+                return
+            }
             await loadComments()
         }
         .onChange(of: offlineStore.lastSyncEvent?.id) { _, _ in

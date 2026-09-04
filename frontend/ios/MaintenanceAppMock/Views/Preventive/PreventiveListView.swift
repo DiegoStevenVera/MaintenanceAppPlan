@@ -209,6 +209,8 @@ struct APIActivity: Identifiable, Codable {
     let reportVersionCount: Int
     let eventID: String?
     let eventCode: String?
+    let sapNotification: String?
+    let noticeCreatedAt: Date?
     let severity: String?
 
     enum CodingKeys: String, CodingKey {
@@ -225,6 +227,8 @@ struct APIActivity: Identifiable, Codable {
         case reportVersionCount = "report_version_count"
         case eventID = "event_id"
         case eventCode = "event_code"
+        case sapNotification = "sap_notification"
+        case noticeCreatedAt = "notice_created_at"
     }
 }
 
@@ -251,6 +255,8 @@ extension APIActivity {
         reportVersionCount = detail.reportVersionCount
         eventID = detail.eventID
         eventCode = detail.eventCode
+        sapNotification = detail.sapNotification
+        noticeCreatedAt = detail.noticeCreatedAt
         severity = detail.severity
     }
 }
@@ -412,6 +418,14 @@ private struct ReopenMaintenanceRequest: Encodable {
     let reason: String
 }
 
+private struct StartMaintenanceRequest: Encodable {
+    let startedAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case startedAt = "started_at"
+    }
+}
+
 struct MaintenanceAPIService {
     private let client: APIClient
 
@@ -497,9 +511,17 @@ struct MaintenanceAPIService {
         id: String,
         command: MaintenanceLifecycleCommand,
         reason: String?,
+        occurredAt: Date? = nil,
         accessToken: String
     ) async throws -> APIActivityDetail {
         let path = "api/v1/maintenance-activities/\(id)/\(command.rawValue)"
+        if command == .start {
+            return try await client.post(
+                path,
+                body: StartMaintenanceRequest(startedAt: occurredAt ?? Date()),
+                bearerToken: accessToken
+            )
+        }
         if command == .reopen {
             return try await client.post(
                 path,
@@ -647,6 +669,7 @@ final class MaintenanceActivityStore: ObservableObject {
         transitioningIDs.insert(id)
         transitionErrors[id] = nil
         defer { transitioningIDs.remove(id) }
+        let occurredAt = Date()
 
         do {
             let detail = try await session.withValidAccessToken { token in
@@ -654,6 +677,7 @@ final class MaintenanceActivityStore: ObservableObject {
                     id: id,
                     command: command,
                     reason: reason,
+                    occurredAt: occurredAt,
                     accessToken: token
                 )
             }
@@ -707,6 +731,8 @@ final class MaintenanceActivityStore: ObservableObject {
             reportVersionCount: detail.reportVersionCount,
             eventID: detail.eventID,
             eventCode: detail.eventCode,
+            sapNotification: detail.sapNotification,
+            noticeCreatedAt: detail.noticeCreatedAt,
             severity: detail.severity
         )
         if let index = preventiveActivities.firstIndex(where: { $0.id == detail.id }) {
@@ -1048,6 +1074,12 @@ struct APIActivityCard: View {
                     .background(BrandColor.red.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 VStack(alignment: .leading, spacing: 5) {
                     Text(activity.title).font(.headline).lineLimit(2)
+                    if activity.activityType == "PREVENTIVE" {
+                        Text("Orden SAP: \(activity.sapOrder?.isEmpty == false ? activity.sapOrder! : "No registrada")")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(BrandColor.red)
+                            .lineLimit(1)
+                    }
                     Text(activity.assets.map(\.name).joined(separator: ", ")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     Label(
                         activity.locationPath?.activityLocationSummary ?? "Ubicacion no registrada",

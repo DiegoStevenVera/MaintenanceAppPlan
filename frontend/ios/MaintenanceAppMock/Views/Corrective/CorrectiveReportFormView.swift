@@ -196,6 +196,12 @@ struct CorrectiveReportFormView: View {
                 DetailTile(title: "Subsistema", value: detail.subsystem)
                 DetailTile(title: "Asset afectado", value: detail.assets.map(\.name).joined(separator: ", "))
                 DetailTile(title: "Ubicación física", value: detail.locationPath ?? "No registrada")
+                if let startedAt = detail.actualStartAt {
+                    DetailTile(
+                        title: "Hora de inicio del correctivo",
+                        value: Self.dateTimeFormatter.string(from: startedAt)
+                    )
+                }
             }
         }
     }
@@ -762,6 +768,14 @@ struct CorrectiveReportFormView: View {
             replacement: nil
         )
     }
+
+    private static let dateTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        formatter.locale = Locale(identifier: "es_PE")
+        return formatter
+    }()
 
 }
 

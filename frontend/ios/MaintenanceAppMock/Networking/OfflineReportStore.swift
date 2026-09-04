@@ -81,6 +81,7 @@ struct OfflineCorrectiveCatalog: Codable {
     let targets: [CorrectiveTarget]
     let contexts: [String: CorrectiveCreationContext]
     let trees: [String: [EquipmentTreeNodeDTO]]
+    let locationOptions: [CorrectiveLocationOption]?
 }
 
 struct OfflineCorrectiveOperation: Codable, Identifiable {
@@ -522,6 +523,11 @@ final class OfflineReportStore: ObservableObject {
         var targets: [CorrectiveTarget] = []
         var contexts: [String: CorrectiveCreationContext] = [:]
         var trees: [String: [EquipmentTreeNodeDTO]] = [:]
+        let locationOptions = try await session.withValidAccessToken { token in
+            try await CorrectiveCreationAPIService(baseURLString: baseURL).locationOptions(
+                accessToken: token
+            )
+        }
         for subsystem in ["ATS", "CBTC", "IXL"] {
             let subsystemTargets = try await session.withValidAccessToken { token in
                 try await CorrectiveCreationAPIService(baseURLString: baseURL).targets(
@@ -544,7 +550,8 @@ final class OfflineReportStore: ObservableObject {
         }
         let catalog = OfflineCorrectiveCatalog(
             ownerUserID: ownerUserID, environment: environment, baseURL: baseURL,
-            downloadedAt: Date(), targets: targets, contexts: contexts, trees: trees
+            downloadedAt: Date(), targets: targets, contexts: contexts, trees: trees,
+            locationOptions: locationOptions
         )
         correctiveCatalog = catalog
         try await workDiskStore.write([catalog], collection: "corrective-catalog")
@@ -1025,6 +1032,7 @@ final class OfflineReportStore: ObservableObject {
                         id: operation.activityID,
                         command: operation.command,
                         reason: operation.reason,
+                        occurredAt: operation.createdAt,
                         accessToken: token
                     )
                 }

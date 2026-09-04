@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
@@ -30,6 +30,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     CorrectiveEventDTO,
     CorrectiveTargetDTO,
     CorrectiveCreationContextDTO,
+    CorrectiveLocationOptionDTO,
     CreateCorrectiveEventRequest,
     MaintenanceActivityDetailDTO,
     MaintenanceDashboardDTO,
@@ -45,6 +46,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     ReportEditorDTO,
     ReportWriteResultDTO,
     ReopenMaintenanceRequest,
+    StartMaintenanceRequest,
 )
 from shared_kernel.schemas import MaintenanceStatus, Page, UserRole
 
@@ -373,11 +375,20 @@ async def _transition_maintenance_activity(
     current_user: UserDTO,
     session: AsyncSession,
     reason: str | None = None,
+    occurred_at: datetime | None = None,
 ) -> MaintenanceActivityDetailDTO:
     if not uses_postgres():
         raise HTTPException(status_code=404, detail="Maintenance activity not found")
     repository = PostgresMaintenanceRepository(session)
     try:
+        if occurred_at is not None:
+            if occurred_at.tzinfo is None:
+                occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+            if occurred_at > datetime.now(timezone.utc) + timedelta(minutes=5):
+                raise HTTPException(
+                    status_code=422,
+                    detail="La hora de inicio no puede estar en el futuro.",
+                )
         if command == MaintenanceLifecycleCommand.COMPLETE:
             await PostgresReportWriter(session).ensure_finalized_report(
                 activity_id=activity_id
@@ -388,6 +399,7 @@ async def _transition_maintenance_activity(
             user_id=current_user.id,
             user_role=current_user.role,
             reason=reason,
+            occurred_at=occurred_at,
         )
         if found and command == MaintenanceLifecycleCommand.COMPLETE:
             await PostgresReportWriter(
@@ -436,6 +448,7 @@ async def _transition_maintenance_activity(
 )
 async def start_maintenance_activity(
     activity_id: str,
+    payload: StartMaintenanceRequest | None = None,
     current_user: UserDTO = Depends(operational_roles),
     session: AsyncSession = Depends(get_session),
 ) -> MaintenanceActivityDetailDTO:
@@ -444,6 +457,7 @@ async def start_maintenance_activity(
         command=MaintenanceLifecycleCommand.START,
         current_user=current_user,
         session=session,
+        occurred_at=payload.started_at if payload else None,
     )
 
 
@@ -571,6 +585,18 @@ async def list_corrective_targets(
     if not uses_postgres():
         return []
     return await PostgresMaintenanceRepository(session).list_corrective_targets(subsystem)
+
+
+@router.get(
+    "/corrective-location-options",
+    response_model=list[CorrectiveLocationOptionDTO],
+)
+async def list_corrective_location_options(
+    session: AsyncSession = Depends(get_session),
+) -> list[CorrectiveLocationOptionDTO]:
+    if not uses_postgres():
+        return []
+    return await PostgresMaintenanceRepository(session).list_corrective_location_options()
 
 
 @router.get("/corrective-events/{event_id}", response_model=CorrectiveEventDTO)
