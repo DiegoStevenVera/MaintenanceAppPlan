@@ -147,23 +147,25 @@
           {% if index < personnel|length %}{{ personnel[index].personnel_role }}{% endif %}
         </td>
         <td class="center">
-          {% if index < personnel|length %}{{ personnel[index].quantity }}{% endif %}
+          {% if loop.first %}{{ participants|length }}{% endif %}
         </td>
         <td class="center">
-          {% if index < personnel|length %}{{ "%.2f"|format(personnel[index].estimated_hours) if personnel[index].estimated_hours is not none else activity_duration }}{% endif %}
+          {% if loop.first %}{{ activity_duration }}{% endif %}
         </td>
         <td class="center" colspan="4">
           {% if index < tools|length %}{{ tools[index].tool_name }}{% endif %}
         </td>
         <td class="center">-</td>
         <td class="center">
-          {% if index < tools|length %}{{ tools[index].estimated_hours if tools[index].estimated_hours is not none else activity_duration }}{% endif %}
+          {% if loop.first %}{{ activity_duration }}{% endif %}
         </td>
       </tr>
       {% endfor %}
       <tr>
         <td class="label" colspan="3">Nombre de la actividad:</td>
-        <td class="activity-title" colspan="9">{{ activity.title }}</td>
+        <td class="activity-title" colspan="9">
+          {{ activity.title }}{% if activity.assets %} - {{ activity.assets | map(attribute='name') | join(', ') }}{% endif %}
+        </td>
       </tr>
       <tr>
         <td class="label" colspan="3">Frecuencia de la actividad:</td>

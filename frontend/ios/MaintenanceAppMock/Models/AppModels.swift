@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 enum UserRole: String, CaseIterable, Identifiable, Codable {
@@ -73,6 +74,41 @@ enum MaintenanceDateFilter: String, CaseIterable, Identifiable, Codable {
         case .thisMonth: return "calendar.circle"
         case .specificMonth: return "line.3.horizontal.decrease.circle"
         }
+    }
+}
+
+enum PeruvianDateFormat {
+    static func display(_ rawValue: String) -> String {
+        for formatter in inputFormatters {
+            if let date = formatter.date(from: rawValue) {
+                return outputFormatter.string(from: date)
+            }
+        }
+        return rawValue
+    }
+
+    private static let inputFormatters: [DateFormatter] = [
+        formatter("yyyy-MM-dd"),
+        formatter("dd/MM/yyyy"),
+        formatter("dd-MM-yyyy"),
+    ]
+
+    private static let outputFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_PE")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "America/Lima")
+        formatter.dateFormat = "dd/MM/yyyy"
+        return formatter
+    }()
+
+    private static func formatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = TimeZone(identifier: "America/Lima")
+        formatter.dateFormat = format
+        return formatter
     }
 }
 

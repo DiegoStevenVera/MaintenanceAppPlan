@@ -770,6 +770,7 @@ struct PreventiveListView: View {
     @State private var selectedYear = Calendar.current.component(.year, from: Date())
     @State private var selectedStatus = "Todos"
     @State private var selectedSubsystem = "Todos"
+    @State private var selectedSummaryMetric: PreventiveSummaryMetric?
     @State private var isSelectingOfflineWork = false
     @State private var selectedOfflineIDs: Set<String> = []
 
@@ -786,17 +787,21 @@ struct PreventiveListView: View {
     }
 
     private var visibleActivities: [APIActivity] {
-        guard !isOfflineMode else { return activitySource }
         return activitySource.filter { activity in
-            (selectedStatus == "Todos" || activity.status == selectedStatus)
-                && (selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
+            (isOfflineMode || selectedStatus == "Todos" || activity.status == selectedStatus)
+                && (isOfflineMode || selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
+                && matchesSelectedSummaryMetric(activity)
         }
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                PreventiveAPISummaryStrip(activities: visibleActivities)
+                PreventiveAPISummaryStrip(
+                    activities: activitySource,
+                    selectedMetric: selectedSummaryMetric,
+                    onSelect: toggleSummaryMetric
+                )
                 filterPanel
                 if isSelectingOfflineWork {
                     OfflinePackageBatchPanel(
@@ -975,6 +980,15 @@ struct PreventiveListView: View {
         }
     }
 
+    private func toggleSummaryMetric(_ metric: PreventiveSummaryMetric) {
+        selectedSummaryMetric = selectedSummaryMetric == metric ? nil : metric
+    }
+
+    private func matchesSelectedSummaryMetric(_ activity: APIActivity) -> Bool {
+        guard let selectedSummaryMetric else { return true }
+        return selectedSummaryMetric.matches(activity)
+    }
+
     private func load() async {
         guard !isOfflineMode else { return }
         let range = dateRange(for: selectedFilter)
@@ -1035,29 +1049,91 @@ struct PreventiveListView: View {
     }
 }
 
+private enum PreventiveSummaryMetric: Hashable {
+    case scheduled
+    case unscheduled
+    case inProgress
+    case completed
+
+    func matches(_ activity: APIActivity) -> Bool {
+        switch self {
+        case .scheduled:
+            activity.status == "SCHEDULED" && activity.scheduledAt != nil
+        case .unscheduled:
+            activity.status == "SCHEDULED" && activity.scheduledAt == nil
+        case .inProgress:
+            activity.status == "IN_PROGRESS"
+        case .completed:
+            activity.status == "COMPLETED"
+        }
+    }
+}
+
 private struct PreventiveAPISummaryStrip: View {
     let activities: [APIActivity]
+    let selectedMetric: PreventiveSummaryMetric?
+    let onSelect: (PreventiveSummaryMetric) -> Void
 
     var body: some View {
         GlassPanel {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: AppSpacing.md)], spacing: AppSpacing.md) {
-                metric("Programados", activities.filter { $0.status == "SCHEDULED" && $0.scheduledAt != nil }.count, "calendar", BrandColor.graphite)
-                metric("Sin fecha", activities.filter { $0.status == "SCHEDULED" && $0.scheduledAt == nil }.count, "calendar.badge.exclamationmark", BrandColor.graphite)
-                metric("En progreso", activities.filter { $0.status == "IN_PROGRESS" }.count, "arrow.triangle.2.circlepath", BrandColor.amber)
-                metric("Completados", activities.filter { $0.status == "COMPLETED" }.count, "checkmark.circle.fill", BrandColor.green)
+                metric("Programados", .scheduled, "calendar")
+                metric("Sin fecha", .unscheduled, "calendar.badge.exclamationmark")
+                metric("En progreso", .inProgress, "arrow.triangle.2.circlepath")
+                metric("Completados", .completed, "checkmark.circle.fill")
             }
         }
     }
 
-    private func metric(_ title: String, _ value: Int, _ icon: String, _ tint: Color) -> some View {
-        HStack(spacing: AppSpacing.sm) {
-            Image(systemName: icon).foregroundStyle(tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(value)").font(.title2.weight(.bold)).monospacedDigit()
-                Text(title).font(.caption).foregroundStyle(.secondary)
+    private func metric(
+        _ title: String,
+        _ metric: PreventiveSummaryMetric,
+        _ icon: String
+    ) -> some View {
+        let isSelected = selectedMetric == metric
+        return Button { onSelect(metric) } label: {
+            HStack(spacing: AppSpacing.sm) {
+                Image(systemName: icon)
+                    .foregroundStyle(isSelected ? Color.white : .primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(activities.filter(metric.matches).count)")
+                        .font(.title2.weight(.bold))
+                        .monospacedDigit()
+                    Text(title)
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? Color.white.opacity(0.85) : .secondary)
+                }
+                Spacer()
             }
-            Spacer()
         }
+        .buttonStyle(PreventiveSummaryMetricButtonStyle(isSelected: isSelected))
+        .accessibilityLabel("\(title): \(activities.filter(metric.matches).count)")
+        .accessibilityHint(
+            selectedMetric == metric
+                ? "Toca para quitar el filtro"
+                : "Toca para filtrar los preventivos"
+        )
+    }
+}
+
+private struct PreventiveSummaryMetricButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.headline)
+            .frame(maxWidth: .infinity, minHeight: 54, alignment: .center)
+            .padding(.horizontal, AppSpacing.md)
+            .background(
+                isSelected ? BrandColor.graphite : Color.clear,
+                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .opacity(configuration.isPressed ? 0.78 : 1)
+            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.98)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: isSelected)
     }
 }
 

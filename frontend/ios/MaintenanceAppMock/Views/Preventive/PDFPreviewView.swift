@@ -119,7 +119,10 @@ struct PDFPreviewView: View {
                         title: "Orden SAP",
                         value: detail.activity.sapOrder.orFallback("No registrada")
                     )
-                    DetailTile(title: "Fecha de actividad", value: report.actualDate)
+                    DetailTile(
+                        title: "Fecha de actividad",
+                        value: PeruvianDateFormat.display(report.actualDate)
+                    )
                     DetailTile(title: "Inicio de actividad", value: Self.dateTimeFormatter.string(from: report.activityStartedAt))
                     if let endedAt = report.activityEndedAt {
                         DetailTile(title: "Fin de actividad", value: Self.dateTimeFormatter.string(from: endedAt))

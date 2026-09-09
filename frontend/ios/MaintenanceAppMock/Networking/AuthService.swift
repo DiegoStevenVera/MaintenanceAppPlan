@@ -270,6 +270,8 @@ final class SessionStore: ObservableObject {
     private let keychain = KeychainStore()
     private let cachedUserKey = "authenticatedUserCache"
     private let cachedAdministratorKey = "rolePreviewAdministratorCache"
+    // Refresh tokens rotate on every use, so concurrent refreshes must share one task.
+    private var refreshTask: Task<AuthenticatedUser, Error>?
 
     var isAuthenticated: Bool {
         currentUser != nil
@@ -420,13 +422,22 @@ final class SessionStore: ObservableObject {
     }
 
     private func renewSession() async throws -> AuthenticatedUser {
+        if let refreshTask {
+            return try await refreshTask.value
+        }
+
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL"),
               let refreshToken = try keychain.read(.refreshToken) else {
             throw APIClient.APIError.unauthorized
         }
-        do {
-            let renewed = try await AuthService(baseURLString: baseURL)
+        let task = Task {
+            try await AuthService(baseURLString: baseURL)
                 .refresh(refreshToken: refreshToken)
+        }
+        refreshTask = task
+        defer { refreshTask = nil }
+        do {
+            let renewed = try await task.value
             try persist(renewed)
             currentUser = renewed.user
             return renewed

@@ -2,7 +2,7 @@ import base64
 import binascii
 import hashlib
 import unicodedata
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -2369,6 +2369,7 @@ class PostgresReportWriter:
                     MaintenanceReportRecord,
                     ReportVersionRecord,
                     PreventiveReportDetailRecord.final_result,
+                    PreventiveReportDetailRecord.actual_date,
                 )
                 .join(
                     ReportVersionRecord,
@@ -2399,12 +2400,17 @@ class PostgresReportWriter:
 
         latest_by_activity: dict[
             UUID,
-            tuple[MaintenanceReportRecord, ReportVersionRecord, str | None],
+            tuple[
+                MaintenanceReportRecord,
+                ReportVersionRecord,
+                str | None,
+                date | None,
+            ],
         ] = {}
-        for report, version, final_result in version_rows:
+        for report, version, final_result, actual_date in version_rows:
             latest_by_activity.setdefault(
                 report.maintenance_activity_id,
-                (report, version, final_result),
+                (report, version, final_result, actual_date),
             )
         if not latest_by_activity:
             return [], has_more
@@ -2438,9 +2444,18 @@ class PostgresReportWriter:
             latest = latest_by_activity.get(previous_activity.id)
             if latest is None:
                 continue
-            _, version, final_result = latest
+            _, version, final_result, actual_date = latest
+            # The report's actual date is the operational date. A version may be
+            # finalized much later, so using finalized_at made historical rows
+            # display a different day than the report itself.
             performed_at = (
-                version.finalized_at
+                datetime.combine(
+                    actual_date,
+                    time(hour=12),
+                    tzinfo=ZoneInfo("America/Lima"),
+                )
+                if actual_date is not None
+                else version.finalized_at
                 or previous_activity.completed_at
                 or previous_activity.actual_end_at
                 or previous_activity.scheduled_start_at

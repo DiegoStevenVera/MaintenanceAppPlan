@@ -215,7 +215,10 @@ struct PreventiveReportFormView: View {
                     DetailTile(title: "Etapa", value: detail.stage ?? "No registrada")
                     DetailTile(title: "Sistema", value: detail.system ?? "No registrado")
                     DetailTile(title: "Subsistema", value: detail.subsystem)
-                    DetailTile(title: "Fecha", value: editor.actualDate)
+                    DetailTile(
+                        title: "Fecha",
+                        value: PeruvianDateFormat.display(editor.actualDate)
+                    )
                     DetailTile(title: "Hora de inicio", value: Self.dateTimeFormatter.string(from: editor.activityStartedAt))
                 }
                 MaintenanceDateTimeField(
