@@ -901,24 +901,25 @@ struct MetricGlassCard: View {
     var tint: Color = BrandColor.red
     var statusText: String = "Accion requerida"
     var isSelected = false
+    var isCompact = false
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             Image(systemName: icon)
-                .font(.system(size: 76, weight: .semibold))
+                .font(.system(size: isCompact ? 48 : 76, weight: .semibold))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.16) : Color.black.opacity(0.055))
-                .padding(.trailing, 10)
-                .padding(.top, 8)
+                .padding(.trailing, isCompact ? 6 : 10)
+                .padding(.top, isCompact ? 6 : 8)
 
-            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            VStack(alignment: .leading, spacing: isCompact ? AppSpacing.xs : AppSpacing.sm) {
                 Text(title)
                     .font(.caption.weight(.bold))
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
 
                 Text(value)
-                    .font(.system(size: 40, weight: .black, design: .rounded))
+                    .font(.system(size: isCompact ? 30 : 40, weight: .black, design: .rounded))
                     .monospacedDigit()
                     .foregroundStyle(.primary)
 
@@ -927,16 +928,23 @@ struct MetricGlassCard: View {
                         .fill(tint)
                         .frame(width: 10, height: 10)
                     Text(statusText)
-                        .font(.subheadline.weight(.medium))
+                        .font(isCompact ? .caption.weight(.medium) : .subheadline.weight(.medium))
                         .foregroundStyle(tint)
                         .lineLimit(1)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(AppSpacing.lg)
+            .padding(isCompact ? AppSpacing.md : AppSpacing.lg)
         }
-        .frame(minHeight: 132)
-        .background(colorScheme == .dark ? Color(.secondarySystemBackground) : Color.white, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .frame(minHeight: isCompact ? 100 : 132)
+        .background(
+            isSelected ? tint.opacity(0.14) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
+        .background(
+            colorScheme == .dark ? Color(.secondarySystemBackground) : Color.white,
+            in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+        )
         .overlay {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(

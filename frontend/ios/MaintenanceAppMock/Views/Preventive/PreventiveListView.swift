@@ -1075,65 +1075,46 @@ private struct PreventiveAPISummaryStrip: View {
     let onSelect: (PreventiveSummaryMetric) -> Void
 
     var body: some View {
-        GlassPanel {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: AppSpacing.md)], spacing: AppSpacing.md) {
-                metric("Programados", .scheduled, "calendar")
-                metric("Sin fecha", .unscheduled, "calendar.badge.exclamationmark")
-                metric("En progreso", .inProgress, "arrow.triangle.2.circlepath")
-                metric("Completados", .completed, "checkmark.circle.fill")
-            }
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: AppSpacing.sm),
+                count: 4
+            ),
+            spacing: AppSpacing.sm
+        ) {
+            metric("Programados", .scheduled, "calendar", BrandColor.graphite, "Con fecha programada")
+            metric("Sin fecha", .unscheduled, "calendar.badge.exclamationmark", BrandColor.graphite, "Pendientes de fecha")
+            metric("En progreso", .inProgress, "arrow.triangle.2.circlepath", BrandColor.amber, "En ejecución")
+            metric("Completados", .completed, "checkmark.circle.fill", BrandColor.green, "Finalizados")
         }
     }
 
     private func metric(
         _ title: String,
         _ metric: PreventiveSummaryMetric,
-        _ icon: String
+        _ icon: String,
+        _ tint: Color,
+        _ statusText: String
     ) -> some View {
         let isSelected = selectedMetric == metric
         return Button { onSelect(metric) } label: {
-            HStack(spacing: AppSpacing.sm) {
-                Image(systemName: icon)
-                    .foregroundStyle(isSelected ? Color.white : .primary)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("\(activities.filter(metric.matches).count)")
-                        .font(.title2.weight(.bold))
-                        .monospacedDigit()
-                    Text(title)
-                        .font(.caption)
-                        .foregroundStyle(isSelected ? Color.white.opacity(0.85) : .secondary)
-                }
-                Spacer()
-            }
+            MetricGlassCard(
+                title: title,
+                value: "\(activities.filter(metric.matches).count)",
+                icon: icon,
+                tint: tint,
+                statusText: statusText,
+                isSelected: isSelected,
+                isCompact: true
+            )
         }
-        .buttonStyle(PreventiveSummaryMetricButtonStyle(isSelected: isSelected))
+        .buttonStyle(.plain)
         .accessibilityLabel("\(title): \(activities.filter(metric.matches).count)")
         .accessibilityHint(
             selectedMetric == metric
                 ? "Toca para quitar el filtro"
                 : "Toca para filtrar los preventivos"
         )
-    }
-}
-
-private struct PreventiveSummaryMetricButtonStyle: ButtonStyle {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    let isSelected: Bool
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.headline)
-            .frame(maxWidth: .infinity, minHeight: 54, alignment: .center)
-            .padding(.horizontal, AppSpacing.md)
-            .background(
-                isSelected ? BrandColor.graphite : Color.clear,
-                in: RoundedRectangle(cornerRadius: 18, style: .continuous)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .opacity(configuration.isPressed ? 0.78 : 1)
-            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.98)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: configuration.isPressed)
-            .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: isSelected)
     }
 }
 

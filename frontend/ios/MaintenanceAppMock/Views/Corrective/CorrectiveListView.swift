@@ -12,6 +12,7 @@ struct DatabaseCorrectiveListView: View {
     @State private var selectedStatus = "Todos"
     @State private var selectedSubsystem = "Todos"
     @State private var selectedEquipment = "Todos"
+    @State private var selectedSummaryMetric: CorrectiveSummaryMetric?
     @State private var isSelectingOfflineWork = false
     @State private var selectedOfflineIDs: Set<String> = []
 
@@ -34,6 +35,11 @@ struct DatabaseCorrectiveListView: View {
                     }
                 }
 
+                CorrectiveAPISummaryStrip(
+                    activities: activitySource,
+                    selectedMetric: selectedSummaryMetric,
+                    onSelect: toggleSummaryMetric
+                )
                 filterPanel
                 if isSelectingOfflineWork {
                     OfflinePackageBatchPanel(
@@ -241,12 +247,21 @@ struct DatabaseCorrectiveListView: View {
     }
 
     private var filteredActivities: [APIActivity] {
-        guard !isOfflineMode else { return activitySource }
         return activitySource.filter { activity in
-            (selectedStatus == "Todos" || activity.status == selectedStatus)
-                && (selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
-                && (selectedEquipment == "Todos" || activity.assets.contains { $0.name == selectedEquipment })
+            (isOfflineMode || selectedStatus == "Todos" || activity.status == selectedStatus)
+                && (isOfflineMode || selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
+                && (isOfflineMode || selectedEquipment == "Todos" || activity.assets.contains { $0.name == selectedEquipment })
+                && matchesSelectedSummaryMetric(activity)
         }
+    }
+
+    private func toggleSummaryMetric(_ metric: CorrectiveSummaryMetric) {
+        selectedSummaryMetric = selectedSummaryMetric == metric ? nil : metric
+    }
+
+    private func matchesSelectedSummaryMetric(_ activity: APIActivity) -> Bool {
+        guard let selectedSummaryMetric else { return true }
+        return selectedSummaryMetric.matches(activity)
     }
 
     private var subsystemOptions: [String] {
@@ -306,6 +321,66 @@ struct DatabaseCorrectiveListView: View {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "es_PE")
         return formatter.monthSymbols[max(0, min(month - 1, 11))].capitalized
+    }
+}
+
+private enum CorrectiveSummaryMetric: Hashable {
+    case scheduled
+    case inProgress
+    case completed
+
+    func matches(_ activity: APIActivity) -> Bool {
+        switch self {
+        case .scheduled: activity.status == "SCHEDULED"
+        case .inProgress: activity.status == "IN_PROGRESS"
+        case .completed: activity.status == "COMPLETED"
+        }
+    }
+}
+
+private struct CorrectiveAPISummaryStrip: View {
+    let activities: [APIActivity]
+    let selectedMetric: CorrectiveSummaryMetric?
+    let onSelect: (CorrectiveSummaryMetric) -> Void
+
+    var body: some View {
+        LazyVGrid(
+            columns: Array(
+                repeating: GridItem(.flexible(minimum: 0), spacing: AppSpacing.sm),
+                count: 3
+            ),
+            spacing: AppSpacing.sm
+        ) {
+            metric("Programados", .scheduled, "calendar", BrandColor.graphite, "Listos para atender")
+            metric("En progreso", .inProgress, "arrow.triangle.2.circlepath", BrandColor.amber, "En ejecución")
+            metric("Completados", .completed, "checkmark.circle.fill", BrandColor.green, "Finalizados")
+        }
+    }
+
+    private func metric(
+        _ title: String,
+        _ metric: CorrectiveSummaryMetric,
+        _ icon: String,
+        _ tint: Color,
+        _ statusText: String
+    ) -> some View {
+        let isSelected = selectedMetric == metric
+        return Button { onSelect(metric) } label: {
+            MetricGlassCard(
+                title: title,
+                value: "\(activities.filter(metric.matches).count)",
+                icon: icon,
+                tint: tint,
+                statusText: statusText,
+                isSelected: isSelected,
+                isCompact: true
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title): \(activities.filter(metric.matches).count)")
+        .accessibilityHint(
+            isSelected ? "Toca para quitar el filtro" : "Toca para filtrar los correctivos"
+        )
     }
 }
 
