@@ -787,9 +787,11 @@ struct PreventiveListView: View {
     }
 
     private var visibleActivities: [APIActivity] {
-        return activitySource.filter { activity in
-            (isOfflineMode || selectedStatus == "Todos" || activity.status == selectedStatus)
-                && (isOfflineMode || selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
+        activitySource.filter { activity in
+            matchesSelectedDateFilter(activity)
+                && matchesSearchQuery(activity)
+                && (selectedStatus == "Todos" || activity.status == selectedStatus)
+                && (selectedSubsystem == "Todos" || activity.subsystem == selectedSubsystem)
                 && matchesSelectedSummaryMetric(activity)
         }
     }
@@ -987,6 +989,46 @@ struct PreventiveListView: View {
     private func matchesSelectedSummaryMetric(_ activity: APIActivity) -> Bool {
         guard let selectedSummaryMetric else { return true }
         return selectedSummaryMetric.matches(activity)
+    }
+
+    /// Mirrors the preventive API's date semantics for the downloaded source:
+    /// a monthly view contains activities scheduled in that period plus items
+    /// planned for the month that do not yet have a concrete date.
+    private func matchesSelectedDateFilter(_ activity: APIActivity) -> Bool {
+        let range = dateRange(for: selectedFilter)
+        let scheduledMatch = range.map { interval in
+            activity.scheduledAt.map(interval.contains) ?? false
+        } ?? true
+
+        guard let plannedPeriod = plannedPeriod(for: selectedFilter) else {
+            return scheduledMatch
+        }
+
+        let unscheduledMonthMatch = activity.scheduledAt == nil
+            && activity.plannedYear == plannedPeriod.year
+            && activity.plannedMonth == plannedPeriod.month
+        return scheduledMatch || unscheduledMonthMatch
+    }
+
+    private func matchesSearchQuery(_ activity: APIActivity) -> Bool {
+        let query = normalizedSearchText(searchText)
+        guard !query.isEmpty else { return true }
+
+        let searchableValues = [
+            activity.title,
+            activity.internalCode,
+            activity.sapOrder ?? "",
+            activity.subsystem,
+        ] + activity.assets.map(\.name)
+        return searchableValues.contains {
+            normalizedSearchText($0).contains(query)
+        }
+    }
+
+    private func normalizedSearchText(_ value: String) -> String {
+        value
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private func load() async {

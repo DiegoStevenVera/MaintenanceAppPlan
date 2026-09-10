@@ -65,7 +65,7 @@ struct LoginView: View {
                 }
 
                 fieldLabel("Correo") {
-                    TextField("correo@empresa.com", text: $email)
+                    TextField("correo@hitachirail.com", text: $email)
                         .keyboardType(.emailAddress)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
