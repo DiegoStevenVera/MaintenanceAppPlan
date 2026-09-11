@@ -19,6 +19,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     CalibrationReceiverWriteDTO,
     CalibrationReportWriteDTO,
     CorrectiveReportWriteDTO,
+    OperationalChecklistItemWriteDTO,
     PreventiveReportWriteDTO,
     ReportParticipantWriteDTO,
     ReportDraftWriteRequest,
@@ -51,6 +52,33 @@ def test_final_preventive_requires_steps_and_result() -> None:
                 participants=[participant],
             )
         )
+
+
+def test_checked_operational_item_requires_quantity() -> None:
+    participant = ReportParticipantWriteDTO(
+        user_id="engineer",
+        signature_strokes=[[{"x": 1, "y": 2}]],
+    )
+    payload = PreventiveReportWriteDTO(
+        final_result="Equipo operativo",
+        steps=[
+            {
+                "template_step_id": "step-1",
+                "title": "Inspección",
+                "sequence": 1,
+            }
+        ],
+        participants=[participant],
+        operational_checklist=[
+            OperationalChecklistItemWriteDTO(
+                template_item_id="item-1",
+                is_checked=True,
+            )
+        ],
+    )
+
+    with pytest.raises(ReportValidationError, match="cantidad"):
+        PostgresReportWriter._validate_final(payload)
 
 
 def test_final_corrective_requires_activity() -> None:

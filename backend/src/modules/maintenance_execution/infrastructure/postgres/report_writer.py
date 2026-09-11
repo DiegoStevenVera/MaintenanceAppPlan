@@ -35,7 +35,11 @@ from modules.maintenance_execution.infrastructure.postgres.models import (
 )
 from modules.maintenance_execution.infrastructure.postgres.tool_models import (
     MaintenanceTemplateToolRecord,
+    OperationalChecklistItemRecord,
+    OperationalChecklistRevisionRecord,
+    ReportChecklistItemSnapshotRecord,
     ReportToolUsageRecord,
+    ToolCatalogItemRecord,
     ToolCertificationRecord,
     ToolRecord,
 )
@@ -70,6 +74,7 @@ from modules.maintenance_execution.infrastructure.postgres.template_models impor
 )
 from modules.maintenance_execution.interfaces.schemas import (
     CalibrationReportWriteDTO,
+    ChecklistSelectedToolDTO,
     CorrectiveReportWriteDTO,
     MaintenanceCommentDTO,
     PreventiveReportWriteDTO,
@@ -91,6 +96,10 @@ from modules.maintenance_execution.interfaces.schemas import (
     ReportWriteResultDTO,
     GeneratedReportDTO,
     MaintenanceReportVersionDetailDTO,
+    ManualChecklistItemDTO,
+    OperationalChecklistItemDTO,
+    OperationalChecklistItemWriteDTO,
+    ReportChecklistItemDTO,
     SignaturePointDTO,
 )
 from modules.organizational_context.infrastructure.postgres.models import (
@@ -213,6 +222,11 @@ class PostgresReportWriter:
             ),
             evidence=await self._evidence(version.id),
             generated_report=generated_dto,
+            manual_checklist=await self._checklist_snapshots(version.id, "MANUAL"),
+            operational_checklist=await self._checklist_snapshots(
+                version.id,
+                "OPERATIONAL",
+            ),
         )
 
     async def participant_version_id(
@@ -327,6 +341,8 @@ class PostgresReportWriter:
             sap_order_editable=activity.activity_type == "PREVENTIVE" and not bool(activity.sap_order),
             available_tools=await self._available_tools(),
             required_tool_names=await self._required_tool_names(activity),
+            manual_checklist=await self._manual_checklist(activity),
+            operational_checklist=await self._operational_checklist(activity),
             participants=participants,
             evidence=evidence,
             comments=comments,
@@ -366,6 +382,8 @@ class PostgresReportWriter:
             activity_id=str(activity.id),
             template_name=template_name,
             template_steps=await self._template_steps(activity),
+            manual_checklist=await self._manual_checklist(activity),
+            operational_checklist=await self._operational_checklist(activity),
             previous_reports=previous_reports,
             previous_reports_has_more=previous_reports_has_more,
             previous_reports_offset=previous_reports_offset,
@@ -458,7 +476,12 @@ class PostgresReportWriter:
         await self._snapshot_assets(activity, version)
         if isinstance(report_payload, PreventiveReportWriteDTO):
             activity_ended_at = report_payload.activity_ended_at
-            await self._save_preventive(activity, version, report_payload)
+            await self._save_preventive(
+                activity,
+                version,
+                report_payload,
+                finalize=finalize,
+            )
         else:
             activity_ended_at = report_payload.corrective_ended_at
             await self._save_corrective(activity, version, report_payload)
@@ -700,6 +723,14 @@ class PostgresReportWriter:
                 raise ReportValidationError(
                     "El reporte preventivo debe contener pasos."
                 )
+            if any(
+                item.is_checked
+                and (item.quantity is None or item.quantity <= 0)
+                for item in payload.operational_checklist
+            ):
+                raise ReportValidationError(
+                    "Cada elemento llevado del checklist operativo requiere una cantidad."
+                )
         else:
             if not payload.symptom or not payload.technical_status:
                 raise ReportValidationError(
@@ -899,6 +930,7 @@ class PostgresReportWriter:
             ReportParticipantRecord,
             ReportVersionAssetRecord,
             ReportToolUsageRecord,
+            ReportChecklistItemSnapshotRecord,
         ):
             await self._session.execute(
                 delete(model).where(model.report_version_id == version_id)
@@ -924,6 +956,8 @@ class PostgresReportWriter:
         activity: MaintenanceActivityRecord,
         version: ReportVersionRecord,
         payload: PreventiveReportWriteDTO,
+        *,
+        finalize: bool,
     ) -> None:
         project = await self._session.get(ProjectRecord, activity.project_id)
         subsystem = await self._session.get(SubsystemRecord, activity.subsystem_id)
@@ -981,7 +1015,16 @@ class PostgresReportWriter:
                     )
                 )
 
-        await self._save_tools(version, payload.tools)
+        checklist_tool_usages = await self._save_preventive_checklists(
+            activity,
+            version,
+            payload,
+            finalize=finalize,
+        )
+        await self._save_tools(
+            version,
+            [*payload.tools, *checklist_tool_usages],
+        )
 
     async def _persist_sap_order(
         self,
@@ -1005,7 +1048,23 @@ class PostgresReportWriter:
         version: ReportVersionRecord,
         usages: list[ReportToolUsageWriteDTO],
     ) -> None:
+        unique_usages: dict[str, ReportToolUsageWriteDTO] = {}
         for item in usages:
+            existing = unique_usages.get(item.tool_id)
+            if (
+                existing is not None
+                and existing.operational_checklist_item_id
+                and item.operational_checklist_item_id
+                and existing.operational_checklist_item_id
+                != item.operational_checklist_item_id
+            ):
+                raise ReportValidationError(
+                    "Una unidad identificada no puede cubrir dos requisitos del checklist."
+                )
+            if existing is None or item.operational_checklist_item_id:
+                unique_usages[item.tool_id] = item
+
+        for item in unique_usages.values():
             try:
                 tool_id = UUID(item.tool_id)
             except ValueError as error:
@@ -1013,6 +1072,22 @@ class PostgresReportWriter:
             tool = await self._session.get(ToolRecord, tool_id)
             if tool is None or not tool.is_active:
                 raise ReportValidationError("La herramienta seleccionada no está disponible.")
+            operational_item_id = None
+            if item.operational_checklist_item_id:
+                try:
+                    operational_item_id = UUID(item.operational_checklist_item_id)
+                except ValueError as error:
+                    raise ReportValidationError(
+                        "El equipo identificado no corresponde al checklist."
+                    ) from error
+                requirement = await self._session.get(
+                    OperationalChecklistItemRecord,
+                    operational_item_id,
+                )
+                if requirement is None or tool.catalog_item_id != requirement.catalog_item_id:
+                    raise ReportValidationError(
+                        f"{tool.name} no corresponde al tipo requerido por {requirement.item_name if requirement else 'el checklist'}."
+                    )
             certification = await self._session.scalar(
                 select(ToolCertificationRecord)
                 .where(
@@ -1025,6 +1100,7 @@ class PostgresReportWriter:
             self._session.add(
                 ReportToolUsageRecord(
                     report_version_id=version.id,
+                    operational_checklist_item_id=operational_item_id,
                     tool_id=tool.id,
                     certification_id=certification.id if certification else None,
                     used_at=datetime.now(timezone.utc),
@@ -1052,7 +1128,13 @@ class PostgresReportWriter:
                 .limit(1)
             )
             result.append(ReportEditorToolDTO(
-                id=str(tool.id), name=tool.name, serial_number=tool.serial_number,
+                id=str(tool.id),
+                catalog_item_id=(
+                    str(tool.catalog_item_id) if tool.catalog_item_id else None
+                ),
+                name=tool.name,
+                tool_type=tool.tool_type,
+                serial_number=tool.serial_number,
                 availability_status=tool.availability_status,
                 certification_number=certification.certification_number if certification else None,
                 certification_valid_until=certification.next_calibration_date if certification else None,
@@ -1067,6 +1149,255 @@ class PostgresReportWriter:
             .where(MaintenanceTemplateToolRecord.maintenance_template_id == activity.maintenance_template_id)
             .order_by(MaintenanceTemplateToolRecord.tool_name)
         )).all())
+
+    async def _manual_checklist(
+        self,
+        activity: MaintenanceActivityRecord,
+    ) -> list[ManualChecklistItemDTO]:
+        if activity.maintenance_template_id is None:
+            return []
+        records = (
+            await self._session.scalars(
+                select(MaintenanceTemplateToolRecord)
+                .where(
+                    MaintenanceTemplateToolRecord.maintenance_template_id
+                    == activity.maintenance_template_id,
+                    MaintenanceTemplateToolRecord.is_active.is_(True),
+                )
+                .order_by(MaintenanceTemplateToolRecord.tool_name)
+            )
+        ).all()
+        return [
+            ManualChecklistItemDTO(
+                id=str(record.id),
+                name=record.tool_name,
+                quantity=float(record.quantity) if record.quantity is not None else None,
+                sequence=index,
+            )
+            for index, record in enumerate(records, start=1)
+        ]
+
+    async def _operational_checklist_records(
+        self,
+        activity: MaintenanceActivityRecord,
+    ) -> list[OperationalChecklistItemRecord]:
+        if activity.maintenance_template_id is None:
+            return []
+        return list(
+            (
+                await self._session.scalars(
+                    select(OperationalChecklistItemRecord)
+                    .join(
+                        OperationalChecklistRevisionRecord,
+                        OperationalChecklistRevisionRecord.id
+                        == OperationalChecklistItemRecord.checklist_revision_id,
+                    )
+                    .where(
+                        OperationalChecklistRevisionRecord.maintenance_template_id
+                        == activity.maintenance_template_id,
+                        OperationalChecklistRevisionRecord.status == "ACTIVE",
+                    )
+                    .order_by(OperationalChecklistItemRecord.sequence)
+                )
+            ).all()
+        )
+
+    async def _operational_checklist(
+        self,
+        activity: MaintenanceActivityRecord,
+    ) -> list[OperationalChecklistItemDTO]:
+        result = []
+        for record in await self._operational_checklist_records(activity):
+            catalog = await self._session.get(
+                ToolCatalogItemRecord,
+                record.catalog_item_id,
+            )
+            result.append(
+                OperationalChecklistItemDTO(
+                    id=str(record.id),
+                    catalog_item_id=str(record.catalog_item_id),
+                    category=record.category,
+                    name=record.item_name,
+                    default_quantity=record.default_quantity,
+                    unit=record.unit,
+                    is_required=record.is_required,
+                    sequence=record.sequence,
+                    notes=record.notes,
+                    requires_identified_unit=(
+                        catalog.requires_identified_unit if catalog else False
+                    ),
+                )
+            )
+        return result
+
+    async def _save_preventive_checklists(
+        self,
+        activity: MaintenanceActivityRecord,
+        version: ReportVersionRecord,
+        payload: PreventiveReportWriteDTO,
+        *,
+        finalize: bool,
+    ) -> list[ReportToolUsageWriteDTO]:
+        if activity.maintenance_template_id is None:
+            return []
+
+        manual_records = (
+            await self._session.scalars(
+                select(MaintenanceTemplateToolRecord)
+                .where(
+                    MaintenanceTemplateToolRecord.maintenance_template_id
+                    == activity.maintenance_template_id,
+                    MaintenanceTemplateToolRecord.is_active.is_(True),
+                )
+                .order_by(MaintenanceTemplateToolRecord.tool_name)
+            )
+        ).all()
+        for sequence, record in enumerate(manual_records, start=1):
+            self._session.add(
+                ReportChecklistItemSnapshotRecord(
+                    report_version_id=version.id,
+                    checklist_type="MANUAL",
+                    source_manual_tool_id=record.id,
+                    item_name_snapshot=record.tool_name,
+                    recommended_quantity_snapshot=float(record.quantity),
+                    actual_quantity=None,
+                    unit_snapshot="unidad",
+                    is_checked=None,
+                    is_required_snapshot=True,
+                    sequence=sequence,
+                )
+            )
+
+        writes_by_id: dict[UUID, OperationalChecklistItemWriteDTO] = {}
+        for write in payload.operational_checklist:
+            try:
+                item_id = UUID(write.template_item_id)
+            except ValueError as error:
+                raise ReportValidationError(
+                    "El checklist operativo contiene un elemento inválido."
+                ) from error
+            if item_id in writes_by_id:
+                raise ReportValidationError(
+                    "El checklist operativo contiene elementos duplicados."
+                )
+            writes_by_id[item_id] = write
+
+        operational_records = await self._operational_checklist_records(activity)
+        valid_ids = {record.id for record in operational_records}
+        if set(writes_by_id) - valid_ids:
+            raise ReportValidationError(
+                "El checklist operativo ya no corresponde a este mantenimiento."
+            )
+
+        checklist_tool_usages: list[ReportToolUsageWriteDTO] = []
+        for record in operational_records:
+            write = writes_by_id.get(record.id)
+            is_checked = write.is_checked if write else False
+            quantity = write.quantity if write and is_checked else None
+            selected_tool_ids = write.selected_tool_ids if write and is_checked else []
+            catalog = await self._session.get(
+                ToolCatalogItemRecord,
+                record.catalog_item_id,
+            )
+            if finalize and is_checked and catalog and catalog.requires_identified_unit:
+                expected_count = int(quantity or 0)
+                if quantity != expected_count or len(selected_tool_ids) != expected_count:
+                    raise ReportValidationError(
+                        f"Selecciona {expected_count} unidad(es) identificada(s) para {record.item_name}."
+                    )
+            checklist_tool_usages.extend(
+                ReportToolUsageWriteDTO(
+                    tool_id=tool_id,
+                    operational_checklist_item_id=str(record.id),
+                )
+                for tool_id in selected_tool_ids
+            )
+            self._session.add(
+                ReportChecklistItemSnapshotRecord(
+                    report_version_id=version.id,
+                    checklist_type="OPERATIONAL",
+                    source_operational_item_id=record.id,
+                    item_name_snapshot=record.item_name,
+                    category_snapshot=record.category,
+                    recommended_quantity_snapshot=record.default_quantity,
+                    actual_quantity=quantity,
+                    unit_snapshot=record.unit,
+                    is_checked=is_checked,
+                    is_required_snapshot=record.is_required,
+                    sequence=record.sequence,
+                    notes=(write.notes if write else None) or record.notes,
+                )
+            )
+        return checklist_tool_usages
+
+    async def _checklist_snapshots(
+        self,
+        version_id: UUID,
+        checklist_type: str,
+    ) -> list[ReportChecklistItemDTO]:
+        records = (
+            await self._session.scalars(
+                select(ReportChecklistItemSnapshotRecord)
+                .where(
+                    ReportChecklistItemSnapshotRecord.report_version_id == version_id,
+                    ReportChecklistItemSnapshotRecord.checklist_type == checklist_type,
+                )
+                .order_by(ReportChecklistItemSnapshotRecord.sequence)
+            )
+        ).all()
+        usages = (
+            await self._session.scalars(
+                select(ReportToolUsageRecord).where(
+                    ReportToolUsageRecord.report_version_id == version_id,
+                    ReportToolUsageRecord.operational_checklist_item_id.is_not(None),
+                )
+            )
+        ).all()
+        usages_by_item: dict[UUID, list[ReportToolUsageRecord]] = {}
+        for usage in usages:
+            if usage.operational_checklist_item_id is not None:
+                usages_by_item.setdefault(
+                    usage.operational_checklist_item_id,
+                    [],
+                ).append(usage)
+
+        return [
+            ReportChecklistItemDTO(
+                id=str(record.id),
+                checklist_type=record.checklist_type,
+                source_item_id=str(
+                    record.source_manual_tool_id
+                    or record.source_operational_item_id
+                )
+                if record.source_manual_tool_id or record.source_operational_item_id
+                else None,
+                category=record.category_snapshot,
+                name=record.item_name_snapshot,
+                recommended_quantity=record.recommended_quantity_snapshot,
+                actual_quantity=record.actual_quantity,
+                unit=record.unit_snapshot,
+                is_checked=record.is_checked,
+                is_required=record.is_required_snapshot,
+                sequence=record.sequence,
+                notes=record.notes,
+                selected_tools=[
+                    ChecklistSelectedToolDTO(
+                        id=str(usage.tool_id),
+                        name=usage.tool_name_snapshot or "Equipo identificado",
+                        serial_number=usage.tool_serial_snapshot or "Sin serie",
+                        certification_number=usage.certification_number_snapshot,
+                        certification_valid_until=(
+                            usage.certification_valid_until_snapshot
+                        ),
+                    )
+                    for usage in usages_by_item.get(
+                        record.source_operational_item_id,
+                        [],
+                    )
+                ],
+            )
+            for record in records
+        ]
 
     async def _save_calibration_companion(
         self,

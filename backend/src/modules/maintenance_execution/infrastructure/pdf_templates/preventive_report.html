@@ -136,8 +136,8 @@
         <th colspan="4">Personal</th>
         <th>N° Personas:</th>
         <th>Horas Total:</th>
-        <th colspan="4">Equipos</th>
-        <th>Serie</th>
+        <th colspan="4">Herramientas según manual</th>
+        <th>Cant.</th>
         <th>Horas total:</th>
       </tr>
       {% set resource_rows = [personnel|length, tools|length, 1]|max %}
@@ -155,7 +155,9 @@
         <td class="center" colspan="4">
           {% if index < tools|length %}{{ tools[index].tool_name }}{% endif %}
         </td>
-        <td class="center">-</td>
+        <td class="center">
+          {% if index < tools|length %}{{ tools[index].quantity or '-' }}{% endif %}
+        </td>
         <td class="center">
           {% if loop.first %}{{ activity_duration }}{% endif %}
         </td>

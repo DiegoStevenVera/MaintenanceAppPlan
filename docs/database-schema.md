@@ -67,6 +67,9 @@ while the PCSG component has the business anchor equipment as its parent.
 - `maintenance_template_conclusions`
 - `maintenance_template_personnel`
 - `maintenance_template_tools`
+- `tool_catalog_items`
+- `maintenance_operational_checklist_revisions`
+- `maintenance_operational_checklist_items`
 - `maintenance_plan_entries`: each row is one required monthly execution. The
   annual PCON cell quantity is derived by counting rows for the same year,
   month, template scope, and equipment maintenance. `planning_status` supports
@@ -151,11 +154,20 @@ matching main preventive version when read; imported source rows are not rewritt
 
 ### Tools
 
+- `tool_catalog_items`: type-level catalog shared by checklist requirements and
+  identifiable inventory. `requires_identified_unit` distinguishes equipment
+  that must be resolved to a physical serial-numbered unit.
 - `tools`
 - `tool_certifications`
 - `report_tool_usages`
+- `report_checklist_item_snapshots`
 
-Consumables are not included in this migration.
+Operational checklist items cover access keys, manual tools, consumables, and
+equipment. `maintenance_operational_checklist_items.catalog_item_id` relates a
+maintenance requirement to the generic catalog; `tools.catalog_item_id` relates
+physical units to that type. `report_tool_usages.operational_checklist_item_id`
+records which serial-numbered unit covered each requirement. Each report version
+snapshots both checklists so later revisions do not rewrite history.
 
 ### Incremental Import Control
 

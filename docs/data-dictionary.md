@@ -106,6 +106,9 @@ texto de `children` como fuente de verdad.
 | `maintenance_template_conclusions` | Conclusiones técnicas disponibles para un mantenimiento | `tbl_Conclusion` |
 | `maintenance_template_personnel` | Personal genérico requerido por definición: rol, cantidad y horas | `tbl_Personal_Activity` |
 | `maintenance_template_tools` | Herramientas requeridas por definición | `tbl_Tools_Activity` |
+| `tool_catalog_items` | Catálogo genérico compartido de herramientas, consumibles, llaves y equipos; indica si el ítem exige seleccionar una unidad identificada | `APP` / estandarización operativa |
+| `maintenance_operational_checklist_revisions` | Revisiones del checklist de campo asociado a una plantilla; solo una revisión puede estar activa | `APP` / validación operativa semanal |
+| `maintenance_operational_checklist_items` | Requisitos genéricos del checklist por categoría, cantidad, orden y relación `catalog_item_id` | `APP` / validación operativa semanal |
 | `maintenance_action_types` | Catálogo de tipos de actividad correctiva | `tbl_TypeActivity` |
 | `maintenance_plan_entries` | Una ocurrencia mensual por equipo-mantenimiento: `year`, `month`, `planning_status`, horas y trabajadores requeridos | `tbl_Scheduled_Activities` + PCON nativo |
 | `pcon_annual_plans` | Cabecera de plan anual, estado y año copiado | `PCON` |
@@ -160,6 +163,7 @@ Estados PCON importantes:
 | `calibration_report_details` | Cabecera del reporte de calibración de circuito de vía | `tbl_Calibration` |
 | `calibration_measurements` | Mediciones ordenadas por activo/rol: transmisor y receptores | `tbl_Calibration` |
 | `report_tool_usages` | Herramientas efectivamente utilizadas en una versión | `Tools_Activity` |
+| `report_checklist_item_snapshots` | Copia histórica de los checklists manual y operativo, incluyendo cantidad recomendada, cantidad llevada y confirmación | `APP` |
 | `corrective_equipment_groups` | Grupos lógicos permitidos como objetivo inicial de un correctivo; no son activos físicos | `APP` / regla operativa ATS |
 | `corrective_equipment_group_members` | Equipos grandes físicos pertenecientes a un grupo lógico correctivo | `APP` / `assets` |
 | `corrective_event_affected_assets` | Uno o más activos afectados por evento y su ruta al crear el aviso; la criticidad vive en el evento | `APP` / correctivos existentes |
@@ -170,12 +174,17 @@ Estados PCON importantes:
 `tool_serial_snapshot`, `certification_number_snapshot` y
 `certification_valid_until_snapshot` para que una versión histórica sea auditable.
 
+El checklist del manual y el operativo tienen propósitos distintos. El primero
+alimenta el formato oficial del reporte; el segundo se registra en la app y la
+base de datos, pero por ahora no se imprime en el PDF.
+
 ## Herramientas
 
 | Tabla | Contenido y campos clave | Origen |
 |---|---|---|
-| `tools` | Herramientas identificables por modelo, serie, marca y estado | `tbl_Tool` |
+| `tools` | Unidades físicas identificables por modelo, serie, marca y estado; `catalog_item_id` las vincula con su tipo genérico | `tbl_Tool` |
 | `tool_certifications` | Certificados de calibración, vigencia, empresa y archivo | `tbl_Certification` |
+| `report_tool_usages` | Unidad física usada en una versión; cuando proviene del checklist, `operational_checklist_item_id` identifica el requisito que cubrió | `APP` / `tbl_Tool_Report` |
 
 ## Importación y compatibilidad
 

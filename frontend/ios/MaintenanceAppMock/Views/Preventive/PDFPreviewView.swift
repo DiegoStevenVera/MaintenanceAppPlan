@@ -34,6 +34,7 @@ struct PDFPreviewView: View {
                     } else if detail.reportKind == "CALIBRATION" {
                         calibrationContent(detail)
                     } else {
+                        reportChecklists(detail)
                         steps(detail)
                     }
                     participants(detail)
@@ -132,6 +133,106 @@ struct PDFPreviewView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func reportChecklists(_ detail: APIReportVersionDetail) -> some View {
+        let manualItems = detail.manualChecklist ?? []
+        let operationalItems = detail.operationalChecklist ?? []
+
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Checklist según manual",
+                    subtitle: "Referencia documental guardada con esta versión"
+                )
+                if manualItems.isEmpty {
+                    Text("Pendiente de agregar")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(manualItems.sorted { $0.sequence < $1.sequence }) { item in
+                        checklistSnapshotRow(item, showExecution: false)
+                    }
+                }
+            }
+        }
+
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Checklist operativo",
+                    subtitle: "Elementos registrados durante esta ejecución"
+                )
+                if operationalItems.isEmpty {
+                    Text("Pendiente de agregar")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(operationalItems.sorted { $0.sequence < $1.sequence }) { item in
+                        checklistSnapshotRow(item, showExecution: true)
+                    }
+                }
+            }
+        }
+    }
+
+    private func checklistSnapshotRow(
+        _ item: APIReportChecklistItem,
+        showExecution: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            HStack(spacing: AppSpacing.md) {
+                Image(
+                    systemName: showExecution
+                        ? (item.isChecked == true ? "checkmark.circle.fill" : "circle")
+                        : "book.closed.fill"
+                )
+                .foregroundStyle(
+                    showExecution && item.isChecked != true
+                        ? Color.secondary
+                        : BrandColor.red
+                )
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name)
+                        .font(.subheadline.weight(.semibold))
+                    if let notes = item.notes, !notes.isEmpty {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Text(checklistSnapshotQuantity(item, showExecution: showExecution))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(item.selectedTools ?? []) { tool in
+                Label(
+                    "\(tool.name) · Serie \(tool.serialNumber)",
+                    systemImage: "barcode.viewfinder"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 34)
+            }
+        }
+        .padding(AppSpacing.sm)
+        .background(
+            .background.opacity(0.62),
+            in: RoundedRectangle(cornerRadius: 10)
+        )
+    }
+
+    private func checklistSnapshotQuantity(
+        _ item: APIReportChecklistItem,
+        showExecution: Bool
+    ) -> String {
+        let quantity = showExecution && item.isChecked == true
+            ? item.actualQuantity
+            : item.recommendedQuantity
+        guard let quantity else {
+            return showExecution && item.isChecked != true ? "No llevado" : "Por definir"
+        }
+        return "\(quantity.formatted(.number.precision(.fractionLength(0...2)))) \(item.unit ?? "unidad")"
     }
 
     @ViewBuilder

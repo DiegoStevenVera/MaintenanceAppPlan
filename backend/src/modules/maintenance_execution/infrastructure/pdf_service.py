@@ -30,7 +30,6 @@ from modules.maintenance_execution.infrastructure.postgres.report_writer import 
 )
 from modules.maintenance_execution.infrastructure.postgres.tool_models import (
     MaintenanceTemplateToolRecord,
-    ReportToolUsageRecord,
 )
 from modules.maintenance_execution.infrastructure.postgres.template_models import (
     MaintenanceTemplatePersonnelRecord,
@@ -135,7 +134,8 @@ class PreventivePDFService:
                         select(MaintenanceTemplateToolRecord)
                         .where(
                             MaintenanceTemplateToolRecord.maintenance_template_id
-                            == activity.maintenance_template_id
+                            == activity.maintenance_template_id,
+                            MaintenanceTemplateToolRecord.is_active.is_(True),
                         )
                         .order_by(MaintenanceTemplateToolRecord.tool_name)
                     )
@@ -154,22 +154,14 @@ class PreventivePDFService:
                 ).all()
             )
 
-        used_tools = list(
-            (
-                await self._session.scalars(
-                    select(ReportToolUsageRecord)
-                    .where(ReportToolUsageRecord.report_version_id == version.id)
-                    .order_by(ReportToolUsageRecord.tool_name_snapshot)
-                )
-            ).all()
-        )
-        if used_tools:
+        if detail.manual_checklist:
             tools = [
                 {
-                    "tool_name": tool.tool_name_snapshot or "Herramienta sin nombre",
+                    "tool_name": item.name,
+                    "quantity": item.recommended_quantity,
                     "estimated_hours": None,
                 }
-                for tool in used_tools
+                for item in detail.manual_checklist
             ]
 
         photos = await self._photos(detail)

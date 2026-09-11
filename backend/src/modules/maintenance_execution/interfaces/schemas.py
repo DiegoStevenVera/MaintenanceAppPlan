@@ -326,6 +326,15 @@ class PreventiveStepWriteDTO(BaseModel):
 
 class ReportToolUsageWriteDTO(BaseModel):
     tool_id: str
+    operational_checklist_item_id: str | None = None
+
+
+class OperationalChecklistItemWriteDTO(BaseModel):
+    template_item_id: str
+    is_checked: bool = False
+    quantity: float | None = Field(default=None, ge=0)
+    notes: str | None = None
+    selected_tool_ids: list[str] = Field(default_factory=list)
 
 
 class PreventiveReportWriteDTO(BaseModel):
@@ -337,6 +346,9 @@ class PreventiveReportWriteDTO(BaseModel):
     participants: list[ReportParticipantWriteDTO] = Field(default_factory=list)
     evidence: list[ReportEvidenceWriteDTO] = Field(default_factory=list)
     tools: list[ReportToolUsageWriteDTO] = Field(default_factory=list)
+    operational_checklist: list[OperationalChecklistItemWriteDTO] = Field(
+        default_factory=list
+    )
 
 
 class CalibrationReceiverWriteDTO(BaseModel):
@@ -452,6 +464,30 @@ class GeneratedReportDTO(BaseModel):
     download_path: str
 
 
+class ChecklistSelectedToolDTO(BaseModel):
+    id: str
+    name: str
+    serial_number: str
+    certification_number: str | None = None
+    certification_valid_until: date | None = None
+
+
+class ReportChecklistItemDTO(BaseModel):
+    id: str
+    checklist_type: Literal["MANUAL", "OPERATIONAL"]
+    source_item_id: str | None = None
+    category: str | None = None
+    name: str
+    recommended_quantity: float | None = None
+    actual_quantity: float | None = None
+    unit: str | None = None
+    is_checked: bool | None = None
+    is_required: bool = True
+    sequence: int
+    notes: str | None = None
+    selected_tools: list[ChecklistSelectedToolDTO] = Field(default_factory=list)
+
+
 class MaintenanceReportVersionDetailDTO(BaseModel):
     id: str
     report_kind: str
@@ -468,6 +504,8 @@ class MaintenanceReportVersionDetailDTO(BaseModel):
     participants: list[ReportParticipantDTO] = Field(default_factory=list)
     evidence: list[ReportEvidenceDTO] = Field(default_factory=list)
     generated_report: GeneratedReportDTO | None = None
+    manual_checklist: list[ReportChecklistItemDTO] = Field(default_factory=list)
+    operational_checklist: list[ReportChecklistItemDTO] = Field(default_factory=list)
 
 
 class MaintenanceCommentCreateRequest(BaseModel):
@@ -519,11 +557,34 @@ class ReportEditorAssetDTO(BaseModel):
 
 class ReportEditorToolDTO(BaseModel):
     id: str
+    catalog_item_id: str | None = None
     name: str
+    tool_type: str | None = None
     serial_number: str
     availability_status: str
     certification_number: str | None = None
     certification_valid_until: date | None = None
+
+
+class ManualChecklistItemDTO(BaseModel):
+    id: str
+    name: str
+    quantity: float | None = None
+    unit: str = "unidad"
+    sequence: int
+
+
+class OperationalChecklistItemDTO(BaseModel):
+    id: str
+    catalog_item_id: str
+    category: Literal["ACCESS_KEY", "MANUAL_TOOL", "CONSUMABLE", "EQUIPMENT"]
+    name: str
+    default_quantity: float | None = None
+    unit: str = "unidad"
+    is_required: bool = True
+    sequence: int
+    notes: str | None = None
+    requires_identified_unit: bool = False
 
 
 class PreventiveTemplateTestDTO(BaseModel):
@@ -558,6 +619,10 @@ class PreventiveGuideDTO(BaseModel):
     activity_id: str
     template_name: str | None = None
     template_steps: list[PreventiveTemplateStepDTO] = Field(default_factory=list)
+    manual_checklist: list[ManualChecklistItemDTO] = Field(default_factory=list)
+    operational_checklist: list[OperationalChecklistItemDTO] = Field(
+        default_factory=list
+    )
     previous_reports: list[PreventiveHistoryReportDTO] = Field(default_factory=list)
     previous_reports_has_more: bool = False
     previous_reports_offset: int = Field(default=0, ge=0)
@@ -586,6 +651,10 @@ class ReportEditorDTO(BaseModel):
     sap_order_editable: bool = False
     available_tools: list[ReportEditorToolDTO] = Field(default_factory=list)
     required_tool_names: list[str] = Field(default_factory=list)
+    manual_checklist: list[ManualChecklistItemDTO] = Field(default_factory=list)
+    operational_checklist: list[OperationalChecklistItemDTO] = Field(
+        default_factory=list
+    )
     participants: list[ReportParticipantDTO] = Field(default_factory=list)
     evidence: list[ReportEvidenceDTO] = Field(default_factory=list)
     comments: list[MaintenanceCommentDTO] = Field(default_factory=list)

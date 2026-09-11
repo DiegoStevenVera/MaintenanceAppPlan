@@ -2,6 +2,33 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+enum OperationalChecklistCategory: String, CaseIterable, Identifiable {
+    case accessKey = "ACCESS_KEY"
+    case manualTool = "MANUAL_TOOL"
+    case consumable = "CONSUMABLE"
+    case equipment = "EQUIPMENT"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .accessKey: "Llaves y accesos"
+        case .manualTool: "Herramientas manuales"
+        case .consumable: "Consumibles"
+        case .equipment: "Equipos"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .accessKey: "key.fill"
+        case .manualTool: "wrench.and.screwdriver.fill"
+        case .consumable: "shippingbox.fill"
+        case .equipment: "bolt.fill"
+        }
+    }
+}
+
 struct PreventiveReportFormView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
@@ -17,6 +44,7 @@ struct PreventiveReportFormView: View {
     @State private var evidence: [APIReportEvidenceWrite] = []
     @State private var sapOrder = ""
     @State private var selectedToolIDs: Set<String> = []
+    @State private var operationalChecklist: [APIOperationalChecklistItemWrite] = []
     @State private var showsUnselectedTools = false
     @State private var conclusion = "Equipo operativo"
     @State private var additionalComments = ""
@@ -61,7 +89,8 @@ struct PreventiveReportFormView: View {
                 steps: steps,
                 participants: participants.map(\.apiWrite),
                 evidence: evidence,
-                tools: selectedToolIDs.sorted().map(APIReportToolUsageWrite.init(toolID:))
+                tools: selectedToolIDs.sorted().map(APIReportToolUsageWrite.init(toolID:)),
+                operationalChecklist: operationalChecklist
             ),
             corrective: nil,
             calibration: editor?.calibrationRequired == true
@@ -89,7 +118,13 @@ struct PreventiveReportFormView: View {
                         }
                         header(detail)
                         generalData(detail, editor: editor)
-                        toolsPanel(editor)
+                        manualChecklistPanel(editor)
+                        operationalChecklistPanel(editor)
+                        if editor.operationalChecklist?.contains(
+                            where: { $0.requiresIdentifiedUnit == true }
+                        ) != true {
+                            toolsPanel(editor)
+                        }
                         stepsPanel
                         if editor.calibrationRequired {
                             calibrationPanel
@@ -307,6 +342,275 @@ struct PreventiveReportFormView: View {
         }
     }
 
+    private func manualChecklistPanel(_ editor: APIReportEditor) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Checklist según manual",
+                    subtitle: "Referencia documental; no se modifica durante la ejecución"
+                )
+                if let items = editor.manualChecklist, !items.isEmpty {
+                    ForEach(items.sorted { $0.sequence < $1.sequence }) { item in
+                        HStack(spacing: AppSpacing.md) {
+                            Image(systemName: "book.closed.fill")
+                                .foregroundStyle(BrandColor.red)
+                                .frame(width: 34, height: 34)
+                                .background(
+                                    BrandColor.red.opacity(0.10),
+                                    in: RoundedRectangle(cornerRadius: 8)
+                                )
+                            Text(item.name)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(quantityText(item.quantity, unit: item.unit))
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(AppSpacing.sm)
+                        .background(
+                            .background.opacity(0.62),
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                    }
+                } else {
+                    pendingChecklistLabel
+                }
+            }
+        }
+    }
+
+    private func operationalChecklistPanel(_ editor: APIReportEditor) -> some View {
+        let items = editor.operationalChecklist ?? []
+        let groupedItems = Dictionary(grouping: items, by: \.category).mapValues {
+            $0.sorted { $0.sequence < $1.sequence }
+        }
+        let categories = OperationalChecklistCategory.allCases.filter { category in
+            groupedItems[category.rawValue]?.isEmpty == false
+        }
+
+        return GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Checklist operativo",
+                    subtitle: "Confirma lo que se llevó y ajusta la cantidad real"
+                )
+                if items.isEmpty {
+                    pendingChecklistLabel
+                } else {
+                    ForEach(categories) { category in
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Label(category.title, systemImage: category.systemImage)
+                                .font(.headline)
+                                .foregroundStyle(BrandColor.red)
+                            ForEach(groupedItems[category.rawValue] ?? []) { item in
+                                operationalChecklistRow(
+                                    item,
+                                    entry: operationalChecklistBinding(for: item),
+                                    availableTools: editor.availableTools
+                                )
+                            }
+                        }
+                        .padding(AppSpacing.md)
+                        .background(
+                            .background.opacity(0.62),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private func operationalChecklistRow(
+        _ item: APIOperationalChecklistItem,
+        entry: Binding<APIOperationalChecklistItemWrite>,
+        availableTools: [APIEditorTool]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Toggle(isOn: Binding(
+                get: { entry.wrappedValue.isChecked },
+                set: { isChecked in
+                    entry.wrappedValue.isChecked = isChecked
+                    if isChecked, entry.wrappedValue.quantity == nil {
+                        entry.wrappedValue.quantity = item.defaultQuantity ?? 1
+                    } else if !isChecked {
+                        entry.wrappedValue.selectedToolIDs = []
+                    }
+                }
+            )) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.name)
+                        .font(.subheadline.weight(.semibold))
+                    Text("Recomendado: \(quantityText(item.defaultQuantity, unit: item.unit))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if let notes = item.notes, !notes.isEmpty {
+                        Text(notes)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if item.requiresIdentifiedUnit == true {
+                    identifiedToolSelector(
+                        item: item,
+                        entry: entry,
+                        availableTools: availableTools
+                    )
+                }
+            }
+            .toggleStyle(.switch)
+
+            if entry.wrappedValue.isChecked {
+                Stepper(
+                    value: Binding(
+                        get: { max(1, Int(entry.wrappedValue.quantity ?? 1)) },
+                        set: { entry.wrappedValue.quantity = Double($0) }
+                    ),
+                    in: 1...999
+                ) {
+                    Text(
+                        "Cantidad llevada: \(quantityText(entry.wrappedValue.quantity, unit: item.unit))"
+                    )
+                    .font(.subheadline.monospacedDigit())
+                }
+            }
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private func operationalChecklistBinding(
+        for item: APIOperationalChecklistItem
+    ) -> Binding<APIOperationalChecklistItemWrite> {
+        Binding(
+            get: {
+                operationalChecklist.first { $0.templateItemID == item.id }
+                    ?? APIOperationalChecklistItemWrite(
+                        templateItemID: item.id,
+                        isChecked: false,
+                        quantity: item.defaultQuantity,
+                        notes: nil,
+                        selectedToolIDs: []
+                    )
+            },
+            set: { updated in
+                if let index = operationalChecklist.firstIndex(
+                    where: { $0.templateItemID == item.id }
+                ) {
+                    operationalChecklist[index] = updated
+                } else {
+                    operationalChecklist.append(updated)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private func identifiedToolSelector(
+        item: APIOperationalChecklistItem,
+        entry: Binding<APIOperationalChecklistItemWrite>,
+        availableTools: [APIEditorTool]
+    ) -> some View {
+        let eligibleTools = availableTools.filter { tool in
+            if let catalogItemID = item.catalogItemID,
+               let toolCatalogItemID = tool.catalogItemID {
+                return catalogItemID == toolCatalogItemID
+            }
+            return normalizedToolName(tool.toolType ?? tool.name)
+                == normalizedToolName(item.name)
+        }
+        let selectedIDs = Set(entry.wrappedValue.selectedToolIDs ?? [])
+        let expectedCount = max(1, Int(entry.wrappedValue.quantity ?? 1))
+
+        if eligibleTools.isEmpty {
+            Label(
+                "No hay unidades identificadas registradas para seleccionar",
+                systemImage: "exclamationmark.circle"
+            )
+            .font(.caption)
+            .foregroundStyle(.orange)
+        } else {
+            Menu {
+                ForEach(eligibleTools) { tool in
+                    Button {
+                        var updated = entry.wrappedValue
+                        var ids = updated.selectedToolIDs ?? []
+                        if let index = ids.firstIndex(of: tool.id) {
+                            ids.remove(at: index)
+                        } else if expectedCount == 1 {
+                            ids = [tool.id]
+                        } else if ids.count < expectedCount {
+                            ids.append(tool.id)
+                        }
+                        updated.selectedToolIDs = ids
+                        entry.wrappedValue = updated
+                    } label: {
+                        Label(
+                            "\(tool.name) · Serie \(tool.serialNumber)",
+                            systemImage: selectedIDs.contains(tool.id)
+                                ? "checkmark.circle.fill"
+                                : "circle"
+                        )
+                    }
+                    .disabled(tool.availabilityStatus.uppercased() != "AVAILABLE")
+                }
+            } label: {
+                HStack {
+                    Image(systemName: "barcode.viewfinder")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Seleccionar equipo específico")
+                            .font(.subheadline.weight(.semibold))
+                        Text("\(selectedIDs.count) de \(expectedCount) seleccionado(s)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.caption)
+                }
+                .padding(AppSpacing.sm)
+                .background(
+                    .background.opacity(0.62),
+                    in: RoundedRectangle(cornerRadius: 10)
+                )
+            }
+
+            ForEach(eligibleTools.filter { selectedIDs.contains($0.id) }) { tool in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Serie: \(tool.serialNumber)")
+                        .font(.caption.weight(.semibold))
+                    if let certificate = tool.certificationNumber {
+                        Text("Certificado: \(certificate)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+        }
+    }
+
+    private func normalizedToolName(_ value: String) -> String {
+        value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var pendingChecklistLabel: some View {
+        Label("Pendiente de agregar", systemImage: "clock.fill")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppSpacing.md)
+            .background(
+                .background.opacity(0.58),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+    }
+
+    private func quantityText(_ quantity: Double?, unit: String) -> String {
+        guard let quantity else { return "Por definir" }
+        return "\(quantity.formatted(.number.precision(.fractionLength(0...2)))) \(unit)"
+    }
+
     private func toolsPanel(_ editor: APIReportEditor) -> some View {
         let selectedTools = editor.availableTools.filter { selectedToolIDs.contains($0.id) }
         let unselectedTools = editor.availableTools.filter { !selectedToolIDs.contains($0.id) }
@@ -314,14 +618,9 @@ struct PreventiveReportFormView: View {
         return GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(
-                    title: "Herramientas usadas",
+                    title: "Equipos identificados utilizados",
                     subtitle: "\(selectedTools.count) seleccionada(s)"
                 )
-                if !editor.requiredToolNames.isEmpty {
-                    Text("Requeridas por el mantenimiento: \(editor.requiredToolNames.joined(separator: ", "))")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
                 if editor.availableTools.isEmpty {
                     Text("No hay herramientas disponibles registradas.")
                         .foregroundStyle(.secondary)
@@ -680,6 +979,20 @@ struct PreventiveReportFormView: View {
             ?? ""
         sapOrder = localReport?.sapOrder ?? loaded.preventiveDraft?.sapOrder ?? loaded.sapOrder ?? ""
         selectedToolIDs = Set((localReport?.tools ?? loaded.preventiveDraft?.tools ?? []).map(\.toolID))
+        let savedOperationalChecklist = localReport?.operationalChecklist
+            ?? loaded.preventiveDraft?.operationalChecklist
+            ?? []
+        operationalChecklist = savedOperationalChecklist.isEmpty
+            ? (loaded.operationalChecklist ?? []).map { item in
+                APIOperationalChecklistItemWrite(
+                    templateItemID: item.id,
+                    isChecked: false,
+                    quantity: item.defaultQuantity,
+                    notes: nil,
+                    selectedToolIDs: []
+                )
+            }
+            : savedOperationalChecklist
         let calibration = localPayload?.calibration ?? loaded.calibrationDraft
         calibrationFrequency = calibration?.frequency ?? ""
         transmitterJumpers = calibration?.transmitterJumpers ?? ""

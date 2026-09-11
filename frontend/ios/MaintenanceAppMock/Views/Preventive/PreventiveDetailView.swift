@@ -41,6 +41,8 @@ struct PreventiveDetailView: View {
                         offlineReportState
                         statusPanel(detail)
                         generalData(detail)
+                        manualChecklistGuide
+                        operationalChecklistGuide
                         preventiveGuide
                         commentsPanel
                         reportVersions(detail)
@@ -144,6 +146,8 @@ struct PreventiveDetailView: View {
                     activityID: activityID,
                     templateName: nil,
                     templateSteps: package.editor.templateSteps,
+                    manualChecklist: package.editor.manualChecklist,
+                    operationalChecklist: package.editor.operationalChecklist,
                     previousReports: [],
                     previousReportsHasMore: false,
                     previousReportsOffset: 0
@@ -199,6 +203,8 @@ struct PreventiveDetailView: View {
                 activityID: guide.activityID,
                 templateName: guide.templateName,
                 templateSteps: guide.templateSteps,
+                manualChecklist: guide.manualChecklist,
+                operationalChecklist: guide.operationalChecklist,
                 previousReports: guide.previousReports + newReports,
                 previousReportsHasMore: nextPage.previousReportsHasMore,
                 previousReportsOffset: nextPage.previousReportsOffset
@@ -498,6 +504,117 @@ struct PreventiveDetailView: View {
             Text("Borrador").font(.caption.weight(.bold)).foregroundStyle(.orange)
         }
         .padding(.vertical, AppSpacing.xs)
+    }
+
+    @ViewBuilder
+    private var manualChecklistGuide: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Checklist según manual",
+                    subtitle: "Requerimientos documentales del mantenimiento"
+                )
+                if let items = guide?.manualChecklist, !items.isEmpty {
+                    ForEach(items.sorted { $0.sequence < $1.sequence }) { item in
+                        HStack(spacing: AppSpacing.md) {
+                            Image(systemName: "book.closed.fill")
+                                .foregroundStyle(BrandColor.red)
+                            Text(item.name)
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                            Text(checklistQuantity(item.quantity, unit: item.unit))
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(AppSpacing.md)
+                        .background(
+                            .background.opacity(0.62),
+                            in: RoundedRectangle(cornerRadius: 10)
+                        )
+                    }
+                } else {
+                    pendingChecklist
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var operationalChecklistGuide: some View {
+        let items = guide?.operationalChecklist ?? []
+        let groupedItems = Dictionary(grouping: items, by: \.category).mapValues {
+            $0.sorted { $0.sequence < $1.sequence }
+        }
+        let categories = OperationalChecklistCategory.allCases.filter { category in
+            groupedItems[category.rawValue]?.isEmpty == false
+        }
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Checklist operativo",
+                    subtitle: "Elementos que deben prepararse antes de salir a campo"
+                )
+                if items.isEmpty {
+                    pendingChecklist
+                } else {
+                    ForEach(categories) { category in
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Label(category.title, systemImage: category.systemImage)
+                                .font(.headline)
+                                .foregroundStyle(BrandColor.red)
+                            ForEach(groupedItems[category.rawValue] ?? []) { item in
+                                HStack(alignment: .top, spacing: AppSpacing.sm) {
+                                    Image(systemName: "circle")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .padding(.top, 3)
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(item.name)
+                                            .font(.subheadline.weight(.semibold))
+                                        if let notes = item.notes, !notes.isEmpty {
+                                            Text(notes)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Text(
+                                        checklistQuantity(
+                                            item.defaultQuantity,
+                                            unit: item.unit
+                                        )
+                                    )
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(AppSpacing.md)
+                        .background(
+                            .background.opacity(0.62),
+                            in: RoundedRectangle(cornerRadius: 12)
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var pendingChecklist: some View {
+        Label("Pendiente de agregar", systemImage: "clock.fill")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppSpacing.md)
+            .background(
+                .background.opacity(0.58),
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+    }
+
+    private func checklistQuantity(_ quantity: Double?, unit: String) -> String {
+        guard let quantity else { return "Por definir" }
+        return "\(quantity.formatted(.number.precision(.fractionLength(0...2)))) \(unit)"
     }
 
     @ViewBuilder

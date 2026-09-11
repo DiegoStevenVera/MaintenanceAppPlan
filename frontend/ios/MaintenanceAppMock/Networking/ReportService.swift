@@ -107,13 +107,31 @@ struct APIPreventiveReportWrite: Codable, Equatable {
     var participants: [APIReportParticipantWrite]
     var evidence: [APIReportEvidenceWrite]
     var tools: [APIReportToolUsageWrite]
+    var operationalChecklist: [APIOperationalChecklistItemWrite]?
 
     enum CodingKeys: String, CodingKey {
         case steps, participants, evidence, tools
+        case operationalChecklist = "operational_checklist"
         case sapOrder = "sap_order"
         case activityEndedAt = "activity_ended_at"
         case finalResult = "final_result"
         case additionalComments = "additional_comments"
+    }
+}
+
+struct APIOperationalChecklistItemWrite: Codable, Equatable, Identifiable {
+    var id: String { templateItemID }
+    let templateItemID: String
+    var isChecked: Bool
+    var quantity: Double?
+    var notes: String?
+    var selectedToolIDs: [String]?
+
+    enum CodingKeys: String, CodingKey {
+        case quantity, notes
+        case templateItemID = "template_item_id"
+        case isChecked = "is_checked"
+        case selectedToolIDs = "selected_tool_ids"
     }
 }
 
@@ -128,7 +146,9 @@ struct APIReportToolUsageWrite: Codable, Equatable, Identifiable {
 
 struct APIEditorTool: Codable, Identifiable {
     let id: String
+    let catalogItemID: String?
     let name: String
+    let toolType: String?
     let serialNumber: String
     let availabilityStatus: String
     let certificationNumber: String?
@@ -138,10 +158,83 @@ struct APIEditorTool: Codable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case id, name
+        case catalogItemID = "catalog_item_id"
+        case toolType = "tool_type"
         case serialNumber = "serial_number"
         case availabilityStatus = "availability_status"
         case certificationNumber = "certification_number"
         case certificationValidUntil = "certification_valid_until"
+    }
+}
+
+struct APIManualChecklistItem: Codable, Identifiable {
+    let id: String
+    let name: String
+    let quantity: Double?
+    let unit: String
+    let sequence: Int
+}
+
+struct APIOperationalChecklistItem: Codable, Identifiable {
+    let id: String
+    let catalogItemID: String?
+    let category: String
+    let name: String
+    let defaultQuantity: Double?
+    let unit: String
+    let isRequired: Bool
+    let sequence: Int
+    let notes: String?
+    let requiresIdentifiedUnit: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case id, category, name, unit, sequence, notes
+        case catalogItemID = "catalog_item_id"
+        case defaultQuantity = "default_quantity"
+        case isRequired = "is_required"
+        case requiresIdentifiedUnit = "requires_identified_unit"
+    }
+}
+
+struct APIChecklistSelectedTool: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let serialNumber: String
+    let certificationNumber: String?
+    let certificationValidUntil: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case serialNumber = "serial_number"
+        case certificationNumber = "certification_number"
+        case certificationValidUntil = "certification_valid_until"
+    }
+}
+
+struct APIReportChecklistItem: Decodable, Identifiable {
+    let id: String
+    let checklistType: String
+    let sourceItemID: String?
+    let category: String?
+    let name: String
+    let recommendedQuantity: Double?
+    let actualQuantity: Double?
+    let unit: String?
+    let isChecked: Bool?
+    let isRequired: Bool
+    let sequence: Int
+    let notes: String?
+    let selectedTools: [APIChecklistSelectedTool]?
+
+    enum CodingKeys: String, CodingKey {
+        case id, category, name, unit, sequence, notes
+        case selectedTools = "selected_tools"
+        case checklistType = "checklist_type"
+        case sourceItemID = "source_item_id"
+        case recommendedQuantity = "recommended_quantity"
+        case actualQuantity = "actual_quantity"
+        case isChecked = "is_checked"
+        case isRequired = "is_required"
     }
 }
 
@@ -372,6 +465,8 @@ struct APIPreventiveGuide: Decodable {
     let activityID: String
     let templateName: String?
     let templateSteps: [APITemplateStep]
+    let manualChecklist: [APIManualChecklistItem]?
+    let operationalChecklist: [APIOperationalChecklistItem]?
     let previousReports: [APIPreventiveHistoryReport]
     let previousReportsHasMore: Bool
     let previousReportsOffset: Int
@@ -380,6 +475,8 @@ struct APIPreventiveGuide: Decodable {
         case activityID = "activity_id"
         case templateName = "template_name"
         case templateSteps = "template_steps"
+        case manualChecklist = "manual_checklist"
+        case operationalChecklist = "operational_checklist"
         case previousReports = "previous_reports"
         case previousReportsHasMore = "previous_reports_has_more"
         case previousReportsOffset = "previous_reports_offset"
@@ -507,9 +604,13 @@ struct APIReportVersionDetail: Decodable {
     let participants: [APIStoredParticipant]
     let evidence: [APIStoredEvidence]
     let generatedReport: APIGeneratedReport?
+    let manualChecklist: [APIReportChecklistItem]?
+    let operationalChecklist: [APIReportChecklistItem]?
 
     enum CodingKeys: String, CodingKey {
         case id, summary, activity, participants, evidence
+        case manualChecklist = "manual_checklist"
+        case operationalChecklist = "operational_checklist"
         case reportKind = "report_kind"
         case reportNumber = "report_number"
         case versionNumber = "version_number"
@@ -564,6 +665,8 @@ struct APIReportEditor: Codable {
     let sapOrderEditable: Bool
     let availableTools: [APIEditorTool]
     let requiredToolNames: [String]
+    let manualChecklist: [APIManualChecklistItem]?
+    let operationalChecklist: [APIOperationalChecklistItem]?
     let participants: [APIStoredParticipant]
     let evidence: [APIStoredEvidence]
     let comments: [APIMaintenanceComment]
@@ -574,6 +677,8 @@ struct APIReportEditor: Codable {
         case sapOrderEditable = "sap_order_editable"
         case availableTools = "available_tools"
         case requiredToolNames = "required_tool_names"
+        case manualChecklist = "manual_checklist"
+        case operationalChecklist = "operational_checklist"
         case activityID = "activity_id"
         case activityType = "activity_type"
         case actualDate = "actual_date"
