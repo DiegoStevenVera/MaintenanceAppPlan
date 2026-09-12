@@ -568,6 +568,21 @@ struct APIStoredEvidence: Codable, Identifiable {
     }
 }
 
+extension APIReportEvidenceWrite {
+    func reconcilingAttachment(with stored: [APIStoredEvidence]) -> Self {
+        guard contentBase64 == nil, attachmentID != nil,
+              !stored.contains(where: { $0.id == attachmentID }) else { return self }
+        let matches = stored.filter {
+            $0.originalFileName == originalFileName && $0.mediaType == mediaType
+                && abs($0.capturedAt.timeIntervalSince(capturedAt)) < 0.001
+        }
+        guard matches.count == 1 else { return self }
+        var repaired = self
+        repaired.attachmentID = matches[0].id
+        return repaired
+    }
+}
+
 struct APIGeneratedReport: Decodable {
     let id: String
     let reportVersionID: String

@@ -125,6 +125,15 @@ struct OfflineSynchronizationNotice: Identifiable {
     let message: String
 }
 
+struct OfflineSyncProgressItem: Identifiable {
+    let id: String
+    let title: String
+    let equipment: String
+    let performedAt: Date
+    var status: String = "En espera"
+    var isUploading = false
+}
+
 actor OfflineReportDiskStore {
     private let directory: URL
     private let encoder: JSONEncoder
@@ -249,6 +258,9 @@ final class OfflineReportStore: ObservableObject {
     @Published private(set) var lastSyncEvent: OfflineSyncEvent?
     @Published private(set) var lastReconciledActivity: OfflineActivityReconciliation?
     @Published private(set) var lastSynchronizationNotice: OfflineSynchronizationNotice?
+    @Published private(set) var synchronizationBatchID: UUID?
+    @Published private(set) var synchronizationItems: [OfflineSyncProgressItem] = []
+    private var hasPresentedSynchronization = false
 
     private let diskStore: OfflineReportDiskStore
     private let workDiskStore: OfflineWorkDiskStore
@@ -873,6 +885,7 @@ final class OfflineReportStore: ObservableObject {
     }
 
     private func connectivityChanged(isAvailable: Bool) async {
+        if !isAvailable { hasPresentedSynchronization = false }
         isNetworkAvailable = isAvailable
         if isAvailable {
             await synchronizePending()
@@ -934,7 +947,48 @@ final class OfflineReportStore: ObservableObject {
         guard !records.isEmpty || !lifecycleOperations.isEmpty || !commentOperations.isEmpty || !correctiveOperations.isEmpty else { return }
 
         isSynchronizing = true
-        defer { isSynchronizing = false }
+        let activityIDs = Set(records.map(\.activityID)
+            + lifecycleOperations.map(\.activityID) + commentOperations.map(\.activityID))
+        synchronizationItems = activityIDs.sorted().map { id in
+            let record = draftsByActivity[id]
+            let detail = record?.activityDetail ?? workPackagesByActivity[id]?.activityDetail
+            return OfflineSyncProgressItem(
+                id: id,
+                title: detail?.title ?? "Mantenimiento",
+                equipment: detail?.assets.map(\.name).joined(separator: ", ") ?? "",
+                performedAt: detail?.actualEndAt ?? detail?.actualStartAt
+                    ?? record?.updatedAt ?? Date()
+            )
+        }
+        synchronizationItems += correctiveOperations.map { operation in
+            OfflineSyncProgressItem(
+                id: operation.id.uuidString,
+                title: operation.request.sapEventName,
+                equipment: operation.request.affectedAssetPath,
+                performedAt: operation.request.noticeCreatedAt
+            )
+        }
+        if !hasPresentedSynchronization && !synchronizationItems.isEmpty {
+            hasPresentedSynchronization = true
+            synchronizationBatchID = UUID()
+        }
+        defer {
+            for index in synchronizationItems.indices {
+                let id = synchronizationItems[index].id
+                let error = draftsByActivity[id]?.lastError
+                    ?? lifecycleOperations.first(where: { $0.activityID == id })?.lastError
+                    ?? commentOperations.first(where: { $0.activityID == id })?.lastError
+                    ?? correctiveOperations.first(where: { $0.id.uuidString == id })?.lastError
+                let pending = draftsByActivity[id] != nil
+                    || lifecycleOperations.contains(where: { $0.activityID == id })
+                    || commentOperations.contains(where: { $0.activityID == id })
+                    || correctiveOperations.contains(where: { $0.id.uuidString == id })
+                synchronizationItems[index].isUploading = false
+                synchronizationItems[index].status = error
+                    ?? (pending ? "Pendiente de sincronización" : "Sincronizado")
+            }
+            isSynchronizing = false
+        }
 
         // A report cannot be created until a locally queued start/reopen has
         // reached the server. Completion/closure deliberately remain after the
@@ -946,6 +1000,10 @@ final class OfflineReportStore: ObservableObject {
                 continue
             }
             record.state = .syncing
+            if let index = synchronizationItems.firstIndex(where: { $0.id == record.activityID }) {
+                synchronizationItems[index].status = "Subiendo reporte y evidencias"
+                synchronizationItems[index].isUploading = true
+            }
             record.lastError = nil
             try? await diskStore.write(record)
             draftsByActivity[record.activityID] = record
@@ -964,10 +1022,12 @@ final class OfflineReportStore: ObservableObject {
                     activityID: record.activityID,
                     synchronizedPayload: record.payload,
                     reportVersionID: result.versionID,
-                    announce: true
+                    announce: false
                 )
+                updateSynchronizationItem(record.activityID, status: "Reporte guardado")
             } catch {
                 await markFailed(activityID: record.activityID, error: error)
+                updateSynchronizationItem(record.activityID, status: error.localizedDescription)
                 if error.isReportConnectivityFailure {
                     break
                 }
@@ -975,6 +1035,12 @@ final class OfflineReportStore: ObservableObject {
         }
 
         await synchronizeOperations()
+    }
+
+    private func updateSynchronizationItem(_ id: String, status: String, uploading: Bool = false) {
+        guard let index = synchronizationItems.firstIndex(where: { $0.id == id }) else { return }
+        synchronizationItems[index].status = status
+        synchronizationItems[index].isUploading = uploading
     }
 
     private func synchronizeOperations() async {
@@ -1002,6 +1068,7 @@ final class OfflineReportStore: ObservableObject {
         }
 
         for operation in correctiveOperations where operation.state == .pending {
+            updateSynchronizationItem(operation.id.uuidString, status: "Creando correctivo", uploading: true)
             do {
                 _ = try await session.withValidAccessToken { token in
                     try await CorrectiveCreationAPIService(baseURLString: operation.baseURL).create(
@@ -1010,6 +1077,7 @@ final class OfflineReportStore: ObservableObject {
                 }
                 correctiveOperations.removeAll { $0.id == operation.id }
                 try? await persistOperations()
+                updateSynchronizationItem(operation.id.uuidString, status: "Sincronizado")
             } catch {
                 guard let index = correctiveOperations.firstIndex(where: { $0.id == operation.id }) else { continue }
                 correctiveOperations[index].state = .needsAttention
@@ -1026,6 +1094,7 @@ final class OfflineReportStore: ObservableObject {
         guard isNetworkAvailable, let session else { return }
         for operation in lifecycleOperations where operation.state == .pending {
             guard commands.contains(operation.command) else { continue }
+            updateSynchronizationItem(operation.activityID, status: "Actualizando estado", uploading: true)
             do {
                 let detail = try await session.withValidAccessToken { token in
                     try await MaintenanceAPIService(baseURLString: operation.baseURL).transition(
@@ -1149,11 +1218,11 @@ enum OfflineWorkError: LocalizedError {
 struct OfflineStatusBar: View {
     @EnvironmentObject private var offlineStore: OfflineReportStore
     @State private var isShowingDrafts = false
-    @State private var synchronizationNotice: OfflineSynchronizationNotice?
+    @State private var isShowingSynchronization = false
 
     var body: some View {
         Group {
-            if !offlineStore.isNetworkAvailable || offlineStore.pendingCount > 0 {
+            if !offlineStore.isNetworkAvailable || offlineStore.pendingCount > 0 || offlineStore.isSynchronizing {
                 HStack(spacing: AppSpacing.sm) {
                 Image(
                     systemName: offlineStore.isNetworkAvailable
@@ -1163,7 +1232,7 @@ struct OfflineStatusBar: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(
                         offlineStore.isNetworkAvailable
-                            ? "Sincronización pendiente"
+                            ? (offlineStore.isSynchronizing ? "Sincronizando trabajos" : "Sincronización pendiente")
                             : "Trabajando sin conexión"
                     )
                     .font(.caption.weight(.bold))
@@ -1172,8 +1241,14 @@ struct OfflineStatusBar: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                if offlineStore.pendingCount > 0 {
-                    Button("Ver") { isShowingDrafts = true }
+                if offlineStore.pendingCount > 0 || offlineStore.isSynchronizing {
+                    Button(offlineStore.isSynchronizing ? "Ver progreso" : "Ver") {
+                        if offlineStore.isSynchronizing {
+                            isShowingSynchronization = true
+                        } else {
+                            isShowingDrafts = true
+                        }
+                    }
                     .font(.caption.weight(.bold))
                     .buttonStyle(.bordered)
                 }
@@ -1186,15 +1261,31 @@ struct OfflineStatusBar: View {
                 }
             }
         }
-        .onChange(of: offlineStore.lastSynchronizationNotice?.id) { _, _ in
-            synchronizationNotice = offlineStore.lastSynchronizationNotice
+        .onChange(of: offlineStore.synchronizationBatchID, initial: true) { _, id in
+            if id != nil { isShowingSynchronization = true }
         }
-        .alert(item: $synchronizationNotice) { notice in
-            Alert(
-                title: Text(notice.title),
-                message: Text(notice.message),
-                dismissButton: .default(Text("Aceptar"))
-            )
+        .sheet(isPresented: $isShowingSynchronization) {
+            NavigationStack {
+                List(offlineStore.synchronizationItems) { item in
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(item.title).font(.headline)
+                        Text(item.equipment).foregroundStyle(.secondary)
+                        Text(item.performedAt, format: .dateTime.day().month().year().hour().minute())
+                            .font(.subheadline)
+                        HStack {
+                            if item.isUploading { ProgressView() }
+                            Text(item.status).font(.subheadline)
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                .navigationTitle("Sincronización de trabajos")
+                .toolbar {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Cerrar") { isShowingSynchronization = false }
+                    }
+                }
+            }
         }
     }
 

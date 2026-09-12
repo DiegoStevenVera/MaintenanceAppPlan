@@ -1034,7 +1034,7 @@ struct PreventiveReportFormView: View {
             participants = loaded.formParticipants(
                 preferredWrites: localReport.participants
             )
-            evidence = localReport.evidence
+            evidence = localReport.evidence.map { $0.reconcilingAttachment(with: loaded.evidence) }
         } else {
             participants = participantDrafts(from: loaded)
             evidence = loaded.evidence.map {

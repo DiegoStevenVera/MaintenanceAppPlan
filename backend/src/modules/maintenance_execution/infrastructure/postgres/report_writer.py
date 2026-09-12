@@ -4,7 +4,7 @@ import hashlib
 import unicodedata
 from datetime import date, datetime, time, timezone
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import delete, func, or_, select
@@ -493,6 +493,7 @@ class PostgresReportWriter:
             user_id,
             existing_evidence,
         )
+        version.data_snapshot = report_payload.model_dump(mode="json")
         calibration_version = None
         if payload.calibration is not None and track_circuit_asset is not None:
             calibration_version = await self._save_calibration_companion(
@@ -2368,10 +2369,10 @@ class PostgresReportWriter:
                 if item.corrective_activity_client_id
                 else None
             )
-            existing = (
-                existing_evidence.get(item.attachment_id)
-                if item.attachment_id
-                else None
+            existing = self._resolve_existing_evidence(item, existing_evidence)
+            attachment_id = (
+                existing.id if existing is not None and existing.report_version_id == version.id
+                else uuid5(version.id, item.client_id)
             )
             if existing is not None and item.content_base64 is None:
                 existing_reference = portable_storage_reference(
@@ -2380,6 +2381,7 @@ class PostgresReportWriter:
                 )
                 self._session.add(
                     AttachmentRecord(
+                        id=attachment_id,
                         report_version_id=version.id,
                         preventive_step_result_id=preventive_step_result_id,
                         corrective_activity_id=corrective_activity_id,
@@ -2395,6 +2397,7 @@ class PostgresReportWriter:
                         file_size_bytes=existing.file_size_bytes,
                     )
                 )
+                item.attachment_id = str(attachment_id)
                 continue
             if item.content_base64 is None:
                 raise ReportValidationError(
@@ -2410,6 +2413,7 @@ class PostgresReportWriter:
             target.write_bytes(content)
             self._session.add(
                 AttachmentRecord(
+                    id=attachment_id,
                     report_version_id=version.id,
                     preventive_step_result_id=preventive_step_result_id,
                     corrective_activity_id=corrective_activity_id,
@@ -2427,6 +2431,27 @@ class PostgresReportWriter:
                     file_size_bytes=len(content),
                 )
             )
+            item.attachment_id = str(attachment_id)
+
+    @staticmethod
+    def _resolve_existing_evidence(
+        item: ReportEvidenceWriteDTO,
+        existing_evidence: dict[str, AttachmentRecord],
+    ) -> AttachmentRecord | None:
+        existing = existing_evidence.get(item.attachment_id or "")
+        if existing is not None:
+            return existing
+        # Older draft saves replaced attachment IDs. Recover only an unambiguous
+        # photo from the already authorized current/source report versions.
+        if not item.attachment_id or item.content_base64 is not None:
+            return None
+        matches = [
+            record for record in existing_evidence.values()
+            if record.original_file_name == item.original_file_name
+            and record.media_type == item.media_type
+            and abs((record.captured_at - item.captured_at).total_seconds()) < 0.001
+        ]
+        return matches[0] if len(matches) == 1 else None
 
     async def _snapshot_assets(
         self,
