@@ -43,9 +43,7 @@ struct PreventiveReportFormView: View {
     @State private var participants: [ReportFormParticipant] = []
     @State private var evidence: [APIReportEvidenceWrite] = []
     @State private var sapOrder = ""
-    @State private var selectedToolIDs: Set<String> = []
     @State private var operationalChecklist: [APIOperationalChecklistItemWrite] = []
-    @State private var showsUnselectedTools = false
     @State private var conclusion = "Equipo operativo"
     @State private var additionalComments = ""
     @State private var endTime = Date()
@@ -89,7 +87,7 @@ struct PreventiveReportFormView: View {
                 steps: steps,
                 participants: participants.map(\.apiWrite),
                 evidence: evidence,
-                tools: selectedToolIDs.sorted().map(APIReportToolUsageWrite.init(toolID:)),
+                tools: [],
                 operationalChecklist: operationalChecklist
             ),
             corrective: nil,
@@ -120,11 +118,6 @@ struct PreventiveReportFormView: View {
                         generalData(detail, editor: editor)
                         manualChecklistPanel(editor)
                         operationalChecklistPanel(editor)
-                        if editor.operationalChecklist?.contains(
-                            where: { $0.requiresIdentifiedUnit == true }
-                        ) != true {
-                            toolsPanel(editor)
-                        }
                         stepsPanel
                         if editor.calibrationRequired {
                             calibrationPanel
@@ -546,13 +539,13 @@ struct PreventiveReportFormView: View {
                         entry.wrappedValue = updated
                     } label: {
                         Label(
-                            "\(tool.name) · Serie \(tool.serialNumber)",
+                            "\(tool.name) · Serie \(tool.serialNumber) · \(toolAvailabilityLabel(tool))",
                             systemImage: selectedIDs.contains(tool.id)
                                 ? "checkmark.circle.fill"
                                 : "circle"
                         )
                     }
-                    .disabled(tool.availabilityStatus.uppercased() != "AVAILABLE")
+                    .disabled(tool.isSelectable == false)
                 }
             } label: {
                 HStack {
@@ -584,6 +577,11 @@ struct PreventiveReportFormView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    if let validUntil = tool.certificationValidUntil {
+                        Text("Vigente hasta: \(validUntil)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -592,6 +590,22 @@ struct PreventiveReportFormView: View {
     private func normalizedToolName(_ value: String) -> String {
         value.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func toolAvailabilityLabel(_ tool: APIEditorTool) -> String {
+        if tool.availabilityStatus.uppercased() != "AVAILABLE" {
+            return "No disponible"
+        }
+        switch tool.certificationStatus {
+        case "VALID":
+            return "Certificación vigente"
+        case "EXPIRED":
+            return "Certificación vencida"
+        case "MISSING":
+            return "Sin certificación"
+        default:
+            return "Disponible"
+        }
     }
 
     private var pendingChecklistLabel: some View {
@@ -609,81 +623,6 @@ struct PreventiveReportFormView: View {
     private func quantityText(_ quantity: Double?, unit: String) -> String {
         guard let quantity else { return "Por definir" }
         return "\(quantity.formatted(.number.precision(.fractionLength(0...2)))) \(unit)"
-    }
-
-    private func toolsPanel(_ editor: APIReportEditor) -> some View {
-        let selectedTools = editor.availableTools.filter { selectedToolIDs.contains($0.id) }
-        let unselectedTools = editor.availableTools.filter { !selectedToolIDs.contains($0.id) }
-
-        return GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Equipos identificados utilizados",
-                    subtitle: "\(selectedTools.count) seleccionada(s)"
-                )
-                if editor.availableTools.isEmpty {
-                    Text("No hay herramientas disponibles registradas.")
-                        .foregroundStyle(.secondary)
-                } else {
-                    if selectedTools.isEmpty {
-                        Label(
-                            "Seleccione las herramientas utilizadas",
-                            systemImage: "wrench.and.screwdriver"
-                        )
-                        .foregroundStyle(.secondary)
-                        .padding(.vertical, AppSpacing.sm)
-                    }
-
-                    ForEach(selectedTools) { tool in
-                        toolToggle(tool)
-                    }
-
-                    if !unselectedTools.isEmpty {
-                        DisclosureGroup(isExpanded: $showsUnselectedTools) {
-                            VStack(spacing: AppSpacing.xs) {
-                                ForEach(unselectedTools) { tool in
-                                    toolToggle(tool)
-                                        .padding(.vertical, AppSpacing.xs)
-                                }
-                            }
-                            .padding(.top, AppSpacing.sm)
-                        } label: {
-                            Label(
-                                "No seleccionadas (\(unselectedTools.count))",
-                                systemImage: "wrench.and.screwdriver"
-                            )
-                            .font(.subheadline.weight(.semibold))
-                        }
-                        .padding(AppSpacing.md)
-                        .background(
-                            .background.opacity(0.58),
-                            in: RoundedRectangle(cornerRadius: 10)
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    private func toolToggle(_ tool: APIEditorTool) -> some View {
-        Toggle(isOn: Binding(
-            get: { selectedToolIDs.contains(tool.id) },
-            set: { selected in
-                if selected { selectedToolIDs.insert(tool.id) }
-                else { selectedToolIDs.remove(tool.id) }
-            }
-        )) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(tool.name).font(.headline)
-                Text("Serie: \(tool.serialNumber)")
-                    .font(.caption).foregroundStyle(.secondary)
-                if let certification = tool.certificationNumber {
-                    Text("Certificado: \(certification)")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-            }
-        }
-        .toggleStyle(.switch)
     }
 
     private var isCameraAvailable: Bool {
@@ -863,7 +802,7 @@ struct PreventiveReportFormView: View {
             )
         }
         do {
-            let loaded: APIReportEditor
+            var loaded: APIReportEditor
             if !offlineStore.isNetworkAvailable, let workPackage {
                 loaded = workPackage.editor
                 await offlineStore.markWorkPackageOpened(activityID: activityID)
@@ -875,6 +814,10 @@ struct PreventiveReportFormView: View {
             editor = loaded
             baseReportVersionID = localDraft?.payload.baseReportVersionID
                 ?? loaded.reportVersionID
+            if let localDraft {
+                loaded.operationalChecklist = localDraft.editor.operationalChecklist
+                editor = loaded
+            }
             apply(editor: loaded, localPayload: localDraft?.payload)
             if localDraft != nil {
                 successMessage = "Se recuperó el borrador guardado en este iPad."
@@ -978,18 +921,18 @@ struct PreventiveReportFormView: View {
             ?? loaded.preventiveDraft?.additionalComments
             ?? ""
         sapOrder = localReport?.sapOrder ?? loaded.preventiveDraft?.sapOrder ?? loaded.sapOrder ?? ""
-        selectedToolIDs = Set((localReport?.tools ?? loaded.preventiveDraft?.tools ?? []).map(\.toolID))
         let savedOperationalChecklist = localReport?.operationalChecklist
             ?? loaded.preventiveDraft?.operationalChecklist
             ?? []
         operationalChecklist = savedOperationalChecklist.isEmpty
             ? (loaded.operationalChecklist ?? []).map { item in
-                APIOperationalChecklistItemWrite(
+                let deliveries = (loaded.toolDeliveries ?? []).filter { $0.catalog_item_id == item.catalogItemID }
+                return APIOperationalChecklistItemWrite(
                     templateItemID: item.id,
                     isChecked: false,
-                    quantity: item.defaultQuantity,
+                    quantity: deliveries.isEmpty ? item.defaultQuantity : deliveries.reduce(0) { $0 + $1.quantity },
                     notes: nil,
-                    selectedToolIDs: []
+                    selectedToolIDs: deliveries.compactMap(\.tool_id)
                 )
             }
             : savedOperationalChecklist

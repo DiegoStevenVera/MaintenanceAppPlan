@@ -60,4 +60,5 @@ temp/
 # Databases
 docs/OldVersionApp/Database/*
 docs/OldVersionApp/Formats/*
+docs/HERRAMIENTAS/*
 *.sql

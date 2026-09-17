@@ -54,6 +54,14 @@ struct ProfileView: View {
 
                 GlassPanel {
                     ActionButtonGrid {
+                        if session.currentUser?.role == .administrator {
+                            NavigationLink {
+                                PreventiveTemplateListView()
+                            } label: {
+                                Label("Checklists preventivos", systemImage: "checklist")
+                            }
+                            .buttonStyle(ActionTileButtonStyle())
+                        }
                         Button {
                             isShowingOfflineWork = true
                         } label: {

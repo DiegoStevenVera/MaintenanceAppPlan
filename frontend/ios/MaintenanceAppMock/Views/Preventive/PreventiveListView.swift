@@ -863,7 +863,7 @@ struct PreventiveListView: View {
     private var filterPanel: some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Filtros", subtitle: "Segun fecha de programacion en la base de datos")
+                SectionHeaderText(title: "Filtros", subtitle: "Según fecha de programación en la base de datos")
                 ActionButtonGrid {
                     ForEach(MaintenanceDateFilter.allCases) { filter in
                         Button { selectedFilter = filter } label: {

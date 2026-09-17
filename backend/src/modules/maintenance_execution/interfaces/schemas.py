@@ -557,6 +557,7 @@ class ReportEditorAssetDTO(BaseModel):
 
 class ReportEditorToolDTO(BaseModel):
     id: str
+    inventory_item_id: str | None = None
     catalog_item_id: str | None = None
     name: str
     tool_type: str | None = None
@@ -564,6 +565,8 @@ class ReportEditorToolDTO(BaseModel):
     availability_status: str
     certification_number: str | None = None
     certification_valid_until: date | None = None
+    certification_status: Literal["VALID", "EXPIRED", "MISSING"] = "MISSING"
+    is_selectable: bool = False
 
 
 class ManualChecklistItemDTO(BaseModel):
@@ -585,6 +588,12 @@ class OperationalChecklistItemDTO(BaseModel):
     sequence: int
     notes: str | None = None
     requires_identified_unit: bool = False
+
+
+class ToolDeliveryDTO(BaseModel):
+    catalog_item_id: str
+    tool_id: str | None = None
+    quantity: float
 
 
 class PreventiveTemplateTestDTO(BaseModel):
@@ -658,3 +667,4 @@ class ReportEditorDTO(BaseModel):
     participants: list[ReportParticipantDTO] = Field(default_factory=list)
     evidence: list[ReportEvidenceDTO] = Field(default_factory=list)
     comments: list[MaintenanceCommentDTO] = Field(default_factory=list)
+    tool_deliveries: list[ToolDeliveryDTO] = Field(default_factory=list)

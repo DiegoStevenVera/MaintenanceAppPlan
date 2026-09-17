@@ -7,7 +7,7 @@ from pathlib import Path
 from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -42,6 +42,9 @@ from modules.maintenance_execution.infrastructure.postgres.tool_models import (
     ToolCatalogItemRecord,
     ToolCertificationRecord,
     ToolRecord,
+)
+from modules.maintenance_execution.infrastructure.postgres.tool_inventory_item_models import (
+    ToolInventoryItemRecord,
 )
 from modules.maintenance_execution.infrastructure.postgres.report_models import (
     AttachmentRecord,
@@ -101,6 +104,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     OperationalChecklistItemWriteDTO,
     ReportChecklistItemDTO,
     SignaturePointDTO,
+    ToolDeliveryDTO,
 )
 from modules.organizational_context.infrastructure.postgres.models import (
     ProjectRecord,
@@ -339,13 +343,17 @@ class PostgresReportWriter:
             ),
             sap_order=activity.sap_order,
             sap_order_editable=activity.activity_type == "PREVENTIVE" and not bool(activity.sap_order),
-            available_tools=await self._available_tools(),
+            available_tools=await self._available_tools(
+                activity.id,
+                (activity.actual_start_at or datetime.now(timezone.utc)).date(),
+            ),
             required_tool_names=await self._required_tool_names(activity),
             manual_checklist=await self._manual_checklist(activity),
-            operational_checklist=await self._operational_checklist(activity),
+            operational_checklist=await self._operational_checklist(activity, preventive_draft),
             participants=participants,
             evidence=evidence,
             comments=comments,
+            tool_deliveries=await self._tool_deliveries(activity.id),
         )
 
     async def get_preventive_guide(
@@ -1025,6 +1033,9 @@ class PostgresReportWriter:
         await self._save_tools(
             version,
             [*payload.tools, *checklist_tool_usages],
+            activity_id=activity.id,
+            used_on=(activity.actual_start_at or datetime.now(timezone.utc)).date(),
+            enforce_readiness=finalize,
         )
 
     async def _persist_sap_order(
@@ -1048,6 +1059,10 @@ class PostgresReportWriter:
         self,
         version: ReportVersionRecord,
         usages: list[ReportToolUsageWriteDTO],
+        *,
+        activity_id: UUID,
+        used_on: date,
+        enforce_readiness: bool,
     ) -> None:
         unique_usages: dict[str, ReportToolUsageWriteDTO] = {}
         for item in usages:
@@ -1073,6 +1088,31 @@ class PostgresReportWriter:
             tool = await self._session.get(ToolRecord, tool_id)
             if tool is None or not tool.is_active:
                 raise ReportValidationError("La herramienta seleccionada no está disponible.")
+            issued_for_activity = await self._session.scalar(
+                text("""
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM tool_inventory i
+                    JOIN tool_inventory_movements m ON m.inventory_id = i.id
+                    WHERE i.tool_id = :tool_id
+                      AND m.kind = 'ISSUE'
+                      AND m.activity_ids::jsonb @> jsonb_build_array(CAST(:activity_id AS text))
+                      AND m.quantity > coalesce((
+                          SELECT sum(x.quantity)
+                          FROM tool_inventory_movements x
+                          WHERE x.issue_id = m.id
+                      ), 0)
+                )
+                """),
+                {"tool_id": tool.id, "activity_id": str(activity_id)},
+            )
+            if enforce_readiness and (
+                tool.availability_status.upper() != "AVAILABLE"
+                and not issued_for_activity
+            ):
+                raise ReportValidationError(
+                    f"{tool.name} · serie {tool.serial_number} no está disponible para este mantenimiento."
+                )
             operational_item_id = None
             if item.operational_checklist_item_id:
                 try:
@@ -1098,6 +1138,13 @@ class PostgresReportWriter:
                 .order_by(ToolCertificationRecord.next_calibration_date.desc())
                 .limit(1)
             )
+            if enforce_readiness and operational_item_id is not None and (
+                certification is None
+                or certification.next_calibration_date < used_on
+            ):
+                raise ReportValidationError(
+                    f"{tool.name} · serie {tool.serial_number} no tiene una certificación vigente."
+                )
             self._session.add(
                 ReportToolUsageRecord(
                     report_version_id=version.id,
@@ -1112,7 +1159,48 @@ class PostgresReportWriter:
                 )
             )
 
-    async def _available_tools(self) -> list[ReportEditorToolDTO]:
+    async def _tool_deliveries(self, activity_id: UUID) -> list[ToolDeliveryDTO]:
+        rows = (
+            await self._session.execute(
+                text("""
+                SELECT i.catalog_item_id, i.tool_id,
+                    m.quantity-coalesce((SELECT sum(x.quantity) FROM tool_inventory_movements x WHERE x.issue_id=m.id),0) AS quantity
+                FROM tool_inventory i JOIN tool_inventory_movements m ON m.inventory_id=i.id
+                WHERE m.kind='ISSUE' AND m.activity_ids::jsonb @> jsonb_build_array(CAST(:activity AS text))
+                AND m.quantity > coalesce((SELECT sum(x.quantity) FROM tool_inventory_movements x WHERE x.issue_id=m.id),0)
+                """),
+                {"activity": str(activity_id)},
+            )
+        ).mappings().all()
+        return [
+            ToolDeliveryDTO(
+                catalog_item_id=str(row["catalog_item_id"]),
+                tool_id=str(row["tool_id"]) if row["tool_id"] else None,
+                quantity=float(row["quantity"]),
+            )
+            for row in rows
+        ]
+
+    async def _available_tools(
+        self,
+        activity_id: UUID | None = None,
+        activity_date: date | None = None,
+    ) -> list[ReportEditorToolDTO]:
+        issued_ids = set()
+        if activity_id:
+            issued_ids = set(
+                (
+                    await self._session.scalars(
+                        text("""
+                        SELECT i.tool_id FROM tool_inventory i JOIN tool_inventory_movements m ON m.inventory_id=i.id
+                        WHERE i.tool_id IS NOT NULL AND m.kind='ISSUE'
+                        AND m.activity_ids::jsonb @> jsonb_build_array(CAST(:activity AS text))
+                        AND m.quantity > coalesce((SELECT sum(x.quantity) FROM tool_inventory_movements x WHERE x.issue_id=m.id),0)
+                        """),
+                        {"activity": str(activity_id)},
+                    )
+                ).all()
+            )
         tools = (
             await self._session.scalars(
                 select(ToolRecord)
@@ -1121,6 +1209,18 @@ class PostgresReportWriter:
             )
         ).all()
         result = []
+        inventory_item_ids = {
+            tool_id: inventory_item_id
+            for tool_id, inventory_item_id in (
+                await self._session.execute(
+                    select(
+                        ToolInventoryItemRecord.tool_id,
+                        ToolInventoryItemRecord.id,
+                    ).where(ToolInventoryItemRecord.tool_id.is_not(None))
+                )
+            ).all()
+        }
+        effective_date = activity_date or date.today()
         for tool in tools:
             certification = await self._session.scalar(
                 select(ToolCertificationRecord)
@@ -1128,17 +1228,39 @@ class PostgresReportWriter:
                 .order_by(ToolCertificationRecord.next_calibration_date.desc())
                 .limit(1)
             )
+            certification_status = (
+                "MISSING"
+                if certification is None
+                else (
+                    "VALID"
+                    if certification.next_calibration_date >= effective_date
+                    else "EXPIRED"
+                )
+            )
+            availability_status = (
+                "AVAILABLE" if tool.id in issued_ids else tool.availability_status
+            )
             result.append(ReportEditorToolDTO(
                 id=str(tool.id),
+                inventory_item_id=(
+                    str(inventory_item_ids[tool.id])
+                    if tool.id in inventory_item_ids
+                    else None
+                ),
                 catalog_item_id=(
                     str(tool.catalog_item_id) if tool.catalog_item_id else None
                 ),
                 name=tool.name,
                 tool_type=tool.tool_type,
                 serial_number=tool.serial_number,
-                availability_status=tool.availability_status,
+                availability_status=availability_status,
                 certification_number=certification.certification_number if certification else None,
                 certification_valid_until=certification.next_calibration_date if certification else None,
+                certification_status=certification_status,
+                is_selectable=(
+                    availability_status.upper() == "AVAILABLE"
+                    and certification_status == "VALID"
+                ),
             ))
         return result
 
@@ -1206,9 +1328,41 @@ class PostgresReportWriter:
     async def _operational_checklist(
         self,
         activity: MaintenanceActivityRecord,
+        draft: PreventiveReportWriteDTO | None = None,
     ) -> list[OperationalChecklistItemDTO]:
         result = []
-        for record in await self._operational_checklist_records(activity):
+        if draft is not None and not draft.operational_checklist:
+            return result
+        records = await self._operational_checklist_records(activity)
+        if draft and draft.operational_checklist:
+            source = await self._session.scalar(
+                select(OperationalChecklistItemRecord)
+                .join(
+                    OperationalChecklistRevisionRecord,
+                    OperationalChecklistRevisionRecord.id
+                    == OperationalChecklistItemRecord.checklist_revision_id,
+                )
+                .where(
+                    OperationalChecklistItemRecord.id
+                    == UUID(draft.operational_checklist[0].template_item_id),
+                    OperationalChecklistRevisionRecord.maintenance_template_id
+                    == activity.maintenance_template_id,
+                )
+            )
+            if source:
+                records = list(
+                    (
+                        await self._session.scalars(
+                            select(OperationalChecklistItemRecord)
+                            .where(
+                                OperationalChecklistItemRecord.checklist_revision_id
+                                == source.checklist_revision_id
+                            )
+                            .order_by(OperationalChecklistItemRecord.sequence)
+                        )
+                    ).all()
+                )
+        for record in records:
             catalog = await self._session.get(
                 ToolCatalogItemRecord,
                 record.catalog_item_id,
@@ -1283,7 +1437,41 @@ class PostgresReportWriter:
                 )
             writes_by_id[item_id] = write
 
-        operational_records = await self._operational_checklist_records(activity)
+        operational_records = []
+        if writes_by_id:
+            # Downloaded work and existing drafts keep their published revision.
+            revisions = (
+                await self._session.scalars(
+                    select(OperationalChecklistRevisionRecord.id)
+                    .join(
+                        OperationalChecklistItemRecord,
+                        OperationalChecklistItemRecord.checklist_revision_id
+                        == OperationalChecklistRevisionRecord.id,
+                    )
+                    .where(
+                        OperationalChecklistItemRecord.id.in_(writes_by_id),
+                        OperationalChecklistRevisionRecord.maintenance_template_id
+                        == activity.maintenance_template_id,
+                    )
+                    .distinct()
+                )
+            ).all()
+            if len(revisions) != 1:
+                raise ReportValidationError(
+                    "El checklist debe pertenecer a una sola revisión del mantenimiento."
+                )
+            operational_records = list(
+                (
+                    await self._session.scalars(
+                        select(OperationalChecklistItemRecord)
+                        .where(
+                            OperationalChecklistItemRecord.checklist_revision_id
+                            == revisions[0]
+                        )
+                        .order_by(OperationalChecklistItemRecord.sequence)
+                    )
+                ).all()
+            )
         valid_ids = {record.id for record in operational_records}
         if set(writes_by_id) - valid_ids:
             raise ReportValidationError(

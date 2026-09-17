@@ -191,6 +191,8 @@ private struct AssetService {
     func list(
         query: String,
         subsystem: String?,
+        category: String? = nil,
+        status: String? = nil,
         accessToken: String
     ) async throws -> EquipmentPageDTO {
         var queryItems = [
@@ -202,6 +204,12 @@ private struct AssetService {
         }
         if let subsystem {
             queryItems.append(URLQueryItem(name: "subsystem", value: subsystem))
+        }
+        if let category {
+            queryItems.append(URLQueryItem(name: "category", value: category))
+        }
+        if let status {
+            queryItems.append(URLQueryItem(name: "status", value: status))
         }
         return try await client.get(
             "api/v1/assets",
@@ -241,6 +249,8 @@ final class AssetStore: ObservableObject {
     @Published private(set) var total = 0
     @Published private(set) var isLoadingList = false
     @Published private(set) var listError: String?
+    @Published private(set) var availableCategories: [String] = []
+    @Published private(set) var availableStatuses: [String] = []
     @Published private(set) var details: [String: EquipmentDTO] = [:]
     @Published private(set) var trees: [String: [EquipmentTreeNodeDTO]] = [:]
     @Published private(set) var histories: [String: [EquipmentMaintenanceDTO]] = [:]
@@ -250,6 +260,8 @@ final class AssetStore: ObservableObject {
     func loadEquipments(
         query: String,
         subsystem: String?,
+        category: String? = nil,
+        status: String? = nil,
         session: SessionStore
     ) async {
         guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL") else {
@@ -265,12 +277,20 @@ final class AssetStore: ObservableObject {
                 try await service.list(
                     query: query,
                     subsystem: subsystem,
+                    category: category,
+                    status: status,
                     accessToken: token
                 )
             }
             guard !Task.isCancelled else { return }
             equipments = page.items
             total = page.total
+            availableCategories = Array(
+                Set(availableCategories).union(page.items.map(\.category).filter { !$0.isEmpty })
+            ).sorted()
+            availableStatuses = Array(
+                Set(availableStatuses).union(page.items.map(\.status).filter { !$0.isEmpty })
+            ).sorted()
         } catch {
             guard !Task.isCancelled else { return }
             listError = error.localizedDescription
@@ -350,72 +370,138 @@ struct AssetSearchView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var assetStore: AssetStore
     @State private var query = ""
-    @State private var selectedSubsystem = "Todos"
+    @State private var selectedCategory = ""
+    @State private var selectedStatus = ""
+    @State private var page = 0
 
-    private let subsystems = ["Todos", "ATS", "CBTC", "IXL"]
+    private let pageSize = 10
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                filters
-                results
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                    pageHeader
+                    filters(isWide: geometry.size.width >= 760)
+                    results(isWide: geometry.size.width >= 1_000)
+                }
+                .padding(AppSpacing.lg)
+                .frame(maxWidth: 1_200, alignment: .leading)
+                .frame(maxWidth: .infinity)
             }
-            .padding(AppSpacing.lg)
-            .frame(maxWidth: 980, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
         .background(MaintenanceScreenBackground())
         .navigationTitle("Equipos")
+        .navigationBarTitleDisplayMode(.inline)
         .refreshable {
             await load()
         }
-        .task(id: "\(query)|\(selectedSubsystem)") {
+        .task(id: "\(query)|\(selectedCategory)|\(selectedStatus)") {
             if !query.isEmpty {
                 try? await Task.sleep(for: .milliseconds(300))
             }
             guard !Task.isCancelled else { return }
             await load()
         }
+        .onChange(of: query) { _, _ in page = 0 }
+        .onChange(of: selectedCategory) { _, _ in page = 0 }
+        .onChange(of: selectedStatus) { _, _ in page = 0 }
     }
 
-    private var filters: some View {
+    private var pageHeader: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Equipos")
+                .font(.largeTitle.bold())
+            Text("Consulta los equipos, su ubicación y estado operativo")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func filters(isWide: Bool) -> some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Equipos grandes",
-                    subtitle: "Busca por nombre, categoria, tipo o codigo"
-                )
-
                 HStack(spacing: AppSpacing.sm) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("Buscar equipo", text: $query)
+                    TextField("Buscar por nombre, categoría, tipo o código", text: $query)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                 }
                 .padding(AppSpacing.md)
                 .background(
-                    .regularMaterial,
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .background.opacity(0.72),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
 
-                Picker("Subsistema", selection: $selectedSubsystem) {
-                    ForEach(subsystems, id: \.self) { subsystem in
-                        Text(subsystem).tag(subsystem)
-                    }
+                let layout = isWide
+                    ? AnyLayout(HStackLayout(spacing: AppSpacing.md))
+                    : AnyLayout(VStackLayout(alignment: .leading, spacing: AppSpacing.md))
+                layout {
+                    categoryFilter
+                    statusFilter
+                    clearFiltersButton
                 }
-                .pickerStyle(.segmented)
             }
         }
     }
 
+    private var categoryFilter: some View {
+        MaintenanceChoiceField(
+            "Categoría",
+            systemImage: "square.stack.3d.up",
+            selection: $selectedCategory
+        ) {
+            Text("Todas").tag("")
+            ForEach(assetStore.availableCategories, id: \.self) { category in
+                Text(category).tag(category)
+            }
+        }
+    }
+
+    private var statusFilter: some View {
+        MaintenanceChoiceField(
+            "Estado",
+            systemImage: "checkmark.seal",
+            selection: $selectedStatus
+        ) {
+            Text("Todos").tag("")
+            ForEach(assetStore.availableStatuses, id: \.self) { status in
+                Text(status).tag(status)
+            }
+        }
+    }
+
+    private var clearFiltersButton: some View {
+        Button {
+            query = ""
+            selectedCategory = ""
+            selectedStatus = ""
+        } label: {
+            Label("Limpiar filtros", systemImage: "arrow.counterclockwise")
+        }
+        .buttonStyle(ActionTileButtonStyle())
+        .disabled(query.isEmpty && selectedCategory.isEmpty && selectedStatus.isEmpty)
+    }
+
     @ViewBuilder
-    private var results: some View {
+    private func results(isWide: Bool) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            SectionHeaderText(
-                title: "\(assetStore.total) equipos",
-                subtitle: "Activos marcados como business anchor"
-            )
+            HStack(alignment: .lastTextBaseline) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(assetStore.total) equipos")
+                        .font(.title3.bold())
+                    if !assetStore.equipments.isEmpty {
+                        Text("Mostrando \(pageItems.count) de \(assetStore.total)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                Text("Inventario de equipos")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+            }
 
             if assetStore.isLoadingList && assetStore.equipments.isEmpty {
                 ProgressView("Cargando equipos")
@@ -433,79 +519,311 @@ struct AssetSearchView: View {
                 }
             } else if assetStore.equipments.isEmpty {
                 ContentUnavailableView.search(text: query)
+            } else if isWide {
+                equipmentTable
             } else {
                 LazyVStack(spacing: AppSpacing.sm) {
-                    ForEach(assetStore.equipments) { equipment in
+                    ForEach(pageItems) { equipment in
                         NavigationLink {
                             AssetDetailView(assetID: equipment.id)
                         } label: {
-                            EquipmentResultCard(equipment: equipment)
+                            EquipmentCompactRow(equipment: equipment)
                         }
                         .buttonStyle(.plain)
                     }
                 }
             }
+
+            if !assetStore.equipments.isEmpty {
+                pagination
+            }
         }
+    }
+
+    private var equipmentTable: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: AppSpacing.sm) {
+                Text("Imagen").frame(width: 62, alignment: .leading)
+                Text("Código").frame(width: 120, alignment: .leading)
+                Text("Nombre").frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
+                Text("Categoría").frame(width: 150, alignment: .leading)
+                Text("Ubicación").frame(width: 180, alignment: .leading)
+                Text("Estado").frame(width: 150, alignment: .leading)
+                Text("Ver").frame(width: 44, alignment: .trailing)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, AppSpacing.md)
+            .padding(.vertical, AppSpacing.sm)
+
+            ForEach(pageItems) { equipment in
+                NavigationLink {
+                    AssetDetailView(assetID: equipment.id)
+                } label: {
+                    EquipmentWideRow(equipment: equipment)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(BrandColor.glassStroke)
+        }
+    }
+
+    private var pageItems: [EquipmentDTO] {
+        let start = page * pageSize
+        guard start < assetStore.equipments.count else { return [] }
+        return Array(assetStore.equipments[start..<min(start + pageSize, assetStore.equipments.count)])
+    }
+
+    private var pageCount: Int {
+        max(1, Int(ceil(Double(assetStore.equipments.count) / Double(pageSize))))
+    }
+
+    private var visiblePages: [Int] {
+        let lastPage = pageCount - 1
+        let start = min(max(0, page - 2), max(0, lastPage - 4))
+        return Array(start...min(lastPage, start + 4))
+    }
+
+    private var pagination: some View {
+        HStack(spacing: AppSpacing.xs) {
+            Button { page = max(0, page - 1) } label: {
+                Image(systemName: "chevron.left")
+            }
+            .buttonStyle(.glass)
+            .disabled(page == 0)
+
+            ForEach(visiblePages, id: \.self) { pageNumber in
+                Button { page = pageNumber } label: {
+                    Text(String(pageNumber + 1))
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 34, height: 34)
+                }
+                .buttonStyle(.glass)
+                .tint(pageNumber == page ? BrandColor.red : .primary)
+            }
+
+            Button { page = min(pageCount - 1, page + 1) } label: {
+                Image(systemName: "chevron.right")
+            }
+            .buttonStyle(.glass)
+            .disabled(page >= pageCount - 1)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, AppSpacing.sm)
     }
 
     private func load() async {
         await assetStore.loadEquipments(
             query: query.trimmingCharacters(in: .whitespacesAndNewlines),
-            subsystem: selectedSubsystem == "Todos" ? nil : selectedSubsystem,
+            subsystem: nil,
+            category: selectedCategory.isEmpty ? nil : selectedCategory,
+            status: selectedStatus.isEmpty ? nil : selectedStatus,
             session: session
         )
+        page = min(page, max(0, pageCount - 1))
     }
 }
 
-private struct EquipmentResultCard: View {
+private struct EquipmentWideRow: View {
     let equipment: EquipmentDTO
 
     var body: some View {
-        GlassPanel {
-            HStack(spacing: AppSpacing.md) {
-                Image(systemName: symbolName)
-                    .font(.title2.weight(.semibold))
-                    .foregroundStyle(BrandColor.red)
-                    .frame(width: 48, height: 48)
-                    .background(
-                        BrandColor.red.opacity(0.12),
-                        in: RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    )
-
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(equipment.name)
-                        .font(.headline)
-                    Text("\(equipment.category) · \(equipment.assetType)")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text("\(equipment.serialOrCode) · \(equipment.physicalLocation)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
-                }
-
-                Spacer()
-
-                Text(equipment.subsystem)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(BrandColor.red)
-
-                Image(systemName: "chevron.right")
+        HStack(spacing: AppSpacing.sm) {
+            EquipmentThumbnail(equipment: equipment, size: 48)
+                .frame(width: 62, alignment: .leading)
+            Text(equipment.serialOrCode)
+                .font(.subheadline.weight(.semibold))
+                .frame(width: 120, alignment: .leading)
+                .lineLimit(2)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(equipment.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                Text(equipment.assetType)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .frame(minWidth: 210, maxWidth: .infinity, alignment: .leading)
+            Text(equipment.category)
+                .font(.subheadline)
+                .frame(width: 150, alignment: .leading)
+                .lineLimit(2)
+            Text(equipment.physicalLocation.activityLocationSummary)
+                .font(.subheadline)
+                .frame(width: 180, alignment: .leading)
+                .lineLimit(2)
+            EquipmentStatusBadge(status: equipment.status)
+                .frame(width: 150, alignment: .leading)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+                .frame(width: 44, alignment: .trailing)
         }
+        .padding(.horizontal, AppSpacing.md)
+        .padding(.vertical, AppSpacing.sm)
+        .contentShape(.rect)
+        .overlay(alignment: .bottom) { Divider() }
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Abre el detalle del equipo")
+    }
+}
+
+private struct EquipmentCompactRow: View {
+    let equipment: EquipmentDTO
+
+    var body: some View {
+        HStack(spacing: AppSpacing.md) {
+            EquipmentThumbnail(equipment: equipment, size: 58)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(equipment.serialOrCode)
+                    .font(.subheadline.weight(.bold))
+                Text(equipment.name)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                Text("\(equipment.category) · \(equipment.assetType)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(equipment.physicalLocation.activityLocationSummary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: AppSpacing.sm)
+            EquipmentStatusBadge(status: equipment.status)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.secondary)
+        }
+        .padding(AppSpacing.md)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(BrandColor.glassStroke)
+        }
+        .contentShape(.rect)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Abre el detalle del equipo")
+    }
+}
+
+private struct EquipmentThumbnail: View {
+    let equipment: EquipmentDTO
+    let size: CGFloat
+
+    var body: some View {
+        Image(systemName: symbolName)
+            .font(.system(size: size * 0.42, weight: .semibold))
+            .foregroundStyle(BrandColor.red)
+            .frame(width: size, height: size)
+            .background(
+                BrandColor.red.opacity(0.09),
+                in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .stroke(BrandColor.red.opacity(0.10))
+            }
+            .accessibilityHidden(true)
     }
 
     private var symbolName: String {
         switch equipment.category {
-        case "Vehículo":
-            return "tram.fill"
-        case "Servidor":
-            return "server.rack"
-        case "Equipo de vía":
-            return "point.topleft.down.curvedto.point.bottomright.up"
-        default:
-            return "square.stack.3d.up.fill"
+        case "Vehículo": "tram.fill"
+        case "Servidor": "server.rack"
+        case "Equipo de vía": "point.topleft.down.curvedto.point.bottomright.up"
+        default: "square.stack.3d.up.fill"
+        }
+    }
+}
+
+private struct EquipmentStatusBadge: View {
+    let status: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(tint)
+                .frame(width: 7, height: 7)
+            Text(displayStatus)
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(tint)
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, 6)
+        .background(tint.opacity(0.10), in: Capsule())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Estado: \(displayStatus)")
+    }
+
+    private var normalizedStatus: String {
+        status.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .uppercased()
+    }
+
+    private var displayStatus: String {
+        status.lowercased().capitalized
+    }
+
+    private var tint: Color {
+        if normalizedStatus.contains("OPERATIVO")
+            || normalizedStatus.contains("DISPONIBLE")
+            || normalizedStatus == "ACTIVE" {
+            return BrandColor.green
+        }
+        if normalizedStatus.contains("MANTENIMIENTO")
+            || normalizedStatus.contains("PROCESO") {
+            return BrandColor.amber
+        }
+        return BrandColor.red
+    }
+}
+
+private struct EquipmentInfoCell: View {
+    let title: String
+    let value: String
+    let symbol: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            Image(systemName: symbol)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(BrandColor.red)
+                .frame(width: 24, height: 24)
+                .background(BrandColor.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private enum EquipmentDetailSection: String, CaseIterable, Identifiable {
+    case components
+    case preventiveMaintenance
+    case maintenanceHistory
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .components: "Componentes internos"
+        case .preventiveMaintenance: "Mantenimientos preventivos"
+        case .maintenanceHistory: "Mantenimientos realizados"
         }
     }
 }
@@ -515,24 +833,29 @@ struct AssetDetailView: View {
     @EnvironmentObject private var assetStore: AssetStore
     let assetID: String
     @State private var isPresentingComponentAdmin = false
+    @State private var selectedSection: EquipmentDetailSection = .components
 
     var body: some View {
         Group {
             if let equipment = assetStore.details[assetID] {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                        header(equipment)
-                        EquipmentAssetPhotoPanel(equipment: equipment)
-                        information(equipment)
-                        componentTree(equipment)
-                        maintenanceHistory
+                GeometryReader { geometry in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                            header(equipment)
+                            overview(
+                                equipment,
+                                isWide: geometry.size.width >= 900
+                            )
+                            sectionPicker
+                            selectedSectionContent(equipment)
+                        }
+                        .padding(AppSpacing.lg)
+                        .frame(maxWidth: 1_100, alignment: .leading)
+                        .frame(maxWidth: .infinity)
                     }
-                    .padding(AppSpacing.lg)
-                    .frame(maxWidth: 900, alignment: .leading)
-                    .frame(maxWidth: .infinity)
-                }
-                .refreshable {
-                    await assetStore.loadDetail(id: assetID, session: session, force: true)
+                    .refreshable {
+                        await assetStore.loadDetail(id: assetID, session: session, force: true)
+                    }
                 }
             } else if assetStore.loadingDetailIDs.contains(assetID) {
                 ProgressView("Cargando detalle del equipo")
@@ -577,48 +900,139 @@ struct AssetDetailView: View {
     }
 
     private func header(_ equipment: EquipmentDTO) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text(equipment.serialOrCode)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(BrandColor.red)
-            Text(equipment.name)
-                .font(.system(.largeTitle, design: .rounded).weight(.black))
-            HStack(spacing: AppSpacing.sm) {
-                Text("\(equipment.businessLabel ?? "Equipo") · \(equipment.category)")
+        HStack(alignment: .center, spacing: AppSpacing.md) {
+            EquipmentThumbnail(equipment: equipment, size: 72)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: AppSpacing.sm) {
+                    Text(equipment.serialOrCode)
+                        .font(.title2.bold())
+                    EquipmentStatusBadge(status: equipment.status)
+                }
+                Text(equipment.name)
                     .font(.headline)
                     .foregroundStyle(.secondary)
-                Text(equipment.status)
-                    .font(.caption.weight(.bold))
-                    .foregroundStyle(BrandColor.green)
-                    .padding(.horizontal, AppSpacing.sm)
-                    .padding(.vertical, 6)
-                    .background(BrandColor.green.opacity(0.12), in: Capsule())
+                Label(
+                    equipment.physicalLocation.activityLocationSummary,
+                    systemImage: "mappin.and.ellipse"
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    @ViewBuilder
+    private func overview(_ equipment: EquipmentDTO, isWide: Bool) -> some View {
+        if isWide {
+            HStack(alignment: .top, spacing: AppSpacing.md) {
+                information(equipment)
+                    .frame(maxWidth: .infinity)
+                EquipmentAssetPhotoPanel(equipment: equipment)
+                    .frame(width: 330)
+            }
+        } else {
+            VStack(spacing: AppSpacing.md) {
+                information(equipment)
+                EquipmentAssetPhotoPanel(equipment: equipment)
             }
         }
     }
 
     private func information(_ equipment: EquipmentDTO) -> some View {
-        GlassPanel {
+        ContentGlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Informacion")
-                DetailTile(title: "Subsistema", value: equipment.subsystem)
-                DetailTile(title: "Categoria", value: equipment.category)
-                DetailTile(title: "Tipo", value: equipment.assetType)
-                DetailTile(title: "Codigo", value: equipment.serialOrCode)
-                DetailTile(title: "Estado", value: equipment.status)
-                DetailTile(title: "Ubicacion fisica", value: equipment.physicalLocation)
-                optionalTile(title: "Fabricante", value: equipment.manufacturer)
-                optionalTile(title: "Modelo", value: equipment.model)
-                optionalTile(title: "Part number", value: equipment.partNumber)
-                optionalTile(title: "Version de software", value: equipment.softwareVersion)
+                SectionHeaderText(title: "Información general")
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 180), spacing: AppSpacing.md)],
+                    alignment: .leading,
+                    spacing: AppSpacing.md
+                ) {
+                    EquipmentInfoCell(
+                        title: "Categoría",
+                        value: equipment.category,
+                        symbol: "square.stack.3d.up"
+                    )
+                    EquipmentInfoCell(
+                        title: "Tipo",
+                        value: equipment.assetType,
+                        symbol: "point.3.connected.trianglepath.dotted"
+                    )
+                    EquipmentInfoCell(
+                        title: "Ubicación",
+                        value: equipment.physicalLocation.activityLocationSummary,
+                        symbol: "mappin.and.ellipse"
+                    )
+                    EquipmentInfoCell(
+                        title: "Subsistema",
+                        value: equipment.subsystem,
+                        symbol: "square.3.layers.3d"
+                    )
+                    if let manufacturer = equipment.manufacturer, !manufacturer.isEmpty {
+                        EquipmentInfoCell(
+                            title: "Fabricante",
+                            value: manufacturer,
+                            symbol: "building.2"
+                        )
+                    }
+                    if let model = equipment.model, !model.isEmpty {
+                        EquipmentInfoCell(
+                            title: "Modelo",
+                            value: model,
+                            symbol: "tag"
+                        )
+                    }
+                    if let partNumber = equipment.partNumber, !partNumber.isEmpty {
+                        EquipmentInfoCell(
+                            title: "Part number",
+                            value: partNumber,
+                            symbol: "number"
+                        )
+                    }
+                    if let softwareVersion = equipment.softwareVersion, !softwareVersion.isEmpty {
+                        EquipmentInfoCell(
+                            title: "Versión de software",
+                            value: softwareVersion,
+                            symbol: "cpu"
+                        )
+                    }
+                    if let currentPosition = equipment.currentPosition, !currentPosition.isEmpty {
+                        EquipmentInfoCell(
+                            title: "Posición",
+                            value: currentPosition,
+                            symbol: "scope"
+                        )
+                    }
+                }
             }
         }
     }
 
+    private var sectionPicker: some View {
+        Picker("Contenido del equipo", selection: $selectedSection) {
+            ForEach(EquipmentDetailSection.allCases) { section in
+                Text(section.title).tag(section)
+            }
+        }
+        .pickerStyle(.segmented)
+        .accessibilityHint("Selecciona la información que deseas consultar")
+    }
+
     @ViewBuilder
-    private func optionalTile(title: String, value: String?) -> some View {
-        if let value, !value.isEmpty {
-            DetailTile(title: title, value: value)
+    private func selectedSectionContent(_ equipment: EquipmentDTO) -> some View {
+        switch selectedSection {
+        case .components:
+            componentTree(equipment)
+        case .preventiveMaintenance:
+            EquipmentPreventiveTemplatesPanel(
+                assetID: assetID,
+                equipmentName: equipment.name,
+                location: equipment.physicalLocation
+            )
+        case .maintenanceHistory:
+            maintenanceHistory
         }
     }
 
@@ -711,18 +1125,21 @@ private struct EquipmentComponentTreePanel: View {
     var body: some View {
         ContentGlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Componentes internos",
-                    subtitle: "\(componentCount) activos descendientes"
-                )
-                if canAdminister {
-                    Button(action: onAdminister) {
-                        Label(
-                            "Administrar componentes",
-                            systemImage: "slider.horizontal.3"
-                        )
+                HStack(alignment: .center, spacing: AppSpacing.md) {
+                    SectionHeaderText(
+                        title: "Componentes internos",
+                        subtitle: "\(componentCount) activos descendientes"
+                    )
+                    Spacer()
+                    if canAdminister {
+                        Button(action: onAdminister) {
+                            Label(
+                                "Administrar componentes",
+                                systemImage: "slider.horizontal.3"
+                            )
+                        }
+                        .buttonStyle(.glass)
                     }
-                    .buttonStyle(ActionTileButtonStyle())
                 }
 
                 if branches.isEmpty {
@@ -1153,35 +1570,31 @@ private struct EquipmentAssetPhotoPanel: View {
     let equipment: EquipmentDTO
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            if equipment.subsystem == "ATS" {
-                maintenanceBundleImage("ats-cabinet-reference")
-                    .resizable()
-                    .scaledToFill()
-            } else {
-                Rectangle()
-                    .fill(BrandColor.graphite.opacity(0.12))
-                Image(systemName: symbol)
-                    .font(.system(size: 108, weight: .bold))
-                    .foregroundStyle(BrandColor.red.opacity(0.78))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+        ContentGlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(title: "Imágenes del equipo")
 
-            Label(equipment.subsystem, systemImage: "square.stack.3d.up.fill")
-                .font(.headline)
-                .foregroundStyle(BrandColor.signalInk)
-                .padding(AppSpacing.sm)
+                VStack(spacing: AppSpacing.sm) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 68, weight: .semibold))
+                        .foregroundStyle(BrandColor.red.opacity(0.78))
+                    Text("Sin imágenes registradas")
+                        .font(.headline)
+                    Text("Las fotografías del equipo aparecerán aquí cuando estén disponibles.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 260)
+                }
+                .frame(maxWidth: .infinity, minHeight: 176)
                 .background(
-                    Color.white.opacity(0.92),
-                    in: RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    BrandColor.graphite.opacity(0.055),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
                 )
-                .padding(AppSpacing.md)
+            }
         }
-        .frame(height: 260)
-        .frame(maxWidth: .infinity)
-        .clipped()
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .accessibilityLabel("Imagen referencial del equipo \(equipment.name)")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Imágenes de \(equipment.name): sin imágenes registradas")
     }
 
     private var symbol: String {

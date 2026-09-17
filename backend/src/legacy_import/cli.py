@@ -8,6 +8,7 @@ from typing import Any
 from app.database import async_session_factory
 from legacy_import.context import ImportContext
 from legacy_import.storage import STORAGE_SHEETS, StorageImporter
+from legacy_import.tool_inventory import import_tool_inventory
 from legacy_import.wbs import WBS_SHEETS, WBSImporter
 from legacy_import.workbook import LegacyWorkbook
 
@@ -42,6 +43,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate.add_argument("--file", required=True, type=Path)
     validate.add_argument("--kind", choices=("wbs", "storage"), required=True)
+
+    tools = subparsers.add_parser(
+        "import-tool-inventory",
+        help="Import the warehouse tool inventory workbook and label photographs.",
+    )
+    tools.add_argument("--file", required=True, type=Path)
+    tools.add_argument("--photos-dir", required=True, type=Path)
+    tools.add_argument(
+        "--replace",
+        action="store_true",
+        help="Replace the previous import from INVENTARIO_HERRAMIENTAS.xlsx.",
+    )
+    tools.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and transform the workbook, then roll back database changes.",
+    )
     return parser
 
 
@@ -140,6 +158,37 @@ async def run_import(args: argparse.Namespace) -> int:
                 await storage_context.start()
                 await StorageImporter(storage_workbook, storage_context).run()
                 await storage_context.finish()
+
+            elif args.command == "import-tool-inventory":
+                summary = await import_tool_inventory(
+                    session,
+                    args.file,
+                    args.photos_dir,
+                    replace=args.replace,
+                    dry_run=args.dry_run,
+                )
+                if args.dry_run:
+                    await transaction.rollback()
+                else:
+                    await transaction.commit()
+                print(
+                    json.dumps(
+                        {
+                            "rolled_back": args.dry_run,
+                            "source_file": str(args.file),
+                            "rows_read": summary.rows_read,
+                            "rows_imported": summary.rows_imported,
+                            "rows_skipped": summary.rows_skipped,
+                            "images_imported": summary.images_imported,
+                            "rows_without_images": summary.rows_without_images,
+                            "catalog_items_retired": summary.catalog_items_retired,
+                            "location_name": summary.location_name,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return 0
 
             failed = sum(context.stats.failed for context in contexts)
             if args.strict and failed:

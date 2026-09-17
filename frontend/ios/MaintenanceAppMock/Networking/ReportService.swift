@@ -146,6 +146,7 @@ struct APIReportToolUsageWrite: Codable, Equatable, Identifiable {
 
 struct APIEditorTool: Codable, Identifiable {
     let id: String
+    let inventoryItemID: String?
     let catalogItemID: String?
     let name: String
     let toolType: String?
@@ -155,15 +156,20 @@ struct APIEditorTool: Codable, Identifiable {
     // The API serializes a database DATE as YYYY-MM-DD, not an ISO-8601 instant.
     // Keeping it as text avoids making the whole report editor fail to decode.
     let certificationValidUntil: String?
+    let certificationStatus: String?
+    let isSelectable: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, name
+        case inventoryItemID = "inventory_item_id"
         case catalogItemID = "catalog_item_id"
         case toolType = "tool_type"
         case serialNumber = "serial_number"
         case availabilityStatus = "availability_status"
         case certificationNumber = "certification_number"
         case certificationValidUntil = "certification_valid_until"
+        case certificationStatus = "certification_status"
+        case isSelectable = "is_selectable"
     }
 }
 
@@ -657,6 +663,12 @@ struct APIMaintenanceComment: Codable, Identifiable {
     }
 }
 
+struct APIToolDelivery: Codable {
+    let catalog_item_id: String
+    let tool_id: String?
+    let quantity: Double
+}
+
 struct APIReportEditor: Codable {
     let activityID: String
     let activityType: String
@@ -681,13 +693,15 @@ struct APIReportEditor: Codable {
     let availableTools: [APIEditorTool]
     let requiredToolNames: [String]
     let manualChecklist: [APIManualChecklistItem]?
-    let operationalChecklist: [APIOperationalChecklistItem]?
+    var operationalChecklist: [APIOperationalChecklistItem]?
     let participants: [APIStoredParticipant]
     let evidence: [APIStoredEvidence]
     let comments: [APIMaintenanceComment]
+    var toolDeliveries: [APIToolDelivery]? = nil
 
     enum CodingKeys: String, CodingKey {
         case status, participants, evidence, comments
+        case toolDeliveries = "tool_deliveries"
         case sapOrder = "sap_order"
         case sapOrderEditable = "sap_order_editable"
         case availableTools = "available_tools"

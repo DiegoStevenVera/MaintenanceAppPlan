@@ -1,4 +1,6 @@
 # Import all SQLAlchemy models so Base.metadata knows the complete schema.
+from modules.maintenance_execution.infrastructure.postgres import tool_inventory_models as _tool_inventory_models  # noqa: F401
+from modules.maintenance_execution.infrastructure.postgres import tool_inventory_item_models as _tool_inventory_item_models  # noqa: F401
 from modules.app_state.infrastructure.postgres import import_models as _import_models  # noqa: F401
 from modules.app_state.infrastructure.postgres.models import AppStateSnapshotRecord
 from modules.asset_management.infrastructure.postgres import (  # noqa: F401

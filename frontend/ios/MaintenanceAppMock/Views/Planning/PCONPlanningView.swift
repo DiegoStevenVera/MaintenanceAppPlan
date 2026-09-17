@@ -1,7 +1,19 @@
 import SwiftUI
 
+private enum PCONPlanningError: LocalizedError {
+    case proposalNotEditable
+
+    var errorDescription: String? {
+        switch self {
+        case .proposalNotEditable:
+            "La fecha ya pertenece a una semana confirmada. Reprográmala indicando el motivo."
+        }
+    }
+}
+
 private enum PCONSection: String, CaseIterable, Identifiable {
     case annual = "Plan anual"
+    case monthly = "Calendario mensual"
     case weekly = "Programación semanal"
 
     var id: String { rawValue }
@@ -17,7 +29,7 @@ private enum APIPlanningState: String, Decodable {
     var label: String {
         switch self {
         case .monthOnly: "Solo mes"
-        case .proposed: "Propuesto"
+        case .proposed: "Fecha tentativa"
         case .confirmed: "Confirmado"
         case .reschedulePending: "Reprogramación pendiente"
         case .executed: "Ejecutado"
@@ -26,8 +38,8 @@ private enum APIPlanningState: String, Decodable {
 
     var color: Color {
         switch self {
-        case .monthOnly: BrandColor.red
-        case .proposed: BrandColor.amber
+        case .monthOnly: BrandColor.amber
+        case .proposed: Color.blue
         case .confirmed: BrandColor.green
         case .reschedulePending: BrandColor.red
         case .executed: BrandColor.graphite
@@ -109,7 +121,7 @@ private struct PCONAnnualMonth: Decodable, Identifiable {
 
     var displayColor: Color {
         if monthOnlyCount > 0 || proposedCount > 0 {
-            return monthOnlyCount > 0 ? BrandColor.red : BrandColor.amber
+            return monthOnlyCount > 0 ? BrandColor.amber : Color.blue
         }
         if confirmedCount > 0 {
             return BrandColor.green
@@ -676,14 +688,48 @@ private struct HierarchyGroup: Identifiable {
     var id: String { key }
 }
 
+private struct PCONCalendarSlot: Identifiable {
+    let id: Int
+    let date: Date?
+    let day: Int?
+}
+
+private struct PlanningStateBadge: View {
+    let state: APIPlanningState
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Circle().fill(state.color).frame(width: 6, height: 6)
+            Text(state.label)
+                .font(.caption2.bold())
+                .lineLimit(1)
+        }
+        .foregroundStyle(state.color)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(state.color.opacity(0.11), in: Capsule())
+    }
+}
+
 struct PCONPlanningView: View {
     @EnvironmentObject private var session: SessionStore
 
     @State private var section = PCONSection.annual
     @State private var selectedYear: Int
+    @State private var selectedMonth: Int
+    @State private var selectedCalendarDay: Date
     @State private var weekStart: Date
     @State private var query = ""
+    @State private var selectedSubsystem = "Todos"
+    @State private var selectedCategory = "Todas"
+    @State private var selectedLocation = "Todas"
+    @State private var selectedEquipment = "Todos"
+    @State private var weeklyQuery = ""
+    @State private var weeklySelectedSubsystem = "Todos"
+    @State private var weeklySelectedCategory = "Todas"
+    @State private var weeklySelectedLocation = "Todas"
     @State private var annualPlan: PCONAnnualPlan?
+    @State private var monthlyItems: [PCONPlanItem] = []
     @State private var weeklyItems: [PCONPlanItem] = []
     @State private var weekDetail: PCONWeekDetail?
     @State private var history: [PCONHistoryItem] = []
@@ -698,6 +744,7 @@ struct PCONPlanningView: View {
     @State private var isConfirmingWeek = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var weeklyPendingPage = 0
 
     private let calendar = Calendar(identifier: .iso8601)
     private let descriptorWidth: CGFloat = 390
@@ -708,6 +755,8 @@ struct PCONPlanningView: View {
         let now = Date()
         let calendar = Calendar(identifier: .iso8601)
         _selectedYear = State(initialValue: calendar.component(.year, from: now))
+        _selectedMonth = State(initialValue: calendar.component(.month, from: now))
+        _selectedCalendarDay = State(initialValue: now)
         _weekStart = State(initialValue: Self.startOfWeek(now))
     }
 
@@ -719,6 +768,19 @@ struct PCONPlanningView: View {
         ZStack {
             MaintenanceScreenBackground()
             VStack(spacing: 0) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("PCON")
+                            .font(.largeTitle.bold())
+                        Text("Planifica, programa y gestiona los mantenimientos preventivos")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.top, AppSpacing.sm)
+
                 Picker("Vista PCON", selection: $section) {
                     ForEach(PCONSection.allCases) { item in
                         Text(item.rawValue).tag(item)
@@ -731,12 +793,14 @@ struct PCONPlanningView: View {
                 switch section {
                 case .annual:
                     annualContent
+                case .monthly:
+                    monthlyContent
                 case .weekly:
                     weeklyContent
                 }
             }
         }
-        .navigationTitle("PCON")
+        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if !canEdit {
@@ -751,14 +815,6 @@ struct PCONPlanningView: View {
                     Label("Historial de programación", systemImage: "clock.arrow.circlepath")
                 }
             }
-        }
-        .searchable(
-            text: $query,
-            placement: .navigationBarDrawer(displayMode: .always),
-            prompt: "Buscar subsistema, ubicación, equipo o mantenimiento"
-        )
-        .onSubmit(of: .search) {
-            Task { await loadCurrentSection() }
         }
         .onChange(of: section) {
             query = ""
@@ -856,27 +912,27 @@ struct PCONPlanningView: View {
     }
 
     private var annualContent: some View {
-        VStack(spacing: AppSpacing.md) {
-            annualToolbar
-            annualLegend
-            if isLoading && annualPlan == nil {
-                Spacer()
-                ProgressView("Cargando planificación anual...")
-                Spacer()
-            } else if let plan = annualPlan, !plan.rows.isEmpty {
-                annualMatrix(plan)
-            } else {
-                Spacer()
-                ContentUnavailableView(
-                    "Sin planificación",
-                    systemImage: "calendar.badge.exclamationmark",
-                    description: Text("No hay mantenimientos para el año y búsqueda elegidos.")
-                )
-                Spacer()
+        ScrollView(.vertical) {
+            LazyVStack(spacing: AppSpacing.md) {
+                annualFilterBar
+                annualSummary
+                if isLoading && annualPlan == nil {
+                    ProgressView("Cargando planificación anual...")
+                        .padding(.vertical, 80)
+                } else if let plan = annualPlan, !filteredAnnualRows.isEmpty {
+                    annualMatrix(plan)
+                } else {
+                    ContentUnavailableView(
+                        "Sin planificación",
+                        systemImage: "calendar.badge.exclamationmark",
+                        description: Text("No hay mantenimientos para el año y filtros elegidos.")
+                    )
+                    .padding(.vertical, 80)
+                }
             }
+            .padding(.horizontal, AppSpacing.lg)
+            .padding(.bottom, AppSpacing.xl)
         }
-        .padding(.horizontal, AppSpacing.lg)
-        .padding(.bottom, AppSpacing.md)
         .refreshable { await loadAnnual() }
     }
 
@@ -959,13 +1015,146 @@ struct PCONPlanningView: View {
         }
     }
 
+    private var annualFilterBar: some View {
+        GlassPanel {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 155), spacing: AppSpacing.sm)],
+                alignment: .leading,
+                spacing: AppSpacing.sm
+            ) {
+                annualFilterControls
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var annualFilterControls: some View {
+        yearFilter
+        planningFilter("Subsistema", selection: $selectedSubsystem, values: annualSubsystems)
+        planningFilter("Categoría", selection: $selectedCategory, values: annualCategories)
+        planningFilter("Ubicación", selection: $selectedLocation, values: annualLocations)
+        planningFilter("Equipo", selection: $selectedEquipment, values: annualEquipment)
+        Button {
+            selectedSubsystem = "Todos"
+            selectedCategory = "Todas"
+            selectedLocation = "Todas"
+            selectedEquipment = "Todos"
+            query = ""
+            Task { await loadAnnual() }
+        } label: {
+            Label("Limpiar filtros", systemImage: "arrow.counterclockwise")
+                .frame(minHeight: 42)
+        }
+        .buttonStyle(.glass)
+        Button {
+            if expandedGroups.isEmpty {
+                expandedGroups = Set(allGroupKeys)
+            } else {
+                expandedGroups.removeAll()
+            }
+        } label: {
+            Label(
+                expandedGroups.isEmpty ? "Expandir" : "Contraer",
+                systemImage: expandedGroups.isEmpty
+                    ? "arrow.down.right.and.arrow.up.left"
+                    : "arrow.up.left.and.arrow.down.right"
+            )
+            .frame(maxWidth: .infinity, minHeight: 42)
+        }
+        .buttonStyle(.glass)
+        if canEdit {
+            Menu {
+                Button {
+                    Task { await prepareAddMaintenance() }
+                } label: {
+                    Label("Agregar mantenimiento", systemImage: "plus")
+                }
+                Button {
+                    isConfirmingCopy = true
+                } label: {
+                    Label("Copiar plan de \(selectedYear - 1)", systemImage: "doc.on.doc")
+                }
+            } label: {
+                Label("Administrar", systemImage: "slider.horizontal.3")
+                    .frame(maxWidth: .infinity, minHeight: 42)
+            }
+            .buttonStyle(.glassProminent)
+        }
+    }
+
+    private var yearFilter: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text("AÑO")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            Picker("Año", selection: $selectedYear) {
+                ForEach((selectedYear - 3)...(selectedYear + 3), id: \.self) { year in
+                    Text(String(year)).tag(year)
+                }
+            }
+            .labelsHidden()
+            .onChange(of: selectedYear) {
+                Task { await loadAnnual() }
+            }
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func planningFilter(
+        _ title: String,
+        selection: Binding<String>,
+        values: [String]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+            Picker(title, selection: selection) {
+                ForEach(values, id: \.self) { value in Text(value).tag(value) }
+            }
+            .labelsHidden()
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .frame(maxWidth: .infinity, minHeight: 54, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private var annualSummary: some View {
+        let items = filteredAnnualRows.flatMap { $0.months.flatMap(\.occurrences) }
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AppSpacing.sm) {
+                summaryCard("Planificados", value: items.count, color: BrandColor.graphite, icon: "calendar")
+                summaryCard("Con fecha asignada", value: items.filter { ($0.proposedStartAt ?? $0.scheduledStartAt) != nil }.count, color: BrandColor.green, icon: "calendar.badge.checkmark")
+                summaryCard("Pendientes de fecha", value: items.filter { $0.planningState == .monthOnly }.count, color: BrandColor.amber, icon: "calendar.badge.exclamationmark")
+                summaryCard("Reprogramación pendiente", value: items.filter { $0.planningState == .reschedulePending }.count, color: BrandColor.red, icon: "arrow.triangle.2.circlepath")
+                summaryCard("Ejecutados", value: items.filter { $0.planningState == .executed }.count, color: .blue, icon: "checkmark.circle.fill")
+            }
+        }
+    }
+
+    private func summaryCard(_ title: String, value: Int, color: Color, icon: String) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: icon).foregroundStyle(color)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(String(value)).font(.title3.bold()).monospacedDigit()
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .padding(AppSpacing.md)
+        .frame(minWidth: 190, alignment: .leading)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay { RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.06)) }
+    }
+
     private var annualLegend: some View {
         GlassPanel {
             HStack(spacing: AppSpacing.lg) {
                 Text("Estado de la cantidad")
                     .font(.subheadline.bold())
-                legendNumber("1", label: "Solo mes", color: BrandColor.red)
-                legendNumber("1", label: "Propuesto", color: BrandColor.amber)
+                legendNumber("1", label: "Solo mes", color: BrandColor.amber)
+                legendNumber("1", label: "Fecha tentativa", color: Color.blue)
                 legendNumber("1", label: "Confirmado", color: BrandColor.green)
                 legendNumber("1", label: "Ejecutado", color: BrandColor.graphite)
                 Spacer()
@@ -990,10 +1179,10 @@ struct PCONPlanningView: View {
     }
 
     private func annualMatrix(_ plan: PCONAnnualPlan) -> some View {
-        ScrollView([.horizontal, .vertical]) {
+        ScrollView(.horizontal) {
             LazyVStack(spacing: 1, pinnedViews: [.sectionHeaders]) {
                 Section {
-                    ForEach(visibleHierarchyRows(plan.rows)) { hierarchy in
+                    ForEach(visibleHierarchyRows(filteredAnnualRows)) { hierarchy in
                         annualHierarchyRow(hierarchy)
                     }
                 } header: {
@@ -1120,39 +1309,687 @@ struct PCONPlanningView: View {
         .contentShape(Rectangle())
     }
 
-    private var weeklyContent: some View {
-        ScrollView {
-            LazyVStack(spacing: AppSpacing.md) {
-                weekPicker
-                weeklySummary
-
-                if let detail = weekDetail, !detail.proposals.isEmpty {
-                    proposalPanel(detail)
+    private var monthlyContent: some View {
+        GeometryReader { proxy in
+            let isWide = proxy.size.width >= 920
+            ScrollView {
+                VStack(spacing: AppSpacing.md) {
+                    monthlyToolbar
+                    if isLoading && monthlyItems.isEmpty {
+                        ProgressView("Cargando calendario mensual...")
+                            .padding(.top, 80)
+                    } else {
+                        if isWide {
+                            HStack(alignment: .top, spacing: AppSpacing.md) {
+                                monthlyCalendar
+                                    .frame(maxWidth: .infinity)
+                                monthlyDayPanel
+                                    .frame(width: 390)
+                            }
+                        } else {
+                            VStack(spacing: AppSpacing.md) {
+                                monthlyCalendar
+                                monthlyDayPanel
+                            }
+                        }
+                    }
+                    planningLegend
                 }
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.bottom, AppSpacing.xl)
+            }
+            .refreshable { await loadMonthly() }
+        }
+    }
 
+    private var monthlyToolbar: some View {
+        GlassPanel {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppSpacing.md) {
+                    monthNavigation
+                    Spacer()
+                    monthlyMetric("Planificados", value: monthlyItems.count, color: Color.blue)
+                    monthlyMetric("Con fecha", value: monthlyDatedItems.count, color: BrandColor.green)
+                    monthlyMetric("Pendientes", value: monthlyPendingItems.count, color: BrandColor.amber)
+                    todayButton
+                }
+                VStack(spacing: AppSpacing.md) {
+                    HStack { monthNavigation; Spacer(); todayButton }
+                    HStack(spacing: AppSpacing.md) {
+                        monthlyMetric("Planificados", value: monthlyItems.count, color: Color.blue)
+                        monthlyMetric("Con fecha", value: monthlyDatedItems.count, color: BrandColor.green)
+                        monthlyMetric("Pendientes", value: monthlyPendingItems.count, color: BrandColor.amber)
+                    }
+                }
+            }
+        }
+    }
+
+    private var monthNavigation: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Button {
+                moveSelectedMonth(by: -1)
+            } label: {
+                Image(systemName: "chevron.left")
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.glass)
+            Text("\(Self.monthName(selectedMonth)) \(selectedYear)")
+                .font(.headline)
+                .frame(minWidth: 170)
+            Button {
+                moveSelectedMonth(by: 1)
+            } label: {
+                Image(systemName: "chevron.right")
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.glass)
+        }
+    }
+
+    private var todayButton: some View {
+        Button("Hoy") {
+            let now = Date()
+            selectedYear = calendar.component(.year, from: now)
+            selectedMonth = calendar.component(.month, from: now)
+            selectedCalendarDay = now
+            Task { await loadMonthly() }
+        }
+        .buttonStyle(.glass)
+    }
+
+    private func monthlyMetric(_ label: String, value: Int, color: Color) -> some View {
+        HStack(spacing: 7) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(String(value)).font(.headline).monospacedDigit()
+                Text(label).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var monthlyCalendar: some View {
+        GlassPanel {
+            VStack(spacing: 0) {
+                LazyVGrid(
+                    columns: Array(repeating: GridItem(.flexible(), spacing: 1), count: 7),
+                    spacing: 1
+                ) {
+                    ForEach(["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"], id: \.self) {
+                        Text($0)
+                            .font(.caption.bold())
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, AppSpacing.sm)
+                    }
+                    ForEach(monthCalendarSlots) { slot in
+                        calendarDayCell(slot)
+                    }
+                }
+            }
+        }
+    }
+
+    private func calendarDayCell(_ slot: PCONCalendarSlot) -> some View {
+        let items = slot.date.map(items(on:)) ?? []
+        let isSelected = slot.date.map { calendar.isDate($0, inSameDayAs: selectedCalendarDay) } ?? false
+        let isToday = slot.date.map(calendar.isDateInToday) ?? false
+        return Button {
+            if let date = slot.date { selectedCalendarDay = date }
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(slot.day.map(String.init) ?? "")
+                        .font(.subheadline.weight(isToday ? .bold : .medium))
+                        .foregroundStyle(isToday ? BrandColor.red : .primary)
+                    Spacer()
+                    if !items.isEmpty {
+                        Text("\(items.count) mant.")
+                            .font(.caption2.bold())
+                            .foregroundStyle(dominantStateColor(items))
+                    }
+                }
+                HStack(spacing: 3) {
+                    ForEach(Array(items.prefix(4))) { item in
+                        Capsule()
+                            .fill(item.planningState.color)
+                            .frame(height: 5)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(AppSpacing.sm)
+            .frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
+            .background(
+                isSelected ? BrandColor.red.opacity(0.09) : Color.primary.opacity(0.025),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
+            .overlay {
+                if isSelected {
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(BrandColor.red.opacity(0.55), lineWidth: 1)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(slot.date == nil)
+    }
+
+    private var monthlyDayPanel: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(
-                    title: "Pendientes del plan mensual",
-                    subtitle: "Cada fila es una ejecución que puede recibir fecha y rango horario"
+                    title: Self.fullDateFormatter.string(from: selectedCalendarDay),
+                    subtitle: "\(selectedDayItems.count) mantenimiento(s)"
                 )
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                if isLoading && weeklyItems.isEmpty {
-                    ProgressView("Cargando actividades...")
-                        .padding(.top, 40)
-                } else if availableWeeklyItems.isEmpty {
+                if selectedDayItems.isEmpty {
                     ContentUnavailableView(
-                        "Sin actividades pendientes",
-                        systemImage: "calendar.badge.checkmark",
-                        description: Text("No hay ocurrencias sin programar para este periodo.")
+                        "Sin mantenimientos con fecha",
+                        systemImage: "calendar",
+                        description: Text("Asigna una fecha desde las ocurrencias pendientes del mes.")
                     )
+                    .frame(minHeight: 220)
                 } else {
-                    weeklyHierarchy
+                    ForEach(selectedDayItems) { item in
+                        monthlyItemRow(item)
+                    }
+                }
+                if canEdit, !monthlyPendingItems.isEmpty {
+                    Menu {
+                        ForEach(monthlyPendingItems) { pending in
+                            Button {
+                                weekStart = Self.startOfWeek(selectedCalendarDay)
+                                schedulingItem = pending
+                            } label: {
+                                Label(
+                                    "\(pending.maintenanceName) · \(pending.equipmentName)",
+                                    systemImage: "calendar.badge.plus"
+                                )
+                            }
+                        }
+                    } label: {
+                        Label("Agregar mantenimiento al día", systemImage: "plus")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.glassProminent)
+                }
+            }
+        }
+    }
+
+    private func monthlyItemRow(_ item: PCONPlanItem) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Image(systemName: "doc.text")
+                .foregroundStyle(BrandColor.red)
+                .frame(width: 34, height: 34)
+                .background(BrandColor.red.opacity(0.09), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 3) {
+                Text(item.maintenanceName).font(.subheadline.bold()).lineLimit(2)
+                Text("\(item.equipmentName) · \(item.locationName.activityLocationSummary)")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 4) {
+                PlanningStateBadge(state: item.planningState)
+                if let date = item.proposedStartAt ?? item.scheduledStartAt {
+                    Text(Self.timeRange(item, start: date))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if canEdit, item.planningState != .executed {
+                Menu {
+                    Button {
+                        weekStart = Self.startOfWeek(
+                            item.proposedStartAt ?? item.scheduledStartAt ?? selectedCalendarDay
+                        )
+                        schedulingItem = item
+                    } label: {
+                        Label("Editar fecha", systemImage: "calendar.badge.clock")
+                    }
+                    if item.planningState == .proposed {
+                        Button(role: .destructive) {
+                            Task { await clearTentativeDate(item) }
+                        } label: {
+                            Label("Quitar fecha tentativa", systemImage: "calendar.badge.minus")
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .frame(width: 36, height: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Administrar ocurrencia")
+            }
+        }
+        .padding(AppSpacing.sm)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var planningLegend: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AppSpacing.lg) {
+                legendPill("Solo mes", color: BrandColor.amber, detail: "Tiene mes, pero no fecha")
+                legendPill("Fecha tentativa", color: .blue, detail: "Ya tiene día propuesto")
+                legendPill("Confirmado", color: BrandColor.green, detail: "Semana confirmada")
+                legendPill("En ejecución", color: .purple, detail: "Mantenimiento en curso")
+                legendPill("Completado", color: BrandColor.graphite, detail: "Finalizado")
+                legendPill("Reprogramación pendiente", color: BrandColor.red, detail: "Requiere nueva fecha")
+            }
+        }
+    }
+
+    private func legendPill(_ title: String, color: Color, detail: String) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Text(title)
+                .font(.caption.bold())
+                .foregroundStyle(color)
+                .padding(.horizontal, AppSpacing.sm)
+                .padding(.vertical, 6)
+                .background(color.opacity(0.11), in: Capsule())
+            Text(detail).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    private var weeklyContent: some View {
+        GeometryReader { proxy in
+            VStack(spacing: AppSpacing.md) {
+                weeklyControlBar
+
+                if isLoading && weeklyItems.isEmpty && weekDetail == nil {
+                    Spacer()
+                    ProgressView("Cargando programación semanal...")
+                    Spacer()
+                } else if proxy.size.width >= 1_000 {
+                    GeometryReader { workspace in
+                        HStack(alignment: .top, spacing: AppSpacing.md) {
+                            weeklyScheduleBoard
+                                .frame(
+                                    width: max(workspace.size.width - 356, 520),
+                                    height: workspace.size.height
+                                )
+                            weeklyPendingPanel
+                                .frame(width: 340, height: workspace.size.height)
+                        }
+                    }
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: AppSpacing.md) {
+                            weeklyScheduleBoard
+                            weeklyPendingPanel
+                        }
+                    }
+                    .refreshable { await loadWeekly() }
                 }
             }
             .padding(.horizontal, AppSpacing.lg)
-            .padding(.bottom, AppSpacing.xl)
+            .padding(.bottom, AppSpacing.md)
         }
-        .refreshable { await loadWeekly() }
+        .onChange(of: weeklyFilterSignature) {
+            weeklyPendingPage = 0
+        }
+    }
+
+    private var weeklyControlBar: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                weeklyFilterBar
+
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: AppSpacing.md) {
+                        weeklyMetrics
+                        Spacer(minLength: AppSpacing.sm)
+                        confirmWeekButton
+                        weeklyOptionsMenu
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: AppSpacing.sm) {
+                            weeklyMetrics
+                            confirmWeekButton
+                            weeklyOptionsMenu
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var weeklyFilterBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: AppSpacing.sm) {
+                compactWeekNavigation
+
+                Divider()
+                    .frame(height: 36)
+
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Buscar mantenimiento o equipo", text: $weeklyQuery)
+                        .textInputAutocapitalization(.never)
+                }
+                .padding(.horizontal, AppSpacing.sm)
+                .frame(width: 220, height: 42)
+                .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
+
+                compactWeeklyFilter("Subsistema", selection: $weeklySelectedSubsystem, values: weeklySubsystems)
+                compactWeeklyFilter("Categoría", selection: $weeklySelectedCategory, values: weeklyCategories)
+                compactWeeklyFilter("Ubicación", selection: $weeklySelectedLocation, values: weeklyLocations)
+
+                Button {
+                    weeklyQuery = ""
+                    weeklySelectedSubsystem = "Todos"
+                    weeklySelectedCategory = "Todas"
+                    weeklySelectedLocation = "Todas"
+                    weeklyPendingPage = 0
+                } label: {
+                    Label("Limpiar", systemImage: "arrow.counterclockwise")
+                        .frame(minHeight: 42)
+                }
+                .buttonStyle(.glass)
+            }
+        }
+    }
+
+    private func compactWeeklyFilter(
+        _ title: String,
+        selection: Binding<String>,
+        values: [String]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(.secondary)
+            Picker(title, selection: selection) {
+                ForEach(values, id: \.self) { value in Text(value).tag(value) }
+            }
+            .labelsHidden()
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .frame(width: 135, height: 42, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private var compactWeekNavigation: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Button {
+                weekStart = calendar.date(byAdding: .day, value: -7, to: weekStart) ?? weekStart
+                weeklyPendingPage = 0
+                Task { await loadWeekly() }
+            } label: {
+                Image(systemName: "chevron.left").frame(width: 34, height: 34)
+            }
+            .buttonStyle(.glass)
+
+            Text("Semana")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            Button {
+                weekStart = calendar.date(byAdding: .day, value: 7, to: weekStart) ?? weekStart
+                weeklyPendingPage = 0
+                Task { await loadWeekly() }
+            } label: {
+                Image(systemName: "chevron.right").frame(width: 34, height: 34)
+            }
+            .buttonStyle(.glass)
+
+            Text(Self.weekRangeLabel(start: weekStart))
+                .font(.subheadline.bold())
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+        }
+    }
+
+    private var weeklyMetrics: some View {
+        HStack(spacing: AppSpacing.sm) {
+            weeklyMetric(value: weeklyPlannedCount, title: "Planificados", color: .blue)
+            weeklyMetric(value: weeklyProposals.count, title: "Con fecha", color: BrandColor.green)
+            weeklyMetric(value: availableWeeklyItems.count, title: "Pendientes", color: BrandColor.amber)
+            weeklyMetric(value: weeklyConflictCount, title: "Conflictos", color: BrandColor.red)
+        }
+    }
+
+    private func weeklyMetric(value: Int, title: String, color: Color) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(String(value)).font(.headline)
+                Text(title).font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .frame(minWidth: 90, minHeight: 44, alignment: .leading)
+        .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private var confirmWeekButton: some View {
+        let canConfirm = canEdit
+            && weekDetail?.session.status == "DRAFT"
+            && !weeklyProposals.isEmpty
+        return Button {
+            isConfirmingWeek = true
+        } label: {
+            Label("Confirmar semana", systemImage: "arrow.right")
+                .font(.subheadline.bold())
+                .frame(minHeight: 36)
+        }
+        .buttonStyle(.glassProminent)
+        .disabled(!canConfirm)
+        .opacity(canConfirm ? 1 : 0.55)
+    }
+
+    private var weeklyOptionsMenu: some View {
+        Menu {
+            Button {
+                showsHistory = true
+                Task { await loadHistory() }
+            } label: {
+                Label("Ver historial", systemImage: "clock.arrow.circlepath")
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .frame(width: 36, height: 36)
+        }
+        .buttonStyle(.glass)
+        .accessibilityLabel("Más opciones de programación semanal")
+    }
+
+    private var weeklyScheduleBoard: some View {
+        GlassPanel {
+            ScrollView([.horizontal, .vertical], showsIndicators: true) {
+                HStack(alignment: .top, spacing: 0) {
+                    weeklyTimeAxis
+                    ForEach(weekDates, id: \.self) { day in
+                        weeklyGridDayColumn(day)
+                    }
+                }
+            }
+            .frame(maxHeight: .infinity)
+        }
+    }
+
+    private var weeklyTimeAxis: some View {
+        VStack(spacing: 0) {
+            Text("Hora")
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+                .frame(height: weeklyHeaderHeight)
+            ForEach(0..<24, id: \.self) { hour in
+                Text(String(format: "%02d:00", hour))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 48, height: weeklyHourHeight, alignment: .top)
+                    .overlay(alignment: .top) { Divider() }
+            }
+        }
+    }
+
+    private func weeklyGridDayColumn(_ day: Date) -> some View {
+        let proposals = weeklyProposals.filter {
+            calendar.isDate($0.proposedStartAt, inSameDayAs: day)
+        }
+        let isToday = calendar.isDateInToday(day)
+        return VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                Text(Self.weekdayFormatter.string(from: day).capitalized)
+                Text(day, format: .dateTime.day())
+            }
+            .font(.caption2.bold())
+            .foregroundStyle(isToday ? BrandColor.red : .secondary)
+            .frame(width: weeklyDayWidth, height: weeklyHeaderHeight)
+            .background(isToday ? BrandColor.red.opacity(0.08) : Color.clear)
+
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    ForEach(0..<24, id: \.self) { _ in
+                        Rectangle()
+                            .fill(isToday ? BrandColor.red.opacity(0.025) : Color.clear)
+                            .frame(width: weeklyDayWidth, height: weeklyHourHeight)
+                            .overlay(alignment: .top) { Divider() }
+                    }
+                }
+                ForEach(proposals) { proposal in
+                    let geometry = proposalGeometry(proposal)
+                    weeklyProposalBlock(proposal)
+                        .frame(width: weeklyDayWidth - 10, height: geometry.height)
+                        .offset(x: 5, y: geometry.offset)
+                }
+            }
+            .frame(
+                width: weeklyDayWidth,
+                height: weeklyHourHeight * CGFloat(weeklyVisibleHours),
+                alignment: .topLeading
+            )
+        }
+        .overlay(alignment: .leading) { Divider() }
+    }
+
+    private func weeklyProposalBlock(_ proposal: PCONProposal) -> some View {
+        let color = proposal.status == "CONFIRMED" ? BrandColor.green : Color.blue
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(proposal.activityTitle)
+                .lineLimit(2)
+                .font(.caption2.bold())
+            Text(Self.proposalTimeRange(proposal))
+                .font(.system(size: 9, weight: .semibold))
+        }
+        .foregroundStyle(color)
+        .padding(5)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(color.opacity(0.11), in: RoundedRectangle(cornerRadius: 5))
+        .overlay(alignment: .leading) { Rectangle().fill(color).frame(width: 3) }
+        .clipped()
+        .contextMenu {
+            if canEdit, weekDetail?.session.status == "DRAFT" {
+                Button(role: .destructive) {
+                    Task { await deleteProposal(proposal) }
+                } label: {
+                    Label("Quitar de la semana", systemImage: "trash")
+                }
+            }
+        }
+    }
+
+    private var weeklyPendingPanel: some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                HStack {
+                    SectionHeaderText(
+                        title: "Pendientes del mes",
+                        subtitle: "Asigna una fecha para incorporarlos a una semana"
+                    )
+                    Spacer()
+                    Text(String(availableWeeklyItems.count))
+                        .font(.caption.bold())
+                        .foregroundStyle(BrandColor.red)
+                        .padding(7)
+                        .background(BrandColor.red.opacity(0.10), in: Circle())
+                }
+                if availableWeeklyItems.isEmpty {
+                    ContentUnavailableView(
+                        "Sin pendientes",
+                        systemImage: "calendar.badge.checkmark",
+                        description: Text("Todas las ocurrencias del periodo tienen fecha.")
+                    )
+                    .frame(minHeight: 220)
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: AppSpacing.sm) {
+                            ForEach(weeklyPendingPageItems) { item in
+                                Button {
+                                    schedulingItem = item
+                                } label: {
+                                    HStack(spacing: AppSpacing.sm) {
+                                        Circle().fill(BrandColor.amber).frame(width: 7, height: 7)
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.maintenanceName).font(.caption.bold()).lineLimit(2)
+                                            Text("\(item.equipmentName) · \(item.subsystemCode)")
+                                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                            Text(item.locationName.activityLocationSummary)
+                                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                        Spacer()
+                                        Image(systemName: "chevron.right")
+                                            .font(.caption.bold()).foregroundStyle(.tertiary)
+                                    }
+                                    .padding(AppSpacing.sm)
+                                    .background(
+                                        Color.primary.opacity(0.035),
+                                        in: RoundedRectangle(cornerRadius: 7)
+                                    )
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: .infinity)
+
+                    HStack {
+                        Button {
+                            weeklyPendingPage = max(weeklyPendingSafePage - 1, 0)
+                        } label: {
+                            Image(systemName: "chevron.left")
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(weeklyPendingSafePage == 0)
+
+                        Spacer()
+                        Text("Página \(weeklyPendingSafePage + 1) de \(weeklyPendingPageCount)")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+
+                        Button {
+                            weeklyPendingPage = min(
+                                weeklyPendingSafePage + 1,
+                                weeklyPendingPageCount - 1
+                            )
+                        } label: {
+                            Image(systemName: "chevron.right")
+                                .frame(width: 32, height: 32)
+                        }
+                        .buttonStyle(.glass)
+                        .disabled(weeklyPendingSafePage >= weeklyPendingPageCount - 1)
+                    }
+
+                    Menu {
+                        ForEach(weeklyPendingPageItems) { item in
+                            Button {
+                                schedulingItem = item
+                            } label: {
+                                Label(item.maintenanceName, systemImage: "calendar.badge.plus")
+                            }
+                        }
+                    } label: {
+                        Label("Asignar al calendario", systemImage: "calendar.badge.plus")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity, minHeight: 38)
+                    }
+                    .buttonStyle(.glassProminent)
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
     }
 
     private var weekPicker: some View {
@@ -1345,11 +2182,195 @@ struct PCONPlanningView: View {
         }
     }
 
-    private var availableWeeklyItems: [PCONPlanItem] {
-        weeklyItems.filter {
-            $0.activityStatus == "SCHEDULED"
-                && $0.planningState != .executed
+    private var filteredWeeklyItems: [PCONPlanItem] {
+        weeklyItems.filter { item in
+            let normalizedQuery = weeklyQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            let searchableText = [
+                item.maintenanceName,
+                item.equipmentName,
+                item.subsystemCode,
+                item.locationName
+            ]
+            .joined(separator: " ")
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            return (normalizedQuery.isEmpty || searchableText.contains(normalizedQuery))
+                && (weeklySelectedSubsystem == "Todos" || item.subsystemCode == weeklySelectedSubsystem)
+                && (weeklySelectedCategory == "Todas" || item.equipmentCategory == weeklySelectedCategory)
+                && (weeklySelectedLocation == "Todas"
+                    || item.locationName.activityLocationSummary == weeklySelectedLocation)
         }
+    }
+
+    private var availableWeeklyItems: [PCONPlanItem] {
+        filteredWeeklyItems.filter {
+            $0.activityStatus == "SCHEDULED"
+                && ($0.planningState == .monthOnly || $0.planningState == .reschedulePending)
+        }
+    }
+
+    private var weeklySubsystems: [String] {
+        ["Todos"] + Array(Set(weeklyItems.map(\.subsystemCode))).sorted()
+    }
+
+    private var weeklyCategories: [String] {
+        ["Todas"] + Array(Set(weeklyItems.map(\.equipmentCategory))).sorted()
+    }
+
+    private var weeklyLocations: [String] {
+        ["Todas"] + Array(Set(weeklyItems.map { $0.locationName.activityLocationSummary })).sorted()
+    }
+
+    private var weeklyFilterSignature: String {
+        [
+            weeklyQuery,
+            weeklySelectedSubsystem,
+            weeklySelectedCategory,
+            weeklySelectedLocation
+        ].joined(separator: "|")
+    }
+
+    private var weeklyPendingPageSize: Int { 4 }
+
+    private var weeklyPendingPageCount: Int {
+        max(1, Int(ceil(Double(availableWeeklyItems.count) / Double(weeklyPendingPageSize))))
+    }
+
+    private var weeklyPendingSafePage: Int {
+        min(weeklyPendingPage, weeklyPendingPageCount - 1)
+    }
+
+    private var weeklyPendingPageItems: [PCONPlanItem] {
+        let start = weeklyPendingSafePage * weeklyPendingPageSize
+        guard start < availableWeeklyItems.count else { return [] }
+        let end = min(start + weeklyPendingPageSize, availableWeeklyItems.count)
+        return Array(availableWeeklyItems[start..<end])
+    }
+
+    private var weeklyProposals: [PCONProposal] {
+        let filteredActivityIDs = Set(filteredWeeklyItems.map(\.activityID))
+        return (weekDetail?.proposals ?? [])
+            .filter { filteredActivityIDs.contains($0.activityID) }
+            .sorted { $0.proposedStartAt < $1.proposedStartAt }
+    }
+
+    private var weeklyPlannedCount: Int {
+        weeklyProposals.count + availableWeeklyItems.count
+    }
+
+    private var weeklyConflictCount: Int {
+        var conflicts = 0
+        for index in weeklyProposals.indices {
+            for otherIndex in weeklyProposals.indices where otherIndex > index {
+                let first = weeklyProposals[index]
+                let second = weeklyProposals[otherIndex]
+                guard calendar.isDate(first.proposedStartAt, inSameDayAs: second.proposedStartAt) else {
+                    continue
+                }
+                if first.proposedStartAt < second.proposedEndAt
+                    && second.proposedStartAt < first.proposedEndAt {
+                    conflicts += 1
+                }
+            }
+        }
+        return conflicts
+    }
+
+    private var weeklyHeaderHeight: CGFloat { 34 }
+    private var weeklyHourHeight: CGFloat { 44 }
+    private var weeklyDayWidth: CGFloat { 108 }
+    private var weeklyVisibleHours: Int { 24 }
+
+    private func proposalGeometry(_ proposal: PCONProposal) -> (offset: CGFloat, height: CGFloat) {
+        let startComponents = calendar.dateComponents([.hour, .minute], from: proposal.proposedStartAt)
+        let startMinute = (startComponents.hour ?? 8) * 60 + (startComponents.minute ?? 0)
+        let durationMinutes = max(
+            Int(proposal.proposedEndAt.timeIntervalSince(proposal.proposedStartAt) / 60),
+            15
+        )
+        let endMinute = startMinute + durationMinutes
+        let visibleStart = 0
+        let visibleEnd = 24 * 60
+        let clampedStart = min(max(startMinute, visibleStart), visibleEnd)
+        let clampedEnd = min(max(endMinute, clampedStart + 15), visibleEnd)
+        let offset = CGFloat(clampedStart - visibleStart) / 60 * weeklyHourHeight
+        let availableHeight = weeklyHourHeight * CGFloat(weeklyVisibleHours) - offset
+        let durationHeight = CGFloat(clampedEnd - clampedStart) / 60 * weeklyHourHeight
+        return (offset, min(max(durationHeight, 28), availableHeight))
+    }
+
+    private var weekDates: [Date] {
+        (0..<7).compactMap { calendar.date(byAdding: .day, value: $0, to: weekStart) }
+    }
+
+    private var monthlyDatedItems: [PCONPlanItem] {
+        monthlyItems.filter { ($0.proposedStartAt ?? $0.scheduledStartAt) != nil }
+    }
+
+    private var monthlyPendingItems: [PCONPlanItem] {
+        monthlyItems.filter {
+            $0.planningState == .monthOnly || $0.planningState == .reschedulePending
+        }
+    }
+
+    private var selectedDayItems: [PCONPlanItem] {
+        items(on: selectedCalendarDay)
+    }
+
+    private var monthCalendarSlots: [PCONCalendarSlot] {
+        var components = DateComponents()
+        components.year = selectedYear
+        components.month = selectedMonth
+        components.day = 1
+        guard let firstDay = calendar.date(from: components),
+              let dayRange = calendar.range(of: .day, in: .month, for: firstDay) else {
+            return []
+        }
+        let weekday = calendar.component(.weekday, from: firstDay)
+        let mondayOffset = (weekday + 5) % 7
+        var slots = (0..<mondayOffset).map {
+            PCONCalendarSlot(id: $0, date: nil, day: nil)
+        }
+        slots += dayRange.map { day in
+            let date = calendar.date(byAdding: .day, value: day - 1, to: firstDay)
+            return PCONCalendarSlot(id: mondayOffset + day - 1, date: date, day: day)
+        }
+        while slots.count % 7 != 0 {
+            slots.append(PCONCalendarSlot(id: slots.count, date: nil, day: nil))
+        }
+        return slots
+    }
+
+    private func items(on date: Date) -> [PCONPlanItem] {
+        monthlyItems
+            .filter { item in
+                guard let itemDate = item.proposedStartAt ?? item.scheduledStartAt else { return false }
+                return calendar.isDate(itemDate, inSameDayAs: date)
+            }
+            .sorted {
+                ($0.proposedStartAt ?? $0.scheduledStartAt ?? .distantFuture)
+                    < ($1.proposedStartAt ?? $1.scheduledStartAt ?? .distantFuture)
+            }
+    }
+
+    private func dominantStateColor(_ items: [PCONPlanItem]) -> Color {
+        if let pending = items.first(where: { $0.planningState == .reschedulePending }) {
+            return pending.planningState.color
+        }
+        return items.first?.planningState.color ?? .secondary
+    }
+
+    private func moveSelectedMonth(by value: Int) {
+        var components = DateComponents()
+        components.year = selectedYear
+        components.month = selectedMonth
+        components.day = 1
+        let current = calendar.date(from: components) ?? selectedCalendarDay
+        let next = calendar.date(byAdding: .month, value: value, to: current) ?? current
+        selectedYear = calendar.component(.year, from: next)
+        selectedMonth = calendar.component(.month, from: next)
+        selectedCalendarDay = next
+        Task { await loadMonthly() }
     }
 
     private var weekDetailSubtitle: String {
@@ -1373,6 +2394,35 @@ struct PCONPlanningView: View {
             keys.formUnion([subsystem, category, location, equipment])
         }
         return Array(keys)
+    }
+
+    private var annualSubsystems: [String] {
+        ["Todos"] + Array(Set(annualPlan?.rows.map(\.subsystemCode) ?? [])).sorted()
+    }
+
+    private var annualCategories: [String] {
+        ["Todas"] + Array(Set(annualPlan?.rows.map(\.equipmentCategory) ?? [])).sorted()
+    }
+
+    private var annualLocations: [String] {
+        ["Todas"] + Array(
+            Set(annualPlan?.rows.map { $0.locationName.activityLocationSummary } ?? [])
+        ).sorted()
+    }
+
+    private var annualEquipment: [String] {
+        ["Todos"] + Array(Set(annualPlan?.rows.map(\.equipmentName) ?? [])).sorted()
+    }
+
+    private var filteredAnnualRows: [PCONAnnualRow] {
+        guard let rows = annualPlan?.rows else { return [] }
+        return rows.filter { row in
+            (selectedSubsystem == "Todos" || row.subsystemCode == selectedSubsystem)
+                && (selectedCategory == "Todas" || row.equipmentCategory == selectedCategory)
+                && (selectedLocation == "Todas"
+                    || row.locationName.activityLocationSummary == selectedLocation)
+                && (selectedEquipment == "Todos" || row.equipmentName == selectedEquipment)
+        }
     }
 
     private func visibleHierarchyRows(_ rows: [PCONAnnualRow]) -> [HierarchyGroup] {
@@ -1488,8 +2538,28 @@ struct PCONPlanningView: View {
         switch section {
         case .annual:
             await loadAnnual()
+        case .monthly:
+            await loadMonthly()
         case .weekly:
             await loadWeekly()
+        }
+    }
+
+    @MainActor
+    private func loadMonthly() async {
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            monthlyItems = try await withService { service, token in
+                try await service.plan(
+                    year: selectedYear,
+                    month: selectedMonth,
+                    query: query,
+                    token: token
+                ).items
+            }
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -1694,11 +2764,23 @@ struct PCONPlanningView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let center = calendar.date(byAdding: .day, value: 3, to: weekStart) ?? weekStart
-            let year = calendar.component(.year, from: center)
-            let month = calendar.component(.month, from: center)
             weeklyItems = try await withService { service, token in
-                try await service.plan(year: year, month: month, query: query, token: token).items
+                var loaded: [UUID: PCONPlanItem] = [:]
+                let periods = Set(weekDates.map {
+                    "\(calendar.component(.year, from: $0))-\(calendar.component(.month, from: $0))"
+                })
+                for period in periods {
+                    let parts = period.split(separator: "-").compactMap { Int($0) }
+                    guard parts.count == 2 else { continue }
+                    let page = try await service.plan(
+                        year: parts[0],
+                        month: parts[1],
+                        query: "",
+                        token: token
+                    )
+                    for item in page.items { loaded[item.id] = item }
+                }
+                return Array(loaded.values)
             }
             do {
                 weekDetail = try await withService { service, token in
@@ -1737,11 +2819,17 @@ struct PCONPlanningView: View {
         reason: String
     ) async -> Bool {
         do {
+            let targetWeek = Self.startOfWeek(start)
+            let targetWeekKey = Self.apiDate(targetWeek)
             let detail = try await withService { service, token in
-                let current = if let weekDetail, weekDetail.session.status == "DRAFT" {
-                    weekDetail
-                } else {
-                    try await service.createWeek(Self.apiDate(weekStart), token: token)
+                let current: PCONWeekDetail
+                do {
+                    let existing = try await service.currentWeek(targetWeekKey, token: token)
+                    current = existing.session.status == "DRAFT"
+                        ? existing
+                        : try await service.createWeek(targetWeekKey, token: token)
+                } catch {
+                    current = try await service.createWeek(targetWeekKey, token: token)
                 }
                 return try await service.saveProposal(
                     sessionID: current.session.id,
@@ -1752,8 +2840,10 @@ struct PCONPlanningView: View {
                     token: token
                 )
             }
-            weekDetail = detail
-            await loadWeekly()
+            if section == .weekly, calendar.isDate(targetWeek, inSameDayAs: weekStart) {
+                weekDetail = detail
+            }
+            await loadCurrentSection()
             return true
         } catch {
             errorMessage = error.localizedDescription
@@ -1772,6 +2862,31 @@ struct PCONPlanningView: View {
                 )
             }
             await loadWeekly()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
+    private func clearTentativeDate(_ item: PCONPlanItem) async {
+        guard let proposedDate = item.proposedStartAt else { return }
+        do {
+            try await withService { service, token in
+                let detail = try await service.currentWeek(
+                    Self.apiDate(Self.startOfWeek(proposedDate)),
+                    token: token
+                )
+                guard detail.session.status == "DRAFT",
+                      detail.proposals.contains(where: { $0.activityID == item.activityID }) else {
+                    throw PCONPlanningError.proposalNotEditable
+                }
+                try await service.deleteProposal(
+                    sessionID: detail.session.id,
+                    activityID: item.activityID,
+                    token: token
+                )
+            }
+            await loadCurrentSection()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1832,12 +2947,55 @@ struct PCONPlanningView: View {
         return formatter
     }()
 
+    private static let fullDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_PE")
+        formatter.dateFormat = "d 'de' MMMM 'de' yyyy"
+        return formatter
+    }()
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_PE")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    private static func timeRange(_ item: PCONPlanItem, start: Date) -> String {
+        let end = item.proposedEndAt ?? item.scheduledEndAt
+        guard let end else { return timeFormatter.string(from: start) }
+        return "\(timeFormatter.string(from: start)) - \(timeFormatter.string(from: end))"
+    }
+
     private static let weekFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "es_PE")
         formatter.dateFormat = "d 'de' MMMM 'de' yyyy"
         return formatter
     }()
+
+    private static func weekRangeLabel(start: Date) -> String {
+        let calendar = Calendar(identifier: .iso8601)
+        let end = calendar.date(byAdding: .day, value: 6, to: start) ?? start
+        let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "es_PE")
+        dayFormatter.dateFormat = "d"
+        let monthYearFormatter = DateFormatter()
+        monthYearFormatter.locale = Locale(identifier: "es_PE")
+        monthYearFormatter.dateFormat = "MMMM 'de' yyyy"
+        return "\(dayFormatter.string(from: start)) - \(dayFormatter.string(from: end)) de \(monthYearFormatter.string(from: end))"
+    }
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "es_PE")
+        formatter.dateFormat = "EEE"
+        return formatter
+    }()
+
+    private static func proposalTimeRange(_ proposal: PCONProposal) -> String {
+        "\(timeFormatter.string(from: proposal.proposedStartAt)) - \(timeFormatter.string(from: proposal.proposedEndAt))"
+    }
 }
 
 private struct AnnualCountSheet: View {
@@ -2004,7 +3162,7 @@ private struct AnnualCountSheet: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text("Ejecución \(index + 1)")
                     .font(.headline)
-                if let date = item.scheduledStartAt {
+                if let date = item.proposedStartAt ?? item.scheduledStartAt {
                     Text(PCONPlanningView.dateTimeFormatter.string(from: date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -2501,6 +3659,7 @@ private struct ScheduleProposalSheet: View {
 
     @State private var start: Date
     @State private var end: Date
+    @State private var includesTime: Bool
     @State private var reason = ""
     @State private var isSaving = false
 
@@ -2535,6 +3694,7 @@ private struct ScheduleProposalSheet: View {
                 ?? calendar.date(byAdding: .minute, value: duration, to: defaultStart)
                 ?? defaultStart
         )
+        _includesTime = State(initialValue: existingStart != nil)
     }
 
     var body: some View {
@@ -2548,19 +3708,30 @@ private struct ScheduleProposalSheet: View {
                         value: item.locationName.activityLocationSummary
                     )
                 }
-                Section("Fecha y rango horario") {
+                Section("Fecha tentativa") {
                     DatePicker(
-                        "Inicio",
+                        "Día",
                         selection: $start,
                         in: weekStart...weekEnd,
-                        displayedComponents: [.date, .hourAndMinute]
+                        displayedComponents: [.date]
                     )
-                    DatePicker(
-                        "Fin",
-                        selection: $end,
-                        in: start...weekEnd,
-                        displayedComponents: [.date, .hourAndMinute]
-                    )
+                    Toggle("Agregar rango horario", isOn: $includesTime)
+                    if includesTime {
+                        DatePicker(
+                            "Hora inicial",
+                            selection: $start,
+                            displayedComponents: [.hourAndMinute]
+                        )
+                        DatePicker(
+                            "Hora final",
+                            selection: $end,
+                            displayedComponents: [.hourAndMinute]
+                        )
+                    } else {
+                        Text("La actividad quedará disponible durante la jornada y podrá acomodarse en la programación semanal.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 if item.scheduledStartAt != nil {
                     Section("Motivo de reprogramación") {
@@ -2579,7 +3750,7 @@ private struct ScheduleProposalSheet: View {
                     Button {
                         Task {
                             isSaving = true
-                            if await onSave(start, end, reason) {
+                            if await onSave(effectiveStart, effectiveEnd, reason) {
                                 dismiss()
                             }
                             isSaving = false
@@ -2593,7 +3764,7 @@ private struct ScheduleProposalSheet: View {
                     }
                     .disabled(
                         isSaving
-                            || end <= start
+                            || effectiveEnd <= effectiveStart
                             || (item.scheduledStartAt != nil
                                 && reason.trimmingCharacters(
                                     in: .whitespacesAndNewlines
@@ -2610,6 +3781,26 @@ private struct ScheduleProposalSheet: View {
             byAdding: DateComponents(day: 6, hour: 23, minute: 59),
             to: weekStart
         ) ?? weekStart
+    }
+
+    private var effectiveStart: Date {
+        guard !includesTime else { return start }
+        return Calendar(identifier: .iso8601).date(
+            bySettingHour: 8,
+            minute: 0,
+            second: 0,
+            of: start
+        ) ?? start
+    }
+
+    private var effectiveEnd: Date {
+        guard !includesTime else { return end }
+        return Calendar(identifier: .iso8601).date(
+            bySettingHour: 17,
+            minute: 0,
+            second: 0,
+            of: start
+        ) ?? start.addingTimeInterval(9 * 3600)
     }
 }
 

@@ -36,15 +36,22 @@ def test_pcon_requires_authentication() -> None:
 
 
 def test_pcon_seed_backend_reports_that_postgres_is_required() -> None:
-    response = client.get(
+    engineer = client.get(
         "/api/v1/pcon/plan",
         params={"year": 2026, "month": 7},
         headers=authorization_headers(),
     )
+    assert engineer.status_code == 403
+
+    response = client.get(
+        "/api/v1/pcon/plan",
+        params={"year": 2026, "month": 7},
+        headers=authorization_headers(email="admin@maintenance.local"),
+    )
     assert response.status_code == 503
 
 
-def test_only_coordinator_or_administrator_can_edit_pcon() -> None:
+def test_only_administrator_can_edit_pcon() -> None:
     engineer = client.put(
         "/api/v1/pcon/plan/month",
         json={
@@ -65,7 +72,18 @@ def test_only_coordinator_or_administrator_can_edit_pcon() -> None:
         },
         headers=authorization_headers(email="fredy@maintenance.local"),
     )
-    assert coordinator.status_code == 503
+    assert coordinator.status_code == 403
+
+    administrator = client.put(
+        "/api/v1/pcon/plan/month",
+        json={
+            "plan_entry_ids": ["00000000-0000-0000-0000-000000000001"],
+            "year": 2026,
+            "month": 8,
+        },
+        headers=authorization_headers(email="admin@maintenance.local"),
+    )
+    assert administrator.status_code == 503
 
 
 def test_login_accepts_seed_user_password() -> None:
@@ -184,9 +202,15 @@ def test_stock_contract_requires_authentication() -> None:
     unauthorized = client.get("/api/v1/assets/stock")
     assert unauthorized.status_code == 401
 
-    response = client.get(
+    engineer = client.get(
         "/api/v1/assets/stock",
         headers=authorization_headers(),
+    )
+    assert engineer.status_code == 403
+
+    response = client.get(
+        "/api/v1/assets/stock",
+        headers=authorization_headers(email="admin@maintenance.local"),
     )
     assert response.status_code == 200
     assert response.json() == {

@@ -121,6 +121,7 @@ class OperationalChecklistRevisionRecord(OperationalRecordMixin, Base):
     revision_number: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="ACTIVE")
     notes: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[str | None] = mapped_column(String(80), ForeignKey("users.id"))
 
 
 class OperationalChecklistItemRecord(OperationalRecordMixin, Base):

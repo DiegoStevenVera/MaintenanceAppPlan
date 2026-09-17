@@ -51,6 +51,12 @@ struct MainTabView: View {
                 .tabItem {
                     Label("Stock", systemImage: "shippingbox.fill")
                 }
+                NavigationStack {
+                    ToolAdministrationView()
+                }
+                .tabItem {
+                    Label("Herramientas", systemImage: "wrench.and.screwdriver.fill")
+                }
             }
 
             NavigationStack {

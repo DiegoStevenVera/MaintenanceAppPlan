@@ -10,6 +10,7 @@ from modules.asset_management.interfaces.router import router as asset_router
 from modules.identity_access.interfaces.router import router as identity_router
 from modules.maintenance_execution.interfaces.router import router as maintenance_router
 from modules.maintenance_execution.interfaces.planning_router import router as planning_router
+from modules.maintenance_execution.interfaces.tool_admin_router import router as tool_admin_router
 
 
 def create_app() -> FastAPI:
@@ -46,6 +47,7 @@ def create_app() -> FastAPI:
     app.include_router(asset_router, prefix=settings.api_v1_prefix)
     app.include_router(maintenance_router, prefix=settings.api_v1_prefix)
     app.include_router(planning_router, prefix=settings.api_v1_prefix)
+    app.include_router(tool_admin_router, prefix=settings.api_v1_prefix)
     return app
 
 
