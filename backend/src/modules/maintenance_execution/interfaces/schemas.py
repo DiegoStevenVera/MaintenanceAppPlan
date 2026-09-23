@@ -633,6 +633,7 @@ class PreventiveGuideDTO(BaseModel):
         default_factory=list
     )
     previous_reports: list[PreventiveHistoryReportDTO] = Field(default_factory=list)
+    previous_reports_total: int = Field(default=0, ge=0)
     previous_reports_has_more: bool = False
     previous_reports_offset: int = Field(default=0, ge=0)
 

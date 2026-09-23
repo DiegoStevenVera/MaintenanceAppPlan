@@ -1943,33 +1943,11 @@ struct PCONPlanningView: View {
                     }
                     .frame(maxHeight: .infinity)
 
-                    HStack {
-                        Button {
-                            weeklyPendingPage = max(weeklyPendingSafePage - 1, 0)
-                        } label: {
-                            Image(systemName: "chevron.left")
-                                .frame(width: 32, height: 32)
-                        }
-                        .buttonStyle(.glass)
-                        .disabled(weeklyPendingSafePage == 0)
-
-                        Spacer()
-                        Text("Página \(weeklyPendingSafePage + 1) de \(weeklyPendingPageCount)")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Spacer()
-
-                        Button {
-                            weeklyPendingPage = min(
-                                weeklyPendingSafePage + 1,
-                                weeklyPendingPageCount - 1
-                            )
-                        } label: {
-                            Image(systemName: "chevron.right")
-                                .frame(width: 32, height: 32)
-                        }
-                        .buttonStyle(.glass)
-                        .disabled(weeklyPendingSafePage >= weeklyPendingPageCount - 1)
+                    PaginationBar(
+                        currentPage: weeklyPendingSafePage,
+                        pageCount: weeklyPendingPageCount
+                    ) { selectedPage in
+                        weeklyPendingPage = selectedPage
                     }
 
                     Menu {

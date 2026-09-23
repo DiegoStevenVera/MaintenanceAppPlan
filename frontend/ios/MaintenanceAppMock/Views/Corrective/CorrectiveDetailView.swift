@@ -1,5 +1,44 @@
 import SwiftUI
 
+private enum CorrectiveDetailSection: Int, Identifiable {
+    case event
+    case failure
+    case analysis
+    case activities
+    case validation
+    case conclusions
+    case comments
+    case versions
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .event: "Datos del evento"
+        case .failure: "Descripción de falla"
+        case .analysis: "Análisis de falla"
+        case .activities: "Actividades realizadas"
+        case .validation: "Pruebas y validación"
+        case .conclusions: "Conclusiones y comentarios"
+        case .comments: "Comentarios internos"
+        case .versions: "Versiones del reporte"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .event: "doc.text.fill"
+        case .failure: "exclamationmark.bubble.fill"
+        case .analysis: "waveform.path.ecg"
+        case .activities: "wrench.and.screwdriver.fill"
+        case .validation: "checkmark.seal.fill"
+        case .conclusions: "text.bubble.fill"
+        case .comments: "bubble.left.and.bubble.right.fill"
+        case .versions: "doc.text.magnifyingglass"
+        }
+    }
+}
+
 struct CorrectiveDetailView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
@@ -10,6 +49,7 @@ struct CorrectiveDetailView: View {
     @State private var commentText = ""
     @State private var isSendingComment = false
     @State private var commentError: String?
+    @State private var selectedSection = CorrectiveDetailSection.event
 
     private var downloadedDetail: APIActivityDetail? {
         offlineStore.workPackage(for: eventID)?.activityDetail
@@ -26,19 +66,23 @@ struct CorrectiveDetailView: View {
         Group {
             if let detail = displayedDetail {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                        header(detail)
-                        lifecycleActions(detail)
-                        reportActions(detail)
+                    LazyVStack(
+                        alignment: .leading,
+                        spacing: AppSpacing.md,
+                        pinnedViews: [.sectionHeaders]
+                    ) {
+                        detailHeader(detail)
                         offlineReportState
-                        statusPanel(detail)
-                        eventData(detail)
-                        correctiveReport(detail)
-                        commentsPanel
-                        reportVersions(detail)
+                        Section {
+                            selectedSectionContent(detail)
+                        } header: {
+                            sectionSelector(detail)
+                                .padding(.vertical, 4)
+                                .background(.ultraThinMaterial)
+                        }
                     }
                     .padding(AppSpacing.lg)
-                    .frame(maxWidth: 900, alignment: .leading)
+                    .frame(maxWidth: 1_420, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
                 .refreshable {
@@ -64,7 +108,7 @@ struct CorrectiveDetailView: View {
             }
         }
         .background(MaintenanceScreenBackground())
-        .navigationTitle("Detalle correctivo")
+        .navigationTitle("")
         .task {
             if let downloadedDetail {
                 activityStore.cacheDetail(downloadedDetail)
@@ -91,6 +135,164 @@ struct CorrectiveDetailView: View {
                     await offlineStore.reconcileWorkPackage(with: detail)
                 }
             }
+        }
+        .onChange(of: displayedDetail?.reports.map(\.documentStatus)) { _, _ in
+            guard let detail = displayedDetail,
+                  availableSections(for: detail).contains(selectedSection) else {
+                selectedSection = .event
+                return
+            }
+        }
+    }
+
+    private func availableSections(for detail: APIActivityDetail) -> [CorrectiveDetailSection] {
+        var sections: [CorrectiveDetailSection] = [.event]
+        if hasFinalizedReport(detail) {
+            sections += [.failure, .analysis, .activities, .validation, .conclusions]
+        }
+        sections += [.comments, .versions]
+        return sections
+    }
+
+    private func hasFinalizedReport(_ detail: APIActivityDetail) -> Bool {
+        detail.correctiveReport != nil
+            && detail.reports.contains { $0.documentStatus == "FINALIZED" }
+    }
+
+    private func detailHeader(_ detail: APIActivityDetail) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: AppSpacing.xl) {
+                maintenanceIdentity(detail)
+                    .layoutPriority(1)
+                Spacer(minLength: AppSpacing.lg)
+                detailActions(detail)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                maintenanceIdentity(detail)
+                detailActions(detail)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func maintenanceIdentity(_ detail: APIActivityDetail) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text(detail.title)
+                .font(.system(.title, design: .rounded).weight(.black))
+                .lineLimit(2)
+            HStack(spacing: AppSpacing.sm) {
+                APIStatusBadge(status: detail.status)
+                Text(detail.subsystem)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+                if let severity = detail.severity {
+                    Text("Severidad: \(severity)")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(severity == "HIGH" ? BrandColor.red : BrandColor.amber)
+                }
+            }
+        }
+    }
+
+    private func detailActions(_ detail: APIActivityDetail) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            reportActions(detail, isCompact: true)
+            lifecycleActions(detail, presentation: .compact)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private func sectionSelector(_ detail: APIActivityDetail) -> some View {
+        let sections = availableSections(for: detail)
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
+                    Button {
+                        withAnimation(.snappy) { selectedSection = section }
+                    } label: {
+                        HStack(spacing: AppSpacing.sm) {
+                            Image(systemName: section.systemImage)
+                            Text(section.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(selectedSection == section ? BrandColor.red : .primary)
+                        .frame(minWidth: 185, minHeight: 48)
+                        .padding(.horizontal, AppSpacing.sm)
+                        .background(
+                            selectedSection == section ? BrandColor.red.opacity(0.08) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .overlay {
+                            if selectedSection == section {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(BrandColor.red.opacity(0.45), lineWidth: 1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Sección \(index + 1), \(section.title)")
+
+                    if section != sections.last { Divider().frame(height: 26) }
+                }
+            }
+            .padding(4)
+        }
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(BrandColor.glassStroke, lineWidth: 1)
+        }
+        .sensoryFeedback(.selection, trigger: selectedSection)
+    }
+
+    @ViewBuilder
+    private func selectedSectionContent(_ detail: APIActivityDetail) -> some View {
+        switch selectedSection {
+        case .event:
+            eventSection(detail)
+        case .failure:
+            if let report = detail.correctiveReport { failurePanel(report) }
+        case .analysis:
+            if let report = detail.correctiveReport { analysisPanel(report) }
+        case .activities:
+            if let report = detail.correctiveReport { activitiesPanel(report) }
+        case .validation:
+            if let report = detail.correctiveReport { validationPanel(report) }
+        case .conclusions:
+            if let report = detail.correctiveReport { conclusionsPanel(report) }
+        case .comments:
+            commentsPanel
+        case .versions:
+            reportVersions(detail)
+        }
+    }
+
+    private func eventSection(_ detail: APIActivityDetail) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: AppSpacing.md) {
+                eventData(detail)
+                    .frame(minWidth: 680, maxWidth: .infinity, alignment: .topLeading)
+                    .layoutPriority(3)
+                VStack(spacing: AppSpacing.md) {
+                    maintenanceStatusTimeline(detail)
+                    statusPanel(detail)
+                }
+                .frame(minWidth: 380, maxWidth: 520, alignment: .top)
+                .layoutPriority(2)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                eventData(detail)
+                maintenanceStatusTimeline(detail)
+                statusPanel(detail)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
     }
 
@@ -162,48 +364,92 @@ struct CorrectiveDetailView: View {
     }
 
     @ViewBuilder
-    private func reportActions(_ detail: APIActivityDetail) -> some View {
+    private func reportActions(
+        _ detail: APIActivityDetail,
+        isCompact: Bool = false
+    ) -> some View {
         let latestReport = detail.reports.first
 
         if detail.status == "IN_PROGRESS", session.currentUser?.role != .boss {
-            GlassPanel {
-                ActionButtonGrid {
-                    NavigationLink {
-                        CorrectiveReportFormView(eventID: eventID)
-                    } label: {
-                        Label(
-                            offlineStore.draft(for: eventID) != nil
-                                ? "Seguir editando"
-                                : (detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte"),
-                            systemImage: "wrench.and.screwdriver.fill"
-                        )
-                    }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
-
-                    if let latestReport,
-                       latestReport.documentStatus == "FINALIZED" {
-                        NavigationLink {
-                            PDFPreviewView(versionID: latestReport.id)
-                        } label: {
-                            Label("Generar PDF", systemImage: "doc.badge.plus")
-                        }
-                        .buttonStyle(ActionTileButtonStyle())
-                    }
+            if isCompact {
+                compactReportActions(detail, latestReport: latestReport)
+            } else {
+                GlassPanel {
+                    standardReportActions(detail, latestReport: latestReport)
                 }
             }
         } else if let latestReport,
                   latestReport.documentStatus == "FINALIZED" {
-            GlassPanel {
-                ActionButtonGrid {
-                    NavigationLink {
-                        PDFPreviewView(versionID: latestReport.id)
-                    } label: {
-                        Label("Generar PDF", systemImage: "doc.badge.plus")
-                    }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+            if isCompact {
+                compactFinalizedReportButton(latestReport)
+            } else {
+                GlassPanel {
+                    finalizedReportButton(latestReport, prominent: true)
                 }
             }
         }
+    }
+
+    private func compactReportActions(
+        _ detail: APIActivityDetail,
+        latestReport: APIReportVersion?
+    ) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            NavigationLink {
+                CorrectiveReportFormView(eventID: eventID)
+            } label: {
+                Label(reportActionTitle(detail), systemImage: "wrench.and.screwdriver.fill")
+            }
+            .buttonStyle(CompactActionButtonStyle(prominent: true))
+
+            if let latestReport, latestReport.documentStatus == "FINALIZED" {
+                compactFinalizedReportButton(latestReport)
+            }
+        }
+    }
+
+    private func standardReportActions(
+        _ detail: APIActivityDetail,
+        latestReport: APIReportVersion?
+    ) -> some View {
+        ActionButtonGrid {
+            NavigationLink {
+                CorrectiveReportFormView(eventID: eventID)
+            } label: {
+                Label(reportActionTitle(detail), systemImage: "wrench.and.screwdriver.fill")
+            }
+            .buttonStyle(ActionTileButtonStyle(prominent: true))
+
+            if let latestReport, latestReport.documentStatus == "FINALIZED" {
+                finalizedReportButton(latestReport)
+            }
+        }
+    }
+
+    private func reportActionTitle(_ detail: APIActivityDetail) -> String {
+        if offlineStore.draft(for: eventID) != nil { return "Seguir editando" }
+        return detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte"
+    }
+
+    private func finalizedReportButton(
+        _ report: APIReportVersion,
+        prominent: Bool = false
+    ) -> some View {
+        NavigationLink {
+            PDFPreviewView(versionID: report.id)
+        } label: {
+            Label("Generar PDF", systemImage: "doc.badge.plus")
+        }
+        .buttonStyle(ActionTileButtonStyle(prominent: prominent))
+    }
+
+    private func compactFinalizedReportButton(_ report: APIReportVersion) -> some View {
+        NavigationLink {
+            PDFPreviewView(versionID: report.id)
+        } label: {
+            Label("Generar PDF", systemImage: "doc.badge.plus")
+        }
+        .buttonStyle(CompactActionButtonStyle())
     }
 
     @ViewBuilder
@@ -266,7 +512,10 @@ struct CorrectiveDetailView: View {
     }
 
     @ViewBuilder
-    private func lifecycleActions(_ detail: APIActivityDetail) -> some View {
+    private func lifecycleActions(
+        _ detail: APIActivityDetail,
+        presentation: MaintenanceLifecycleActionPanel.Presentation = .panel
+    ) -> some View {
         if let role = session.currentUser?.role,
            MaintenanceLifecycleActionPanel.hasActions(
                status: detail.status,
@@ -297,8 +546,74 @@ struct CorrectiveDetailView: View {
                             activityStore.applyOfflineLifecycle(id: eventID, command: command)
                         }
                     }
-                }
+                },
+                presentation: presentation
             )
+        }
+    }
+
+    private func maintenanceStatusTimeline(_ detail: APIActivityDetail) -> some View {
+        let stages = [
+            (status: "SCHEDULED", title: "Programado"),
+            (status: "IN_PROGRESS", title: "En progreso"),
+            (status: "COMPLETED", title: "Completado"),
+            (status: "CLOSED", title: "Cerrado")
+        ]
+        let currentIndex = stages.firstIndex { $0.status == detail.status } ?? 0
+
+        return GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                HStack(spacing: AppSpacing.md) {
+                    Image(systemName: "clock.badge.checkmark")
+                        .font(.title2)
+                        .foregroundStyle(BrandColor.red)
+                        .frame(width: 46, height: 46)
+                        .background(BrandColor.red.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Estado del correctivo").font(.headline)
+                        APIStatusBadge(status: detail.status)
+                    }
+                    Spacer()
+                    Text("\(currentIndex + 1) de \(stages.count)")
+                        .font(.caption.monospacedDigit().weight(.semibold))
+                        .foregroundStyle(.secondary)
+                }
+
+                ZStack(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.22))
+                        .frame(height: 2)
+                        .padding(.horizontal, 48)
+                        .padding(.top, 14)
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(stages.enumerated()), id: \.offset) { index, stage in
+                            let isCurrent = index == currentIndex
+                            let isReached = index <= currentIndex
+                            VStack(spacing: AppSpacing.xs) {
+                                Image(systemName: isReached ? "checkmark" : "circle.fill")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(isReached ? Color.white : Color.secondary.opacity(0.55))
+                                    .frame(width: 30, height: 30)
+                                    .background(
+                                        isCurrent ? BrandColor.red : (isReached ? BrandColor.green : Color.secondary.opacity(0.14)),
+                                        in: Circle()
+                                    )
+                                    .overlay {
+                                        if isCurrent {
+                                            Circle().stroke(BrandColor.red.opacity(0.22), lineWidth: 6)
+                                        }
+                                    }
+                                Text(stage.title)
+                                    .font(.caption.weight(isCurrent ? .bold : .medium))
+                                    .foregroundStyle(isCurrent ? BrandColor.red : .secondary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -306,49 +621,51 @@ struct CorrectiveDetailView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Datos del evento", subtitle: "Contexto normalizado del aviso")
-                DetailTile(title: "Sede", value: detail.site.orFallback("No registrada"))
-                DetailTile(title: "Proyecto", value: detail.project.orFallback("No registrado"))
-                DetailTile(title: "Etapa", value: detail.stage.orFallback("No registrada"))
-                DetailTile(title: "Sistema", value: detail.system.orFallback("No registrado"))
-                DetailTile(title: "Subsistema", value: detail.subsystem)
-                DetailTile(
-                    title: "Nombre del evento SAP",
-                    value: detail.sapEventName.orFallback("No registrado")
-                )
-                DetailTile(
-                    title: "Notificación SAP",
-                    value: detail.sapNotification.orFallback("No registrada")
-                )
-                if let noticeCreatedAt = detail.noticeCreatedAt {
+                MaintenanceFieldGrid {
+                    DetailTile(title: "Sede", value: detail.site.orFallback("No registrada"))
+                    DetailTile(title: "Proyecto", value: detail.project.orFallback("No registrado"))
+                    DetailTile(title: "Etapa", value: detail.stage.orFallback("No registrada"))
+                    DetailTile(title: "Sistema", value: detail.system.orFallback("No registrado"))
+                    DetailTile(title: "Subsistema", value: detail.subsystem)
                     DetailTile(
-                        title: "Fecha y hora de creación de aviso",
-                        value: Self.dateFormatter.string(from: noticeCreatedAt)
+                        title: "Nombre del evento SAP",
+                        value: detail.sapEventName.orFallback("No registrado")
                     )
-                }
-                if let responseAt = detail.responseAt {
                     DetailTile(
-                        title: "Fecha y hora de respuesta",
-                        value: Self.dateFormatter.string(from: responseAt)
+                        title: "Notificación SAP",
+                        value: detail.sapNotification.orFallback("No registrada")
                     )
-                }
-                DetailTile(
-                    title: "Equipo / asset",
-                    value: detail.affectedAssets.isEmpty
-                        ? detail.assets.map(\.name).joined(separator: ", ").orFallback("No registrado")
-                        : detail.affectedAssets.map(\.path).joined(separator: "\n")
-                )
-                if detail.isCritical {
+                    if let noticeCreatedAt = detail.noticeCreatedAt {
+                        DetailTile(
+                            title: "Fecha y hora de creación de aviso",
+                            value: Self.dateFormatter.string(from: noticeCreatedAt)
+                        )
+                    }
+                    if let responseAt = detail.responseAt {
+                        DetailTile(
+                            title: "Fecha y hora de respuesta",
+                            value: Self.dateFormatter.string(from: responseAt)
+                        )
+                    }
                     DetailTile(
-                        title: "Elemento crítico",
-                        value: "Sí"
+                        title: "Equipo / asset",
+                        value: detail.affectedAssets.isEmpty
+                            ? detail.assets.map(\.name).joined(separator: ", ").orFallback("No registrado")
+                            : detail.affectedAssets.map(\.path).joined(separator: "\n")
                     )
-                }
-                DetailTile(title: "Ubicacion fisica", value: detail.locationPath.orFallback("No registrada"))
-                if let start = detail.actualStartAt {
-                    DetailTile(title: "Inicio real", value: Self.dateFormatter.string(from: start))
-                }
-                if let end = detail.actualEndAt {
-                    DetailTile(title: "Fin real", value: Self.dateFormatter.string(from: end))
+                    if detail.isCritical {
+                        DetailTile(title: "Elemento crítico", value: "Sí")
+                    }
+                    DetailTile(
+                        title: "Ubicación física",
+                        value: detail.locationPath.orFallback("No registrada")
+                    )
+                    if let start = detail.actualStartAt {
+                        DetailTile(title: "Inicio real", value: Self.dateFormatter.string(from: start))
+                    }
+                    if let end = detail.actualEndAt {
+                        DetailTile(title: "Fin real", value: Self.dateFormatter.string(from: end))
+                    }
                 }
             }
         }

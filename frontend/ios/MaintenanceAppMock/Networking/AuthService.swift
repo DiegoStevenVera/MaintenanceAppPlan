@@ -256,6 +256,9 @@ private enum KeychainError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unhandledStatus(let status):
+            if status == errSecMissingEntitlement {
+                return "La aplicación no tiene una firma válida para guardar la sesión en el Keychain. Vuelve a compilarla con la firma habilitada."
+            }
             return "No se pudo acceder al Keychain (\(status))."
         }
     }

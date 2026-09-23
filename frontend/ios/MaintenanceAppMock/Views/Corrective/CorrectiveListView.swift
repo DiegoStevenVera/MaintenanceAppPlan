@@ -98,17 +98,12 @@ struct DatabaseCorrectiveListView: View {
                 }
             }
         }
-        .sheet(isPresented: $isCreatingEvent) {
-            NavigationStack {
-                DatabaseCorrectiveEventCreateView {
-                    isCreatingEvent = false
-                    Task { await load() }
-                }
-                .environmentObject(session)
-                .environmentObject(assetStore)
+        .navigationDestination(isPresented: $isCreatingEvent) {
+            DatabaseCorrectiveEventCreateView {
+                Task { await load() }
             }
-            .presentationDetents([.large])
-            .presentationDragIndicator(.visible)
+            .environmentObject(session)
+            .environmentObject(assetStore)
         }
         .refreshable { await load() }
         .task(id: "\(selectedFilter?.id ?? "all")-\(selectedMonth)-\(selectedYear)-\(searchText)") {
@@ -625,59 +620,39 @@ private struct DatabaseCorrectiveEventCreateView: View {
         selectedTarget != nil && !selectedAssetIDs.isEmpty && context != nil
     }
 
+    private var canReview: Bool {
+        selectedTarget != nil
+            && !selectedAssetIDs.isEmpty
+            && context != nil
+            && !sapEventName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !sapNotification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && (!allowsVariableEventLocation || !selectedLocationLevelTwoID.isEmpty)
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                header
-                creationProgress
-                if creationStep == 0 {
-                    assetSelector
-                    ActionButtonGrid {
-                        Button { creationStep = 1 } label: {
-                            Label("Continuar con datos del evento", systemImage: "arrow.right.circle.fill")
-                        }
-                        .buttonStyle(ActionTileButtonStyle(prominent: true))
-                        .disabled(!canContinue)
+        GeometryReader { geometry in
+            let usesSidebar = geometry.size.width >= 820
+            let sidebarWidth = min(max(geometry.size.width * 0.24, 260), 320)
+            Group {
+                if usesSidebar {
+                    HStack(spacing: 0) {
+                        wizardSidebar
+                            .frame(width: sidebarWidth)
+                        Divider().opacity(0.5)
+                        wizardWorkspace
                     }
                 } else {
-                    contextPanel
-                    sapPanel
-                    ActionButtonGrid {
-                        Button { creationStep = 0 } label: {
-                            Label("Volver al equipo", systemImage: "arrow.left.circle")
-                        }
-                        .buttonStyle(ActionTileButtonStyle())
-                        Button {
-                            Task { await createCorrective() }
-                        } label: {
-                            if isCreating {
-                                ProgressView()
-                            } else {
-                                Label("Crear Correctivo", systemImage: "plus.circle.fill")
-                            }
-                        }
-                        .buttonStyle(ActionTileButtonStyle(prominent: true))
-                        .disabled(!canCreate)
+                    VStack(spacing: 0) {
+                        compactWizardHeader
+                        Divider().opacity(0.5)
+                        wizardWorkspace
                     }
                 }
-
-                if let creationError {
-                    Label(creationError, systemImage: "exclamationmark.triangle")
-                        .font(.subheadline)
-                        .foregroundStyle(BrandColor.red)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-
             }
-            .padding(AppSpacing.lg)
-            .frame(maxWidth: 900, alignment: .leading)
-            .frame(maxWidth: .infinity)
         }
         .background(MaintenanceScreenBackground())
-        .navigationTitle("Nuevo correctivo")
-        .toolbar {
-            Button("Cerrar") { dismiss() }
-        }
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .task(id: selectedSubsystem) {
             await loadTargets()
         }
@@ -724,48 +699,249 @@ private struct DatabaseCorrectiveEventCreateView: View {
         .onChange(of: locationOptions) { _, _ in configureEventLocation() }
     }
 
-    private var header: some View {
-        VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            Text("Correctivo")
-                .font(.caption.weight(.bold))
-                .textCase(.uppercase)
+    private var wizardSidebar: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.lg) {
+            wizardBrand
+            VStack(spacing: AppSpacing.xs) {
+                wizardStepButton(
+                    index: 0,
+                    title: "Equipo afectado",
+                    subtitle: "Selecciona el equipo o activo"
+                )
+                wizardStepButton(
+                    index: 1,
+                    title: "Datos del evento",
+                    subtitle: "Información del aviso"
+                )
+                wizardStepButton(
+                    index: 2,
+                    title: "Confirmación",
+                    subtitle: "Revisa y crea el evento"
+                )
+            }
+            Spacer()
+        }
+        .padding(AppSpacing.lg)
+        .background(BrandColor.red.opacity(0.035))
+    }
+
+    private var compactWizardHeader: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            wizardBrand
+            HStack(spacing: AppSpacing.xs) {
+                compactStepButton(index: 0, title: "Equipo")
+                compactStepButton(index: 1, title: "Evento")
+                compactStepButton(index: 2, title: "Confirmar")
+            }
+        }
+        .padding(AppSpacing.md)
+        .background(BrandColor.red.opacity(0.035))
+    }
+
+    private var wizardBrand: some View {
+        HStack(alignment: .top, spacing: AppSpacing.md) {
+            Image(systemName: "wrench.and.screwdriver.fill")
+                .font(.title2)
                 .foregroundStyle(BrandColor.red)
-            Text("Crear evento correctivo")
-                .font(.system(.largeTitle, design: .rounded).weight(.black))
-            Text("Selecciona el equipo y baja por su arbol hasta el asset afectado.")
-                .font(.headline)
-                .foregroundStyle(.secondary)
+                .frame(width: 52, height: 52)
+                .background(BrandColor.red.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Nuevo correctivo")
+                    .font(.title2.bold())
+                Text("Registra un nuevo evento correctivo")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
-    private var creationProgress: some View {
-        HStack(spacing: AppSpacing.sm) {
-            Label("1. Equipo afectado", systemImage: creationStep == 0 ? "1.circle.fill" : "1.circle")
-                .foregroundStyle(creationStep == 0 ? BrandColor.red : .secondary)
-            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
-            Label("2. Datos del evento", systemImage: creationStep == 1 ? "2.circle.fill" : "2.circle")
-                .foregroundStyle(creationStep == 1 ? BrandColor.red : .secondary)
+    private var wizardWorkspace: some View {
+        VStack(spacing: 0) {
+            wizardPageHeader
+
+            ScrollView {
+                Group {
+                    switch creationStep {
+                    case 0: assetSelector
+                    case 1: eventDataStep
+                    default: confirmationStep
+                    }
+                }
+                .padding(.horizontal, AppSpacing.lg)
+                .padding(.top, AppSpacing.lg)
+                .padding(.bottom, AppSpacing.lg)
+            }
+
+            if let creationError {
+                Label(creationError, systemImage: "exclamationmark.triangle.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(BrandColor.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, AppSpacing.lg)
+                    .padding(.vertical, AppSpacing.sm)
+                    .background(BrandColor.red.opacity(0.08))
+            }
         }
-        .font(.subheadline.weight(.semibold))
-        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var wizardPageHeader: some View {
+        HStack(alignment: .center, spacing: AppSpacing.lg) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Paso \(creationStep + 1) de 3")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(stepTitle)
+                    .font(.largeTitle.bold())
+                Text(stepSubtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: AppSpacing.md)
+            headerAction
+        }
+        .padding(.horizontal, AppSpacing.lg)
+        .padding(.top, AppSpacing.lg)
+        .padding(.bottom, AppSpacing.sm)
+    }
+
+    @ViewBuilder
+    private var headerAction: some View {
+        if creationStep < 2 {
+            Button("Siguiente", systemImage: "chevron.right") {
+                navigate(to: creationStep + 1)
+            }
+            .buttonStyle(CompactActionButtonStyle())
+            .disabled(creationStep == 0 ? !canContinue : !canReview)
+        } else {
+            Button("Crear correctivo", systemImage: "checkmark.circle.fill") {
+                Task { await createCorrective() }
+            }
+            .buttonStyle(CompactActionButtonStyle(prominent: true))
+            .disabled(!canCreate)
+        }
+    }
+
+    private var stepTitle: String {
+        ["Equipo afectado", "Datos del evento", "Confirmación"][creationStep]
+    }
+
+    private var stepSubtitle: String {
+        [
+            "Selecciona el equipo y baja por su árbol hasta el activo afectado.",
+            "Completa la información del aviso y valida su ubicación.",
+            "Revisa los datos antes de crear el evento correctivo."
+        ][creationStep]
+    }
+
+    private func wizardStepButton(
+        index: Int,
+        title: String,
+        subtitle: String
+    ) -> some View {
+        Button { navigate(to: index) } label: {
+            HStack(spacing: AppSpacing.md) {
+                ZStack {
+                    Circle()
+                        .fill(index == creationStep ? BrandColor.red : Color.secondary.opacity(0.18))
+                    Text(String(index + 1))
+                        .font(.headline.monospacedDigit().bold())
+                        .foregroundStyle(index == creationStep ? Color.white : Color.secondary)
+                }
+                .frame(width: 42, height: 42)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(index == creationStep ? BrandColor.red : Color.primary)
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(AppSpacing.sm)
+            .background(
+                index == creationStep ? Color(uiColor: .systemBackground).opacity(0.82) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 12)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canNavigate(to: index))
+        .opacity(canNavigate(to: index) ? 1 : 0.58)
+    }
+
+    private func compactStepButton(index: Int, title: String) -> some View {
+        Button { navigate(to: index) } label: {
+            HStack(spacing: 6) {
+                Text(String(index + 1))
+                    .font(.caption.monospacedDigit().bold())
+                    .frame(width: 24, height: 24)
+                    .foregroundStyle(index == creationStep ? Color.white : Color.secondary)
+                    .background(index == creationStep ? BrandColor.red : Color.secondary.opacity(0.14), in: Circle())
+                Text(title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, AppSpacing.xs)
+            .background(
+                index == creationStep ? BrandColor.red.opacity(0.08) : Color.clear,
+                in: RoundedRectangle(cornerRadius: 10)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!canNavigate(to: index))
+        .opacity(canNavigate(to: index) ? 1 : 0.58)
+    }
+
+    private func canNavigate(to step: Int) -> Bool {
+        switch step {
+        case 0: true
+        case 1: canContinue
+        default: canReview
+        }
+    }
+
+    private func navigate(to step: Int) {
+        guard canNavigate(to: step) else { return }
+        withAnimation(.snappy) { creationStep = min(max(step, 0), 2) }
     }
 
     private var assetSelector: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            ContentGlassPanel {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text("Subsistema")
+                        .font(.caption.bold())
+                        .foregroundStyle(.secondary)
+
+                    Picker("Subsistema", selection: $selectedSubsystem) {
+                        ForEach(subsystemOptions, id: \.self) { subsystem in
+                            Text(subsystem).tag(subsystem)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                }
+            }
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 320), spacing: AppSpacing.md)],
+                alignment: .leading,
+                spacing: AppSpacing.md
+            ) {
+                targetSelectionPanel
+                selectedAssetPanel
+            }
+        }
+    }
+
+    private var targetSelectionPanel: some View {
         ContentGlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Equipo afectado",
-                    subtitle: "Seleccion desde el equipo hasta el componente"
-                )
-
-                Picker("Subsistema", selection: $selectedSubsystem) {
-                    ForEach(subsystemOptions, id: \.self) { subsystem in
-                        Text(subsystem).tag(subsystem)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                TextField("Buscar equipo", text: $equipmentSearchText)
+                SectionHeaderText(title: "Equipo", subtitle: "Selecciona el equipo o grupo lógico")
+                Label("Buscar equipo", systemImage: "magnifyingglass")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                TextField("Nombre o código", text: $equipmentSearchText)
                     .textFieldStyle(.roundedBorder)
 
                 if isLoadingTargets {
@@ -816,9 +992,21 @@ private struct DatabaseCorrectiveEventCreateView: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 240)
+                    .frame(minHeight: 220, maxHeight: 360)
                 }
+            }
+        }
+    }
 
+    private var selectedAssetPanel: some View {
+        ContentGlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Activo afectado",
+                    subtitle: selectedTarget == nil
+                        ? "Selecciona primero un equipo"
+                        : "Marca uno o más activos dentro del equipo"
+                )
                 if let selectedTarget {
                     ForEach(selectedTarget.roots) { root in
                         CorrectiveMultiAssetTreePicker(
@@ -832,8 +1020,34 @@ private struct DatabaseCorrectiveEventCreateView: View {
                         title: "Assets seleccionados",
                         value: selectedAssetPath
                     )
+                    if let context {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 135), spacing: AppSpacing.xs)],
+                            spacing: AppSpacing.xs
+                        ) {
+                            DetailTile(title: "Subsistema", value: context.subsystem)
+                            DetailTile(title: "Ubicación", value: context.physicalLocation)
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "Sin equipo seleccionado",
+                        systemImage: "shippingbox",
+                        description: Text("Selecciona un equipo para consultar sus activos.")
+                    )
                 }
             }
+        }
+    }
+
+    private var eventDataStep: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 330), spacing: AppSpacing.md)],
+            alignment: .leading,
+            spacing: AppSpacing.md
+        ) {
+            contextPanel
+            sapPanel
         }
     }
 
@@ -846,18 +1060,17 @@ private struct DatabaseCorrectiveEventCreateView: View {
                     subtitle: "Valores obtenidos del equipo"
                 )
                 if let context {
-                    DetailTile(title: "Sede", value: context.site)
-                    DetailTile(title: "Proyecto", value: context.project)
-                    DetailTile(
-                        title: "Etapa",
-                        value: context.stage ?? "No registrada"
-                    )
-                    DetailTile(title: "Sistema", value: context.system)
-                    DetailTile(title: "Subsistema", value: context.subsystem)
-                    DetailTile(
-                        title: "Ubicación registrada del equipo",
-                        value: context.physicalLocation
-                    )
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 145), spacing: AppSpacing.xs)],
+                        spacing: AppSpacing.xs
+                    ) {
+                        DetailTile(title: "Sede", value: context.site)
+                        DetailTile(title: "Proyecto", value: context.project)
+                        DetailTile(title: "Etapa", value: context.stage ?? "No registrada")
+                        DetailTile(title: "Sistema", value: context.system)
+                        DetailTile(title: "Subsistema", value: context.subsystem)
+                        DetailTile(title: "Ubicación registrada", value: context.physicalLocation)
+                    }
                     eventLocationFields
                 } else if selectedTarget != nil {
                     ProgressView("Cargando contexto")
@@ -874,18 +1087,24 @@ private struct DatabaseCorrectiveEventCreateView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Datos SAP y tiempos")
-                TextField("Nombre del evento SAP", text: $sapEventName)
-                    .textFieldStyle(.roundedBorder)
-                TextField("Notificacion SAP", text: $sapNotification)
-                    .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Nombre del evento SAP").font(.caption.bold()).foregroundStyle(.secondary)
+                    TextField("Describe el evento", text: $sapEventName)
+                        .textFieldStyle(.roundedBorder)
+                }
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("Notificación SAP").font(.caption.bold()).foregroundStyle(.secondary)
+                    TextField("Número de notificación", text: $sapNotification)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                }
                 Picker("Severidad", selection: $severity) {
                     ForEach(Severity.allCases) { option in
                         Text(option.label).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
-                Toggle("Elemento crítico", isOn: $isCritical)
+                Toggle("Evento crítico", isOn: $isCritical)
                 DatePicker(
                     "Fecha y hora de creacion de aviso",
                     selection: $noticeCreatedAt,
@@ -897,6 +1116,49 @@ private struct DatabaseCorrectiveEventCreateView: View {
                 )
             }
         }
+    }
+
+    private var confirmationStep: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 330), spacing: AppSpacing.md)],
+            alignment: .leading,
+            spacing: AppSpacing.md
+        ) {
+            GlassPanel {
+                VStack(alignment: .leading, spacing: AppSpacing.md) {
+                    SectionHeaderText(title: "Equipo afectado", subtitle: "Selección registrada")
+                    confirmationRow("Subsistema", selectedSubsystem, "square.stack.3d.up")
+                    confirmationRow("Equipo", selectedTarget?.name ?? "No seleccionado", "shippingbox")
+                    confirmationRow("Activos", selectedAssetPath, "scope")
+                    confirmationRow("Ubicación", eventPhysicalLocation, "mappin.and.ellipse")
+                }
+            }
+            GlassPanel {
+                VStack(alignment: .leading, spacing: AppSpacing.md) {
+                    SectionHeaderText(title: "Datos del evento", subtitle: "Información del aviso")
+                    confirmationRow("Evento SAP", sapEventName, "doc.text")
+                    confirmationRow("Notificación", sapNotification, "number")
+                    confirmationRow("Severidad", severity.label, "exclamationmark.triangle")
+                    confirmationRow("Crítico", isCritical ? "Sí" : "No", "bolt.shield")
+                    confirmationRow("Creación del aviso", Self.dateTimeFormatter.string(from: noticeCreatedAt), "calendar")
+                }
+            }
+        }
+    }
+
+    private func confirmationRow(_ title: String, _ value: String, _ systemImage: String) -> some View {
+        HStack(alignment: .top, spacing: AppSpacing.sm) {
+            Image(systemName: systemImage)
+                .foregroundStyle(BrandColor.red)
+                .frame(width: 28, height: 28)
+                .background(BrandColor.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption.bold()).foregroundStyle(.secondary)
+                Text(value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No registrado" : value)
+                    .font(.subheadline.weight(.semibold))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder

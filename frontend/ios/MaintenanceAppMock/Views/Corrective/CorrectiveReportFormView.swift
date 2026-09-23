@@ -2,6 +2,45 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+private enum CorrectiveReportSection: Int, CaseIterable, Identifiable {
+    case event
+    case failure
+    case analysis
+    case activities
+    case validation
+    case conclusions
+    case evidence
+    case participants
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .event: "Datos del evento"
+        case .failure: "Descripción de falla"
+        case .analysis: "Análisis de falla"
+        case .activities: "Actividades realizadas"
+        case .validation: "Pruebas y validación"
+        case .conclusions: "Conclusiones y comentarios"
+        case .evidence: "Evidencias"
+        case .participants: "Participantes y firmas"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .event: "doc.text.fill"
+        case .failure: "exclamationmark.bubble.fill"
+        case .analysis: "waveform.path.ecg"
+        case .activities: "wrench.and.screwdriver.fill"
+        case .validation: "checkmark.seal.fill"
+        case .conclusions: "text.bubble.fill"
+        case .evidence: "photo.on.rectangle.angled"
+        case .participants: "person.2.fill"
+        }
+    }
+}
+
 struct CorrectiveReportFormView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
@@ -37,6 +76,7 @@ struct CorrectiveReportFormView: View {
     @State private var didFinalize = false
     @State private var lastAutosavedPayload: APIReportDraftWrite?
     @State private var autosaveTask: Task<Void, Never>?
+    @State private var selectedReportSection = CorrectiveReportSection.event
 
     private var detail: APIActivityDetail? {
         activityStore.details[eventID]
@@ -76,7 +116,12 @@ struct CorrectiveReportFormView: View {
                 ProgressView("Cargando formulario")
             } else if let detail, let editor {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                    LazyVStack(
+                        alignment: .leading,
+                        spacing: AppSpacing.md,
+                        pinnedViews: [.sectionHeaders]
+                    ) {
+                        reportTitleBar
                         OfflineDraftBanner(
                             draft: offlineStore.draft(for: eventID),
                             isNetworkAvailable: offlineStore.isNetworkAvailable
@@ -84,18 +129,17 @@ struct CorrectiveReportFormView: View {
                             Task { await offlineStore.retry(activityID: eventID) }
                         }
                         header(detail)
-                        eventData(detail)
-                        failurePanel
-                        analysisPanel
-                        activitiesPanel(editor: editor)
-                        validationPanel
-                        evidencePanel
-                        participantsPanel
-                        conclusionsPanel
-                        savePanel
+                        Section {
+                            selectedSectionContent(detail: detail, editor: editor)
+                            savePanel
+                        } header: {
+                            reportSectionSelector
+                                .padding(.vertical, 4)
+                                .background(.ultraThinMaterial)
+                        }
                     }
                     .padding(AppSpacing.lg)
-                    .frame(maxWidth: 900, alignment: .leading)
+                    .frame(maxWidth: 1_420, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
             } else {
@@ -107,7 +151,7 @@ struct CorrectiveReportFormView: View {
             }
         }
         .background(MaintenanceScreenBackground())
-        .navigationTitle("Reporte correctivo")
+        .navigationTitle("")
         .task { await load() }
         .onChange(of: currentPayload) { _, payload in
             scheduleAutosave(payload)
@@ -174,15 +218,127 @@ struct CorrectiveReportFormView: View {
 
     private func header(_ detail: APIActivityDetail) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text(detail.eventCode ?? detail.internalCode)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(BrandColor.red)
             Text(detail.title)
-                .font(.system(.largeTitle, design: .rounded).weight(.black))
+                .font(.system(.title, design: .rounded).weight(.black))
+                .lineLimit(2)
             HStack {
                 APIStatusBadge(status: detail.status)
                 Text(detail.subsystem).foregroundStyle(.secondary)
             }
+        }
+    }
+
+    private var reportTitleBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppSpacing.lg) {
+                Text("Reporte correctivo")
+                    .font(.title3.weight(.bold))
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: AppSpacing.xl)
+                reportActionButtons
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                Text("Reporte correctivo").font(.title3.weight(.bold))
+                reportActionButtons
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private var reportActionButtons: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Button {
+                Task { await save(finalize: false) }
+            } label: {
+                Label("Guardar borrador", systemImage: "square.and.arrow.down.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.glass)
+            .disabled(isSaving || editor == nil)
+
+            if offlineStore.isNetworkAvailable {
+                Button {
+                    Task { await save(finalize: true) }
+                } label: {
+                    Label("Finalizar versión", systemImage: "checkmark.seal.fill")
+                        .font(.subheadline.weight(.semibold))
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(isSaving || editor == nil)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var reportSectionSelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(Array(CorrectiveReportSection.allCases.enumerated()), id: \.element.id) {
+                    index, section in
+                    Button {
+                        withAnimation(.snappy) { selectedReportSection = section }
+                    } label: {
+                        HStack(spacing: AppSpacing.sm) {
+                            Image(systemName: section.systemImage)
+                            Text(String(index + 1))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Text(section.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(selectedReportSection == section ? BrandColor.red : .primary)
+                        .frame(minWidth: 185, minHeight: 48)
+                        .padding(.horizontal, AppSpacing.sm)
+                        .background(
+                            selectedReportSection == section ? BrandColor.red.opacity(0.08) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .overlay {
+                            if selectedReportSection == section {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(BrandColor.red.opacity(0.45), lineWidth: 1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Paso \(index + 1), \(section.title)")
+
+                    if section != CorrectiveReportSection.allCases.last {
+                        Divider().frame(height: 26)
+                    }
+                }
+            }
+            .padding(4)
+        }
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(BrandColor.glassStroke, lineWidth: 1)
+        }
+        .sensoryFeedback(.selection, trigger: selectedReportSection)
+    }
+
+    @ViewBuilder
+    private func selectedSectionContent(
+        detail: APIActivityDetail,
+        editor: APIReportEditor
+    ) -> some View {
+        switch selectedReportSection {
+        case .event: eventData(detail)
+        case .failure: failurePanel
+        case .analysis: analysisPanel
+        case .activities: activitiesPanel(editor: editor)
+        case .validation: validationPanel
+        case .conclusions: conclusionsPanel
+        case .evidence: evidencePanel
+        case .participants: participantsPanel
         }
     }
 
@@ -437,7 +593,9 @@ struct CorrectiveReportFormView: View {
     }
 
     private var savePanel: some View {
-        GlassPanel {
+        Group {
+            if errorMessage != nil || successMessage != nil || isSaving {
+                GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 if let errorMessage {
                     Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
@@ -447,24 +605,9 @@ struct CorrectiveReportFormView: View {
                     Label(successMessage, systemImage: "checkmark.circle.fill")
                         .foregroundStyle(BrandColor.green)
                 }
-                ActionButtonGrid {
-                    Button {
-                        Task { await save(finalize: false) }
-                    } label: {
-                        Label("Guardar borrador", systemImage: "square.and.arrow.down.fill")
-                    }
-                    .buttonStyle(ActionTileButtonStyle())
-                    if offlineStore.isNetworkAvailable {
-                        Button {
-                            Task { await save(finalize: true) }
-                        } label: {
-                            Label("Finalizar versión", systemImage: "checkmark.seal.fill")
-                        }
-                        .buttonStyle(ActionTileButtonStyle(prominent: true))
-                    }
-                }
-                .disabled(isSaving)
                 if isSaving { ProgressView("Guardando reporte") }
+            }
+                }
             }
         }
     }

@@ -26,6 +26,9 @@ MaintenanceAppMock/
 
 - The login screen calls `POST /api/v1/auth/login`.
 - Access and refresh tokens are stored in the iOS Keychain.
+- Simulator builds used for login must keep code signing enabled. Installing a build produced with
+  `CODE_SIGNING_ALLOWED=NO` removes the application identifier required by the Keychain and causes
+  `errSecMissingEntitlement` (`-34018`) after otherwise valid credentials are accepted.
 - App launch validates the access token with `/api/v1/auth/me` and uses `/api/v1/auth/refresh`
   when renewal is required.
 - Closing the session revokes the refresh session in PostgreSQL and removes local Keychain items.

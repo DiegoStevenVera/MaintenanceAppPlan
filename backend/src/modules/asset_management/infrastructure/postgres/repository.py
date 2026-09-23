@@ -3,7 +3,11 @@ from uuid import uuid4
 from sqlalchemy import Select, delete, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from modules.asset_management.infrastructure.postgres.catalog_models import ManufacturerRecord
+from modules.asset_management.infrastructure.postgres.catalog_models import (
+    AssetStatusRecord,
+    EquipmentCategoryRecord,
+    ManufacturerRecord,
+)
 from modules.asset_management.infrastructure.postgres.domain_models import (
     AssetClosureRecord,
     InventoryLocationRecord,
@@ -11,13 +15,16 @@ from modules.asset_management.infrastructure.postgres.domain_models import (
 )
 from modules.asset_management.infrastructure.postgres.models import (
     AssetHistoryRecord,
+    AssetImageRecord,
     AssetRecord,
 )
 from modules.asset_management.interfaces.schemas import (
     AssetComponentOperationDTO,
     AssetDTO,
     AssetHistoryEntryDTO,
+    AssetImageDTO,
     AssetTreeNodeDTO,
+    AssetWriteRequest,
     StockAssetDTO,
 )
 from modules.maintenance_execution.infrastructure.postgres.report_models import (
@@ -27,6 +34,10 @@ from modules.maintenance_execution.infrastructure.postgres.report_models import 
     MaintenanceReportRecord,
     PreventiveReportDetailRecord,
     ReportVersionRecord,
+)
+from modules.organizational_context.infrastructure.postgres.models import SubsystemRecord
+from modules.organizational_context.infrastructure.postgres.operational_models import (
+    GeographicLocationRecord,
 )
 
 
@@ -67,8 +78,12 @@ class PostgresAssetRepository:
         total = await self._session.scalar(
             select(func.count()).select_from(stmt.order_by(None).subquery())
         )
-        result = await self._session.scalars(stmt.limit(limit).offset(offset))
-        return [self._to_asset_dto(record) for record in result.all()], total or 0
+        records = list((await self._session.scalars(stmt.limit(limit).offset(offset))).all())
+        images = await self._images_by_asset([record.id for record in records])
+        return [
+            self._to_asset_dto(record, images=images.get(record.id, []))
+            for record in records
+        ], total or 0
 
     async def get_asset(self, asset_id: str) -> AssetDTO | None:
         row = (
@@ -96,7 +111,174 @@ class PostgresAssetRepository:
             record,
             manufacturer=manufacturer,
             component_count=component_count or 0,
+            images=(await self._images_by_asset([record.id])).get(record.id, []),
         )
+
+    async def create_asset(self, payload: AssetWriteRequest) -> AssetDTO:
+        code = payload.serial_or_code.strip()
+        if await self._serial_or_code_exists(code):
+            raise ValueError("Ya existe un equipo con ese código o número de serie.")
+        category, subsystem, asset_status, location = await self._master_data(payload)
+        record = AssetRecord(
+            id=str(uuid4()),
+            name=payload.name.strip(),
+            category=category.name_n1,
+            asset_type=self._category_type_name(category),
+            subsystem=subsystem.code,
+            serial_or_code=code,
+            part_number=self._empty_to_none(payload.part_number),
+            status=asset_status.name,
+            physical_location=location.full_path,
+            is_business_anchor=True,
+            parent_id=None,
+            children=[],
+            internal_code=code,
+            serial_number=code,
+            serial_number_status="KNOWN",
+            model=self._empty_to_none(payload.model),
+            software_version=self._empty_to_none(payload.software_version),
+            business_label=self._empty_to_none(payload.business_label) or "Equipo",
+            registration_method="MANUAL",
+            is_mobile=False,
+            manufacturer_id=await self._manufacturer_id(payload.manufacturer),
+            equipment_category_id=category.id,
+            subsystem_id=subsystem.id,
+            status_id=asset_status.id,
+            current_geographic_location_id=location.id,
+        )
+        self._session.add(record)
+        await self._session.flush()
+        await self._rebuild_asset_closure()
+        return await self.get_asset(record.id)
+
+    async def update_asset(self, asset_id: str, payload: AssetWriteRequest) -> AssetDTO:
+        record = await self._session.get(AssetRecord, asset_id)
+        if record is None or not record.is_business_anchor:
+            raise ValueError("El equipo no existe o no es un equipo principal.")
+        code = payload.serial_or_code.strip()
+        if await self._serial_or_code_exists(code, excluding_id=asset_id):
+            raise ValueError("Ya existe un equipo con ese código o número de serie.")
+        category, subsystem, asset_status, location = await self._master_data(payload)
+        record.name = payload.name.strip()
+        record.category = category.name_n1
+        record.asset_type = self._category_type_name(category)
+        record.subsystem = subsystem.code
+        record.serial_or_code = code
+        record.internal_code = code
+        record.serial_number = code
+        record.serial_number_status = "KNOWN"
+        record.part_number = self._empty_to_none(payload.part_number)
+        record.status = asset_status.name
+        record.physical_location = location.full_path
+        record.business_label = self._empty_to_none(payload.business_label) or "Equipo"
+        record.model = self._empty_to_none(payload.model)
+        record.software_version = self._empty_to_none(payload.software_version)
+        record.manufacturer_id = await self._manufacturer_id(payload.manufacturer)
+        record.equipment_category_id = category.id
+        record.subsystem_id = subsystem.id
+        record.status_id = asset_status.id
+        record.current_geographic_location_id = location.id
+        await self._session.flush()
+        return await self.get_asset(record.id)
+
+    async def archive_asset(self, asset_id: str) -> AssetDTO:
+        record = await self._session.get(AssetRecord, asset_id)
+        if record is None or not record.is_business_anchor:
+            raise ValueError("El equipo no existe o no es un equipo principal.")
+        record.status = "DADO DE BAJA"
+        archived_status = await self._session.scalar(
+            select(AssetStatusRecord).where(AssetStatusRecord.code == "DADO_DE_BAJA")
+        )
+        record.status_id = archived_status.id if archived_status is not None else None
+        await self._session.flush()
+        return await self.get_asset(record.id)
+
+    async def _serial_or_code_exists(
+        self, code: str, *, excluding_id: str | None = None
+    ) -> bool:
+        stmt = select(func.count()).select_from(AssetRecord).where(
+            func.lower(AssetRecord.serial_or_code) == code.casefold()
+        )
+        if excluding_id:
+            stmt = stmt.where(AssetRecord.id != excluding_id)
+        return bool(await self._session.scalar(stmt))
+
+    async def _master_data(self, payload: AssetWriteRequest):
+        category = await self._session.get(
+            EquipmentCategoryRecord, payload.equipment_category_id
+        )
+        subsystem = await self._session.get(SubsystemRecord, payload.subsystem_id)
+        asset_status = await self._session.get(AssetStatusRecord, payload.status_id)
+        location = await self._session.get(
+            GeographicLocationRecord, payload.geographic_location_id
+        )
+        if category is None or not category.is_active:
+            raise ValueError("La categoría o tipo seleccionado no está disponible.")
+        if subsystem is None or not subsystem.is_active:
+            raise ValueError("El subsistema seleccionado no está disponible.")
+        if category.subsystem_id != subsystem.id:
+            raise ValueError("La categoría no pertenece al subsistema seleccionado.")
+        if asset_status is None or not asset_status.is_active:
+            raise ValueError("El estado seleccionado no está disponible.")
+        if location is None or not location.is_active or location.level != 4:
+            raise ValueError("Debe seleccionar una ubicación completa hasta el nivel 4.")
+        return category, subsystem, asset_status, location
+
+    @staticmethod
+    def _category_type_name(category: EquipmentCategoryRecord) -> str:
+        return " - ".join(
+            value for value in (category.name_n1, category.name_n2) if value
+        )
+
+    async def _manufacturer_id(self, value: str | None):
+        name = self._empty_to_none(value)
+        if name is None:
+            return None
+        manufacturer = await self._session.scalar(
+            select(ManufacturerRecord).where(func.lower(ManufacturerRecord.name) == name.casefold())
+        )
+        if manufacturer is None:
+            manufacturer = ManufacturerRecord(
+                id=uuid4(), name=name, description=None, is_active=True
+            )
+            self._session.add(manufacturer)
+            await self._session.flush()
+        elif not manufacturer.is_active:
+            manufacturer.is_active = True
+        return manufacturer.id
+
+    async def _images_by_asset(self, asset_ids: list[str]) -> dict[str, list[AssetImageDTO]]:
+        if not asset_ids:
+            return {}
+        rows = list(
+            (
+                await self._session.scalars(
+                    select(AssetImageRecord)
+                    .where(AssetImageRecord.asset_id.in_(asset_ids))
+                    .order_by(
+                        AssetImageRecord.asset_id,
+                        AssetImageRecord.is_primary.desc(),
+                        AssetImageRecord.sort_order,
+                        AssetImageRecord.created_at,
+                    )
+                )
+            ).all()
+        )
+        result: dict[str, list[AssetImageDTO]] = {}
+        for image in rows:
+            result.setdefault(image.asset_id, []).append(
+                AssetImageDTO(
+                    id=image.id,
+                    file_name=image.file_name,
+                    media_type=image.media_type,
+                    byte_size=image.byte_size,
+                    caption=image.caption,
+                    is_primary=image.is_primary,
+                    sort_order=image.sort_order,
+                    url=f"/api/v1/assets/{image.asset_id}/images/{image.id}",
+                )
+            )
+        return result
 
     async def list_stock_assets(
         self,
@@ -659,6 +841,7 @@ class PostgresAssetRepository:
         *,
         manufacturer: str | None = None,
         component_count: int = 0,
+        images: list[AssetImageDTO] | None = None,
     ) -> AssetDTO:
         return AssetDTO(
             id=record.id,
@@ -678,5 +861,10 @@ class PostgresAssetRepository:
             model=record.model,
             software_version=record.software_version,
             current_position=record.current_position,
+            equipment_category_id=record.equipment_category_id,
+            subsystem_id=record.subsystem_id,
+            status_id=record.status_id,
+            geographic_location_id=record.current_geographic_location_id,
             component_count=component_count,
+            images=images or [],
         )

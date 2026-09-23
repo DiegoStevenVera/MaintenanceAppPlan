@@ -29,6 +29,160 @@ enum AppSpacing {
     static let xl: CGFloat = 32
 }
 
+struct PaginationBar: View {
+    let currentPage: Int
+    let pageCount: Int
+    var hasMore = false
+    var isLoading = false
+    let onSelectPage: (Int) -> Void
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            pagination(maximumPageButtons: 7)
+            pagination(maximumPageButtons: 5)
+            pagination(maximumPageButtons: 3)
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private func pagination(maximumPageButtons: Int) -> some View {
+        HStack(spacing: 4) {
+            navigationButton(
+                systemImage: "chevron.left",
+                accessibilityLabel: "Pagina anterior",
+                isDisabled: currentPage <= 0
+            ) {
+                onSelectPage(max(0, currentPage - 1))
+            }
+
+            ForEach(items(maximumPageButtons: maximumPageButtons)) { item in
+                switch item.kind {
+                case let .page(page):
+                    Button {
+                        onSelectPage(page)
+                    } label: {
+                        Text(String(page + 1))
+                            .font(.subheadline.monospacedDigit().weight(.semibold))
+                            .frame(width: 34, height: 34)
+                            .foregroundStyle(page == currentPage ? Color.white : Color.primary)
+                            .background(
+                                page == currentPage ? BrandColor.red : Color.clear,
+                                in: Circle()
+                            )
+                            .overlay {
+                                if page == currentPage {
+                                    Circle().stroke(Color.white.opacity(0.45), lineWidth: 1)
+                                }
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(isLoading)
+                    .accessibilityLabel("Pagina \(page + 1)")
+                    .accessibilityAddTraits(page == currentPage ? .isSelected : [])
+
+                case .ellipsis:
+                    Text("...")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 34)
+                        .accessibilityHidden(true)
+                }
+            }
+
+            if hasMore {
+                Text("...")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 34)
+                    .accessibilityLabel("Hay mas paginas disponibles")
+            }
+
+            navigationButton(
+                systemImage: "chevron.right",
+                accessibilityLabel: "Pagina siguiente",
+                isDisabled: currentPage >= normalizedPageCount - 1 && !hasMore
+            ) {
+                onSelectPage(currentPage + 1)
+            }
+        }
+        .padding(.horizontal, AppSpacing.sm)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: Capsule())
+        .overlay { Capsule().stroke(BrandColor.glassStroke, lineWidth: 1) }
+        .glassEffect(.regular.tint(BrandColor.red.opacity(0.035)), in: .capsule)
+        .fixedSize(horizontal: true, vertical: false)
+        .opacity(isLoading ? 0.72 : 1)
+        .animation(.snappy, value: currentPage)
+    }
+
+    private func navigationButton(
+        systemImage: String,
+        accessibilityLabel: String,
+        isDisabled: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Group {
+                if isLoading, systemImage == "chevron.right" {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: systemImage)
+                        .font(.caption.bold())
+                }
+            }
+            .frame(width: 34, height: 34)
+            .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isDisabled || isLoading)
+        .accessibilityLabel(accessibilityLabel)
+    }
+
+    private var normalizedPageCount: Int {
+        max(1, pageCount)
+    }
+
+    private func items(maximumPageButtons: Int) -> [PaginationItem] {
+        let count = normalizedPageCount
+        guard count > maximumPageButtons else {
+            return (0..<count).map { PaginationItem(kind: .page($0)) }
+        }
+
+        let lastPage = count - 1
+        let interiorCount = max(1, maximumPageButtons - 2)
+
+        if currentPage <= interiorCount {
+            let pages = (0...interiorCount).map { PaginationItem(kind: .page($0)) }
+            return pages + [PaginationItem(kind: .ellipsis(1)), PaginationItem(kind: .page(lastPage))]
+        }
+
+        if currentPage >= lastPage - interiorCount {
+            let firstVisible = lastPage - interiorCount
+            let pages = (firstVisible...lastPage).map { PaginationItem(kind: .page($0)) }
+            return [PaginationItem(kind: .page(0)), PaginationItem(kind: .ellipsis(0))] + pages
+        }
+
+        let halfWindow = interiorCount / 2
+        let start = currentPage - halfWindow
+        let end = start + interiorCount - 1
+        let middle = (start...end).map { PaginationItem(kind: .page($0)) }
+        return [PaginationItem(kind: .page(0)), PaginationItem(kind: .ellipsis(0))]
+            + middle
+            + [PaginationItem(kind: .ellipsis(1)), PaginationItem(kind: .page(lastPage))]
+    }
+}
+
+private struct PaginationItem: Identifiable {
+    enum Kind: Hashable {
+        case page(Int)
+        case ellipsis(Int)
+    }
+
+    let kind: Kind
+
+    var id: Kind { kind }
+}
+
 extension String {
     /// Keeps activity summaries scannable without changing the full location
     /// retained in the database or shown in detailed report views.
@@ -204,6 +358,35 @@ struct ActionTileButtonStyle: ButtonStyle {
             )
             .scaleEffect(reduceMotion || !configuration.isPressed ? 1.0 : 0.98)
             .animation(reduceMotion ? nil : .snappy(duration: 0.18), value: configuration.isPressed)
+    }
+}
+
+struct CompactActionButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var prominent = false
+    var prominentColor = BrandColor.red
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.subheadline.weight(.semibold))
+            .labelStyle(.titleAndIcon)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, AppSpacing.md)
+            .frame(minHeight: 42)
+            .foregroundStyle(prominent ? Color.white : BrandColor.red)
+            .background(
+                prominent
+                    ? prominentColor.opacity(configuration.isPressed ? 0.82 : 1)
+                    : BrandColor.red.opacity(configuration.isPressed ? 0.16 : 0.09),
+                in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+            )
+            .glassEffect(
+                .regular.tint((prominent ? prominentColor : BrandColor.red).opacity(0.10)).interactive(),
+                in: .rect(cornerRadius: 12)
+            )
+            .scaleEffect(reduceMotion || !configuration.isPressed ? 1 : 0.98)
+            .animation(reduceMotion ? nil : .snappy(duration: 0.16), value: configuration.isPressed)
     }
 }
 
@@ -417,6 +600,11 @@ private struct MaintenanceFieldLabel: View {
 }
 
 struct MaintenanceLifecycleActionPanel: View {
+    enum Presentation {
+        case panel
+        case compact
+    }
+
     let status: String
     let role: UserRole
     var completionAllowed = true
@@ -424,82 +612,20 @@ struct MaintenanceLifecycleActionPanel: View {
     let errorMessage: String?
     let onClearError: () -> Void
     let onPerform: (MaintenanceLifecycleCommand, String?) -> Void
+    var presentation: Presentation = .panel
 
     @State private var confirmationCommand: MaintenanceLifecycleCommand?
     @State private var isShowingReopenSheet = false
     @State private var reopenReason = ""
 
     var body: some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Acciones",
-                    subtitle: "Cambios de estado registrados con tu usuario"
-                )
-
-                ActionButtonGrid {
-                    ForEach(Self.commands(status: status, role: role)) { command in
-                        Button {
-                            if command == .reopen {
-                                reopenReason = ""
-                                isShowingReopenSheet = true
-                            } else {
-                                confirmationCommand = command
-                            }
-                        } label: {
-                            Label(command.label, systemImage: command.icon)
-                        }
-                        .buttonStyle(
-                            ActionTileButtonStyle(
-                                prominent: command == .start || command == .complete,
-                                prominentColor: command == .start
-                                    ? BrandColor.green
-                                    : BrandColor.red
-                            )
-                        )
-                        .disabled(isWorking || (command == .complete && !completionAllowed))
-                        .opacity(isWorking || (command == .complete && !completionAllowed) ? 0.55 : 1)
-                        .accessibilityHint(command.accessibilityHint)
-                    }
+        Group {
+            if presentation == .panel {
+                GlassPanel {
+                    actionContent(showsHeader: true)
                 }
-
-                if Self.commands(status: status, role: role).contains(.complete),
-                   !completionAllowed {
-                    Label(
-                        "Finaliza al menos una versión del reporte antes de completar el mantenimiento.",
-                        systemImage: "doc.badge.exclamationmark"
-                    )
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                }
-
-                if isWorking {
-                    HStack(spacing: AppSpacing.sm) {
-                        ProgressView()
-                        Text("Actualizando el mantenimiento...")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .center)
-                }
-
-                if let errorMessage {
-                    HStack(alignment: .top, spacing: AppSpacing.sm) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(BrandColor.red)
-                        Text(errorMessage)
-                            .font(.subheadline)
-                            .foregroundStyle(.primary)
-                        Spacer()
-                        Button("Cerrar", action: onClearError)
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .padding(AppSpacing.md)
-                    .background(
-                        BrandColor.red.opacity(0.10),
-                        in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    )
-                }
+            } else {
+                actionContent(showsHeader: false)
             }
         }
         .alert(
@@ -557,6 +683,105 @@ struct MaintenanceLifecycleActionPanel: View {
             }
             .presentationDetents([.medium])
         }
+    }
+
+    private func actionContent(showsHeader: Bool) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            if showsHeader {
+                SectionHeaderText(
+                    title: "Acciones",
+                    subtitle: "Cambios de estado registrados con tu usuario"
+                )
+            }
+
+            if presentation == .compact {
+                HStack(spacing: AppSpacing.sm) {
+                    lifecycleButtons(isCompact: true)
+                }
+            } else {
+                ActionButtonGrid {
+                    lifecycleButtons(isCompact: false)
+                }
+            }
+
+            if presentation == .panel,
+               Self.commands(status: status, role: role).contains(.complete),
+               !completionAllowed {
+                Label(
+                    "Finaliza al menos una versión del reporte antes de completar el mantenimiento.",
+                    systemImage: "doc.badge.exclamationmark"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+
+            if isWorking {
+                HStack(spacing: AppSpacing.sm) {
+                    ProgressView()
+                    Text("Actualizando el mantenimiento...")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+
+            if let errorMessage {
+                HStack(alignment: .top, spacing: AppSpacing.sm) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(BrandColor.red)
+                    Text(errorMessage)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                    Spacer()
+                    Button("Cerrar", action: onClearError)
+                        .font(.subheadline.weight(.semibold))
+                }
+                .padding(AppSpacing.md)
+                .background(
+                    BrandColor.red.opacity(0.10),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous)
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func lifecycleButtons(isCompact: Bool) -> some View {
+        ForEach(Self.commands(status: status, role: role)) { command in
+            if isCompact {
+                lifecycleButton(command)
+                    .buttonStyle(
+                        CompactActionButtonStyle(
+                            prominent: command == .start || command == .complete,
+                            prominentColor: command == .start ? BrandColor.green : BrandColor.red
+                        )
+                    )
+            } else {
+                lifecycleButton(command)
+                    .buttonStyle(
+                        ActionTileButtonStyle(
+                            prominent: command == .start || command == .complete,
+                            prominentColor: command == .start ? BrandColor.green : BrandColor.red
+                        )
+                    )
+            }
+        }
+    }
+
+    private func lifecycleButton(_ command: MaintenanceLifecycleCommand) -> some View {
+        Button {
+            if command == .reopen {
+                reopenReason = ""
+                isShowingReopenSheet = true
+            } else {
+                confirmationCommand = command
+            }
+        } label: {
+            Label(command.label, systemImage: command.icon)
+        }
+        .disabled(isWorking || (command == .complete && !completionAllowed))
+        .opacity(isWorking || (command == .complete && !completionAllowed) ? 0.55 : 1)
+        .accessibilityHint(command.accessibilityHint)
     }
 
     static func hasActions(status: String, role: UserRole) -> Bool {

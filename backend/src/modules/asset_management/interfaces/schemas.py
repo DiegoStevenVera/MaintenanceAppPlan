@@ -1,6 +1,18 @@
 from typing import Literal
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class AssetImageDTO(BaseModel):
+    id: UUID
+    file_name: str
+    media_type: str
+    byte_size: int
+    caption: str | None = None
+    is_primary: bool = False
+    sort_order: int = 0
+    url: str
 
 
 class AssetDTO(BaseModel):
@@ -21,7 +33,66 @@ class AssetDTO(BaseModel):
     model: str | None = None
     software_version: str | None = None
     current_position: str | None = None
+    equipment_category_id: UUID | None = None
+    subsystem_id: UUID | None = None
+    status_id: UUID | None = None
+    geographic_location_id: UUID | None = None
     component_count: int = 0
+    images: list[AssetImageDTO] = Field(default_factory=list)
+
+
+class AssetWriteRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=240)
+    serial_or_code: str = Field(min_length=1, max_length=120)
+    part_number: str | None = Field(default=None, max_length=120)
+    equipment_category_id: UUID
+    subsystem_id: UUID
+    status_id: UUID
+    geographic_location_id: UUID
+    business_label: str | None = Field(default=None, max_length=100)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    model: str | None = Field(default=None, max_length=120)
+    software_version: str | None = Field(default=None, max_length=120)
+
+
+class AssetCatalogOptionDTO(BaseModel):
+    id: UUID
+    name: str
+    code: str | None = None
+
+
+class EquipmentCategoryOptionDTO(BaseModel):
+    id: UUID
+    subsystem_id: UUID
+    name_n1: str
+    name_n2: str
+
+
+class GeographicLocationOptionDTO(BaseModel):
+    id: UUID
+    name: str
+    level: int
+    parent_id: UUID | None = None
+    full_path: str
+
+
+class AssetAdministrationCatalogDTO(BaseModel):
+    categories: list[EquipmentCategoryOptionDTO]
+    subsystems: list[AssetCatalogOptionDTO]
+    statuses: list[AssetCatalogOptionDTO]
+    locations: list[GeographicLocationOptionDTO]
+
+
+class AssetImageWriteRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    image_base64: str
+    file_name: str = Field(min_length=1, max_length=255)
+    media_type: str = Field(min_length=1, max_length=100)
+    caption: str | None = Field(default=None, max_length=500)
+    is_primary: bool = False
 
 
 class AssetTreeNodeDTO(BaseModel):

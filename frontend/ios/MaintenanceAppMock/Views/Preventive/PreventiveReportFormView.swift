@@ -29,6 +29,39 @@ enum OperationalChecklistCategory: String, CaseIterable, Identifiable {
     }
 }
 
+private enum PreventiveReportSection: Int, CaseIterable, Identifiable {
+    case general
+    case checklist
+    case steps
+    case evidence
+    case participants
+    case conclusions
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "Datos generales"
+        case .checklist: "Checklist"
+        case .steps: "Pasos del mantenimiento"
+        case .evidence: "Evidencias"
+        case .participants: "Participantes y firmas"
+        case .conclusions: "Conclusiones"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: "doc.text.fill"
+        case .checklist: "checklist.checked"
+        case .steps: "list.number"
+        case .evidence: "photo.on.rectangle.angled"
+        case .participants: "person.2.fill"
+        case .conclusions: "checkmark.seal.fill"
+        }
+    }
+}
+
 struct PreventiveReportFormView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
@@ -70,6 +103,7 @@ struct PreventiveReportFormView: View {
     @State private var didFinalize = false
     @State private var lastAutosavedPayload: APIReportDraftWrite?
     @State private var autosaveTask: Task<Void, Never>?
+    @State private var selectedReportSection = PreventiveReportSection.general
 
     private var detail: APIActivityDetail? {
         activityStore.details[activityID]
@@ -107,7 +141,12 @@ struct PreventiveReportFormView: View {
                 ProgressView("Cargando formulario")
             } else if let detail, let editor {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                    LazyVStack(
+                        alignment: .leading,
+                        spacing: AppSpacing.md,
+                        pinnedViews: [.sectionHeaders]
+                    ) {
+                        reportTitleBar
                         OfflineDraftBanner(
                             draft: offlineStore.draft(for: activityID),
                             isNetworkAvailable: offlineStore.isNetworkAvailable
@@ -115,20 +154,17 @@ struct PreventiveReportFormView: View {
                             Task { await offlineStore.retry(activityID: activityID) }
                         }
                         header(detail)
-                        generalData(detail, editor: editor)
-                        manualChecklistPanel(editor)
-                        operationalChecklistPanel(editor)
-                        stepsPanel
-                        if editor.calibrationRequired {
-                            calibrationPanel
+                        Section {
+                            selectedSectionContent(detail: detail, editor: editor)
+                            savePanel
+                        } header: {
+                            reportSectionSelector
+                                .padding(.vertical, 4)
+                                .background(.ultraThinMaterial)
                         }
-                        evidencePanel
-                        participantsPanel
-                        conclusionsPanel
-                        savePanel
                     }
                     .padding(AppSpacing.lg)
-                    .frame(maxWidth: 900, alignment: .leading)
+                    .frame(maxWidth: 1_420, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
             } else {
@@ -140,7 +176,8 @@ struct PreventiveReportFormView: View {
             }
         }
         .background(MaintenanceScreenBackground())
-        .navigationTitle("Reporte preventivo")
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .onChange(of: currentPayload) { _, payload in
             scheduleAutosave(payload)
@@ -207,9 +244,6 @@ struct PreventiveReportFormView: View {
 
     private func header(_ detail: APIActivityDetail) -> some View {
         VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text(detail.internalCode)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(BrandColor.red)
             Text(detail.title)
                 .font(.system(.largeTitle, design: .rounded).weight(.black))
             HStack {
@@ -219,24 +253,181 @@ struct PreventiveReportFormView: View {
         }
     }
 
+    private var reportTitleBar: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppSpacing.lg) {
+                Text("Reporte preventivo")
+                    .font(.title3.weight(.bold))
+                    .fixedSize(horizontal: true, vertical: false)
+
+                Spacer(minLength: AppSpacing.xl)
+                reportActionButtons
+            }
+            .frame(maxWidth: .infinity)
+
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                Text("Reporte preventivo")
+                    .font(.title3.weight(.bold))
+
+                reportActionButtons
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, AppSpacing.xs)
+    }
+
+    private var reportActionButtons: some View {
+        HStack(spacing: AppSpacing.sm) {
+            Button {
+                Task { await save(finalize: false) }
+            } label: {
+                HStack(spacing: AppSpacing.xs) {
+                    Image(systemName: "square.and.arrow.down.fill")
+                    Text("Guardar borrador")
+                }
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 4)
+                .fixedSize(horizontal: true, vertical: false)
+            }
+            .buttonStyle(.glass)
+            .disabled(isSaving || editor == nil)
+
+            if offlineStore.isNetworkAvailable {
+                Button {
+                    Task { await save(finalize: true) }
+                } label: {
+                    HStack(spacing: AppSpacing.xs) {
+                        Image(systemName: "checkmark.seal.fill")
+                        Text("Finalizar versión")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .padding(.horizontal, 4)
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(isSaving || editor == nil)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var reportSectionSelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(Array(PreventiveReportSection.allCases.enumerated()), id: \.element.id) {
+                    index, section in
+                    Button {
+                        withAnimation(.snappy) {
+                            selectedReportSection = section
+                        }
+                    } label: {
+                        HStack(spacing: AppSpacing.sm) {
+                            Image(systemName: section.systemImage)
+                                .font(.headline)
+                            Text(String(index + 1))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)
+                            Text(section.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(
+                            selectedReportSection == section ? BrandColor.red : .primary
+                        )
+                        .frame(minWidth: 185, minHeight: 48)
+                        .padding(.horizontal, AppSpacing.sm)
+                        .background(
+                            selectedReportSection == section
+                                ? BrandColor.red.opacity(0.08)
+                                : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .overlay {
+                            if selectedReportSection == section {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(BrandColor.red.opacity(0.45), lineWidth: 1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Paso \(index + 1), \(section.title)")
+
+                    if section != PreventiveReportSection.allCases.last {
+                        Divider().frame(height: 26)
+                    }
+                }
+            }
+            .padding(4)
+        }
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(BrandColor.glassStroke, lineWidth: 1)
+        }
+        .sensoryFeedback(.selection, trigger: selectedReportSection)
+    }
+
+    @ViewBuilder
+    private func selectedSectionContent(
+        detail: APIActivityDetail,
+        editor: APIReportEditor
+    ) -> some View {
+        switch selectedReportSection {
+        case .general:
+            generalData(detail, editor: editor)
+        case .checklist:
+            checklistSection(editor)
+        case .steps:
+            stepsSection(editor)
+        case .evidence:
+            evidencePanel
+        case .participants:
+            participantsPanel
+        case .conclusions:
+            conclusionsPanel
+        }
+    }
+
+    private func checklistSection(_ editor: APIReportEditor) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 520), spacing: AppSpacing.md)],
+            alignment: .leading,
+            spacing: AppSpacing.md
+        ) {
+            manualChecklistPanel(editor)
+                .frame(maxHeight: .infinity, alignment: .top)
+            operationalChecklistPanel(editor)
+                .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    @ViewBuilder
+    private func stepsSection(_ editor: APIReportEditor) -> some View {
+        stepsPanel
+        if editor.calibrationRequired {
+            calibrationPanel
+        }
+    }
+
     private func generalData(_ detail: APIActivityDetail, editor: APIReportEditor) -> some View {
         return GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Datos generales", subtitle: "Datos definidos por la programación")
-                DetailTile(title: "Actividad", value: detail.title)
-                if editor.sapOrderEditable {
-                    MaintenanceTextField(
-                        title: "Orden SAP",
-                        placeholder: "Ingresar Orden SAP",
-                        text: $sapOrder,
-                        systemImage: "number",
-                        autocapitalization: .characters,
-                        disablesAutocorrection: true
-                    )
-                } else if let sapOrder = editor.sapOrder, !sapOrder.isEmpty {
-                    DetailTile(title: "Orden SAP", value: sapOrder)
-                }
-                MaintenanceFieldGrid {
+                LazyVGrid(columns: reportFieldColumns, alignment: .leading, spacing: AppSpacing.md) {
+                    DetailTile(title: "Actividad", value: detail.title)
+                    if editor.sapOrderEditable {
+                        MaintenanceTextField(
+                            title: "Orden SAP",
+                            placeholder: "Ingresar Orden SAP",
+                            text: $sapOrder,
+                            systemImage: "number",
+                            autocapitalization: .characters,
+                            disablesAutocorrection: true
+                        )
+                    } else if let sapOrder = editor.sapOrder, !sapOrder.isEmpty {
+                        DetailTile(title: "Orden SAP", value: sapOrder)
+                    }
                     DetailTile(title: "Equipos", value: detail.assets.map(\.name).joined(separator: ", "))
                     DetailTile(title: "Sede", value: detail.site ?? "No registrada")
                     DetailTile(title: "Proyecto", value: detail.project ?? "No registrado")
@@ -248,88 +439,97 @@ struct PreventiveReportFormView: View {
                         value: PeruvianDateFormat.display(editor.actualDate)
                     )
                     DetailTile(title: "Hora de inicio", value: Self.dateTimeFormatter.string(from: editor.activityStartedAt))
+                    MaintenanceDateTimeField(
+                        title: "Hora fin de la actividad",
+                        selection: $endTime
+                    )
+                    DetailTile(title: "Ubicación física", value: detail.locationPath ?? "No registrada")
                 }
-                MaintenanceDateTimeField(
-                    title: "Hora fin de la actividad",
-                    selection: $endTime
-                )
-                DetailTile(title: "Ubicación física", value: detail.locationPath ?? "No registrada")
             }
         }
+    }
+
+    private var reportFieldColumns: [GridItem] {
+        [GridItem(.adaptive(minimum: 320, maximum: 440), spacing: AppSpacing.md)]
     }
 
     private var stepsPanel: some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Pasos del mantenimiento")
-                ForEach($steps) { $step in
-                    VStack(alignment: .leading, spacing: AppSpacing.sm) {
-                        Toggle(step.title, isOn: $step.isCompleted)
-                            .font(.headline)
-                        if let page = step.manualPage {
-                            Label("Manual, página \(page)", systemImage: "book.pages.fill")
-                                .font(.subheadline)
-                                .foregroundStyle(BrandColor.red)
-                        }
-                        ForEach($step.tests) { $test in
-                            VStack(alignment: .leading, spacing: AppSpacing.xs) {
-                                Text(test.name).font(.subheadline.weight(.semibold))
-                                MaintenanceChoiceField(
-                                    "Resultado",
-                                    systemImage: "checkmark.circle",
-                                    selection: $test.selectedResult
-                                ) {
-                                    ForEach(resultOptions(for: test), id: \.self) { option in
-                                        Text(option).tag(option)
-                                    }
-                                }
-                                /**
-                                TextField(
-                                    "Notas",
-                                    text: Binding($test.notes, replacingNilWith: ""),
-                                    axis: .vertical
-                                )
-                                .textFieldStyle(.roundedBorder)*/
-                            }
-                            .padding(AppSpacing.sm)
-                            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
-                        }
-                        MaintenanceTextArea(
-                            title: "Comentario del paso",
-                            placeholder: "Registrar hallazgos u observaciones",
-                            text: Binding($step.comment, replacingNilWith: ""),
-                            systemImage: "text.alignleft",
-                            minimumLines: 2,
-                            maximumLines: 3
-                        )
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 360), spacing: AppSpacing.md)],
+                    alignment: .leading,
+                    spacing: AppSpacing.md
+                ) {
+                    ForEach($steps) { $step in
+                        preventiveStepCard(step: $step)
                     }
-                    .padding(AppSpacing.md)
-                    .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
                 }
             }
         }
+    }
+
+    private func preventiveStepCard(step: Binding<APIPreventiveStepWrite>) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Toggle(step.wrappedValue.title, isOn: step.isCompleted)
+                .font(.headline)
+            if let page = step.wrappedValue.manualPage {
+                Label("Manual, página \(page)", systemImage: "book.pages.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(BrandColor.red)
+            }
+            ForEach(step.tests) { $test in
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    Text(test.name).font(.subheadline.weight(.semibold))
+                    MaintenanceChoiceField(
+                        "Resultado",
+                        systemImage: "checkmark.circle",
+                        selection: $test.selectedResult
+                    ) {
+                        ForEach(resultOptions(for: test), id: \.self) { option in
+                            Text(option).tag(option)
+                        }
+                    }
+                }
+                .padding(AppSpacing.sm)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+            }
+            MaintenanceTextArea(
+                title: "Comentario del paso",
+                placeholder: "Registrar hallazgos u observaciones",
+                text: Binding(step.comment, replacingNilWith: ""),
+                systemImage: "text.alignleft",
+                minimumLines: 2,
+                maximumLines: 3
+            )
+        }
+        .padding(AppSpacing.md)
+        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var evidencePanel: some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Evidencias", subtitle: "Fotografías persistidas con esta versión")
-                PhotosPicker(
-                    selection: $selectedPhotos,
-                    maxSelectionCount: 20,
-                    matching: .images
-                ) {
-                    Label("Agregar desde galería", systemImage: "photo.badge.plus")
+                ActionButtonGrid {
+                    PhotosPicker(
+                        selection: $selectedPhotos,
+                        maxSelectionCount: 20,
+                        matching: .images
+                    ) {
+                        Label("Agregar desde galería", systemImage: "photo.badge.plus")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+                    Button {
+                        isShowingCamera = true
+                    } label: {
+                        Label("Tomar foto", systemImage: "camera.fill")
+                    }
+                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+                    .disabled(!isCameraAvailable)
+                    .opacity(isCameraAvailable ? 1 : 0.55)
                 }
-                .buttonStyle(ActionTileButtonStyle(prominent: true))
-                Button {
-                    isShowingCamera = true
-                } label: {
-                    Label("Tomar foto", systemImage: "camera.fill")
-                }
-                .buttonStyle(ActionTileButtonStyle(prominent: true))
-                .disabled(!isCameraAvailable)
-                .opacity(isCameraAvailable ? 1 : 0.55)
                 EditableReportEvidenceGrid(evidence: $evidence)
             }
         }
@@ -728,56 +928,48 @@ struct PreventiveReportFormView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Conclusiones")
-                MaintenanceChoiceField(
-                    "Estado final del equipo",
-                    systemImage: "checkmark.seal",
-                    selection: $conclusion
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 420), spacing: AppSpacing.md)],
+                    alignment: .leading,
+                    spacing: AppSpacing.md
                 ) {
-                    Text("Equipo operativo").tag("Equipo operativo")
-                    Text("Equipo no operativo").tag("Equipo no operativo")
-                    Text("Equipo medio operativo").tag("Equipo medio operativo")
+                    MaintenanceChoiceField(
+                        "Estado final del equipo",
+                        systemImage: "checkmark.seal",
+                        selection: $conclusion
+                    ) {
+                        Text("Equipo operativo").tag("Equipo operativo")
+                        Text("Equipo no operativo").tag("Equipo no operativo")
+                        Text("Equipo medio operativo").tag("Equipo medio operativo")
+                    }
+                    MaintenanceTextArea(
+                        title: "Comentarios adicionales del mantenimiento",
+                        placeholder: "Registrar conclusiones, restricciones u observaciones",
+                        text: $additionalComments,
+                        systemImage: "text.bubble",
+                        minimumLines: 3,
+                        maximumLines: 5
+                    )
                 }
-                MaintenanceTextArea(
-                    title: "Comentarios adicionales del mantenimiento",
-                    placeholder: "Registrar conclusiones, restricciones u observaciones",
-                    text: $additionalComments,
-                    systemImage: "text.bubble",
-                    minimumLines: 3,
-                    maximumLines: 5
-                )
             }
         }
     }
 
+    @ViewBuilder
     private var savePanel: some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                if let errorMessage {
-                    Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(BrandColor.red)
-                }
-                if let successMessage {
-                    Label(successMessage, systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(BrandColor.green)
-                }
-                ActionButtonGrid {
-                    Button {
-                        Task { await save(finalize: false) }
-                    } label: {
-                        Label("Guardar borrador", systemImage: "square.and.arrow.down.fill")
+        if errorMessage != nil || successMessage != nil || isSaving {
+            GlassPanel {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    if let errorMessage {
+                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(BrandColor.red)
                     }
-                    .buttonStyle(ActionTileButtonStyle())
-                    if offlineStore.isNetworkAvailable {
-                        Button {
-                            Task { await save(finalize: true) }
-                        } label: {
-                            Label("Finalizar versión", systemImage: "checkmark.seal.fill")
-                        }
-                        .buttonStyle(ActionTileButtonStyle(prominent: true))
+                    if let successMessage {
+                        Label(successMessage, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(BrandColor.green)
                     }
+                    if isSaving { ProgressView("Guardando reporte") }
                 }
-                .disabled(isSaving)
-                if isSaving { ProgressView("Guardando reporte") }
             }
         }
     }

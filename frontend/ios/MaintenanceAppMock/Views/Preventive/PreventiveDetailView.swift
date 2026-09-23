@@ -1,5 +1,38 @@
 import SwiftUI
 
+private enum PreventiveDetailSection: Int, CaseIterable, Identifiable {
+    case general
+    case checklist
+    case steps
+    case comments
+    case versions
+    case previousReports
+
+    var id: Int { rawValue }
+
+    var title: String {
+        switch self {
+        case .general: "Datos generales"
+        case .checklist: "Checklist"
+        case .steps: "Pasos"
+        case .comments: "Comentarios"
+        case .versions: "Versiones"
+        case .previousReports: "Reportes anteriores"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .general: "doc.text.fill"
+        case .checklist: "checklist.checked"
+        case .steps: "list.number"
+        case .comments: "bubble.left.and.bubble.right.fill"
+        case .versions: "doc.text.magnifyingglass"
+        case .previousReports: "clock.arrow.circlepath"
+        }
+    }
+}
+
 struct PreventiveDetailView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var activityStore: MaintenanceActivityStore
@@ -15,6 +48,10 @@ struct PreventiveDetailView: View {
     @State private var guideError: String?
     @State private var isLoadingMoreHistory = false
     @State private var historyLoadError: String?
+    @State private var previousReportsPage = 0
+    @State private var previousReportPages: [Int: [APIPreventiveHistoryReport]] = [:]
+    @State private var previousReportsResolvedTotal: Int?
+    @State private var selectedSection = PreventiveDetailSection.general
 
     private let previousReportsPageSize = 10
 
@@ -33,23 +70,23 @@ struct PreventiveDetailView: View {
         Group {
             if let detail = displayedDetail {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: AppSpacing.xl) {
-                        header(detail)
-                        photoPanel(detail)
-                        lifecycleActions(detail)
-                        reportActions(detail)
+                    LazyVStack(
+                        alignment: .leading,
+                        spacing: AppSpacing.md,
+                        pinnedViews: [.sectionHeaders]
+                    ) {
+                        detailHeader(detail)
                         offlineReportState
-                        statusPanel(detail)
-                        generalData(detail)
-                        manualChecklistGuide
-                        operationalChecklistGuide
-                        preventiveGuide
-                        commentsPanel
-                        reportVersions(detail)
-                        previousReports
+                        Section {
+                            selectedSectionContent(detail)
+                        } header: {
+                            sectionSelector
+                                .padding(.vertical, 4)
+                                .background(.ultraThinMaterial)
+                        }
                     }
                     .padding(AppSpacing.lg)
-                    .frame(maxWidth: 900, alignment: .leading)
+                    .frame(maxWidth: 1_420, alignment: .leading)
                     .frame(maxWidth: .infinity)
                 }
                 .refreshable {
@@ -77,7 +114,8 @@ struct PreventiveDetailView: View {
             }
         }
         .background(MaintenanceScreenBackground())
-        .navigationTitle("Detalle preventivo")
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
         .task {
             if let downloadedDetail {
                 activityStore.cacheDetail(downloadedDetail)
@@ -108,6 +146,143 @@ struct PreventiveDetailView: View {
                     await offlineStore.reconcileWorkPackage(with: detail)
                 }
             }
+        }
+    }
+
+    private func detailHeader(_ detail: APIActivityDetail) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: AppSpacing.xl) {
+                maintenanceIdentity(detail)
+                    .layoutPriority(1)
+                Spacer(minLength: AppSpacing.lg)
+                detailActions(detail)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                maintenanceIdentity(detail)
+                detailActions(detail)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func maintenanceIdentity(_ detail: APIActivityDetail) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text(detail.title)
+                .font(.system(.title, design: .rounded).weight(.black))
+                .lineLimit(2)
+            HStack(spacing: AppSpacing.sm) {
+                APIStatusBadge(status: detail.status)
+                Text(detail.subsystem)
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func detailActions(_ detail: APIActivityDetail) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            reportActions(detail, isCompact: true)
+            lifecycleActions(detail, presentation: .compact)
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var sectionSelector: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 0) {
+                ForEach(Array(PreventiveDetailSection.allCases.enumerated()), id: \.element.id) {
+                    index, section in
+                    Button {
+                        withAnimation(.snappy) {
+                            selectedSection = section
+                        }
+                    } label: {
+                        HStack(spacing: AppSpacing.sm) {
+                            Image(systemName: section.systemImage)
+                                .font(.headline)
+                            /**Text(String(index + 1))
+                                .font(.caption.monospacedDigit())
+                                .foregroundStyle(.secondary)*/
+                            Text(section.title)
+                                .font(.subheadline.weight(.semibold))
+                                .lineLimit(1)
+                        }
+                        .foregroundStyle(selectedSection == section ? BrandColor.red : .primary)
+                        .frame(minWidth: 185, minHeight: 48)
+                        .padding(.horizontal, AppSpacing.sm)
+                        .background(
+                            selectedSection == section ? BrandColor.red.opacity(0.08) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 8)
+                        )
+                        .overlay {
+                            if selectedSection == section {
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(BrandColor.red.opacity(0.45), lineWidth: 1)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Sección \(index + 1), \(section.title)")
+
+                    if section != PreventiveDetailSection.allCases.last {
+                        Divider().frame(height: 26)
+                    }
+                }
+            }
+            .padding(4)
+        }
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(BrandColor.glassStroke, lineWidth: 1)
+        }
+        .sensoryFeedback(.selection, trigger: selectedSection)
+    }
+
+    @ViewBuilder
+    private func selectedSectionContent(_ detail: APIActivityDetail) -> some View {
+        switch selectedSection {
+        case .general:
+            generalSection(detail)
+        case .checklist:
+            checklistSection
+        case .steps:
+            preventiveGuide
+        case .comments:
+            commentsPanel
+        case .versions:
+            reportVersions(detail)
+        case .previousReports:
+            previousReports
+        }
+    }
+
+    private func generalSection(_ detail: APIActivityDetail) -> some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 520), spacing: AppSpacing.md)],
+            alignment: .leading,
+            spacing: AppSpacing.md
+        ) {
+            generalData(detail)
+            VStack(spacing: AppSpacing.md) {
+                maintenanceStatusTimeline(detail)
+                photoPanel(detail)
+            }
+        }
+    }
+
+    private var checklistSection: some View {
+        LazyVGrid(
+            columns: [GridItem(.adaptive(minimum: 520), spacing: AppSpacing.md)],
+            alignment: .leading,
+            spacing: AppSpacing.md
+        ) {
+            manualChecklistGuide
+            operationalChecklistGuide
         }
     }
 
@@ -149,9 +324,11 @@ struct PreventiveDetailView: View {
                     manualChecklist: package.editor.manualChecklist,
                     operationalChecklist: package.editor.operationalChecklist,
                     previousReports: [],
+                    previousReportsTotal: 0,
                     previousReportsHasMore: false,
                     previousReportsOffset: 0
                 )
+                previousReportsResolvedTotal = 0
             }
             return
         }
@@ -159,9 +336,10 @@ struct PreventiveDetailView: View {
         isLoadingGuide = true
         guideError = nil
         historyLoadError = nil
+        previousReportsResolvedTotal = nil
         defer { isLoadingGuide = false }
         do {
-            guide = try await session.withValidAccessToken { token in
+            let loadedGuide = try await session.withValidAccessToken { token in
                 try await reportService.preventiveGuide(
                     activityID: activityID,
                     accessToken: token,
@@ -169,15 +347,69 @@ struct PreventiveDetailView: View {
                     previousReportsOffset: 0
                 )
             }
+            guide = loadedGuide
+            previousReportsPage = 0
+            previousReportPages = [0: loadedGuide.previousReports]
+            previousReportsResolvedTotal = loadedGuide.previousReportsTotal
+            if loadedGuide.previousReportsTotal == nil,
+               loadedGuide.previousReportsHasMore {
+                await resolveLegacyPreviousReportsTotal(from: loadedGuide)
+            }
         } catch {
             guideError = error.localizedDescription
         }
     }
 
     @MainActor
-    private func loadMorePreviousReports() async {
+    private func resolveLegacyPreviousReportsTotal(
+        from initialGuide: APIPreventiveGuide
+    ) async {
+        var reports = initialGuide.previousReports
+        var knownIDs = Set(reports.map(\.id))
+        var offset = reports.count
+        var hasMore = initialGuide.previousReportsHasMore
+
+        while hasMore {
+            do {
+                let batch = try await session.withValidAccessToken { token in
+                    try await reportService.preventiveGuide(
+                        activityID: activityID,
+                        accessToken: token,
+                        previousReportsLimit: 50,
+                        previousReportsOffset: offset
+                    )
+                }
+                let uniqueReports = batch.previousReports.filter { knownIDs.insert($0.id).inserted }
+                guard !uniqueReports.isEmpty else {
+                    hasMore = false
+                    continue
+                }
+                reports.append(contentsOf: uniqueReports)
+                offset += batch.previousReports.count
+                hasMore = batch.previousReportsHasMore
+            } catch {
+                historyLoadError = error.localizedDescription
+                return
+            }
+        }
+
+        var pages: [Int: [APIPreventiveHistoryReport]] = [:]
+        for (index, report) in reports.enumerated() {
+            pages[index / previousReportsPageSize, default: []].append(report)
+        }
+        previousReportPages = pages
+        previousReportsResolvedTotal = reports.count
+    }
+
+    @MainActor
+    private func showPreviousReportsPage(_ page: Int) async {
         guard offlineStore.isNetworkAvailable else { return }
-        guard let guide, guide.previousReportsHasMore, !isLoadingMoreHistory else {
+        guard page >= 0, page < previousReportsPageCount, !isLoadingMoreHistory else {
+            return
+        }
+
+        if previousReportPages[page] != nil {
+            withAnimation(.snappy) { previousReportsPage = page }
             return
         }
 
@@ -186,29 +418,16 @@ struct PreventiveDetailView: View {
         defer { isLoadingMoreHistory = false }
 
         do {
-            let nextPage = try await session.withValidAccessToken { token in
+            let loadedPage = try await session.withValidAccessToken { token in
                 try await reportService.preventiveGuide(
                     activityID: activityID,
                     accessToken: token,
                     previousReportsLimit: previousReportsPageSize,
-                    previousReportsOffset: guide.previousReports.count
+                    previousReportsOffset: page * previousReportsPageSize
                 )
             }
-
-            let existingIDs = Set(guide.previousReports.map(\.id))
-            let newReports = nextPage.previousReports.filter {
-                !existingIDs.contains($0.id)
-            }
-            self.guide = APIPreventiveGuide(
-                activityID: guide.activityID,
-                templateName: guide.templateName,
-                templateSteps: guide.templateSteps,
-                manualChecklist: guide.manualChecklist,
-                operationalChecklist: guide.operationalChecklist,
-                previousReports: guide.previousReports + newReports,
-                previousReportsHasMore: nextPage.previousReportsHasMore,
-                previousReportsOffset: nextPage.previousReportsOffset
-            )
+            previousReportPages[page] = loadedPage.previousReports
+            withAnimation(.snappy) { previousReportsPage = page }
         } catch {
             historyLoadError = error.localizedDescription
         }
@@ -255,50 +474,98 @@ struct PreventiveDetailView: View {
     }
 
     @ViewBuilder
-    private func reportActions(_ detail: APIActivityDetail) -> some View {
+    private func reportActions(
+        _ detail: APIActivityDetail,
+        isCompact: Bool = false
+    ) -> some View {
         let latestReport = detail.reports.first {
             $0.reportKind != "CALIBRATION"
         }
 
         if detail.status == "IN_PROGRESS", session.currentUser?.role != .boss {
-            GlassPanel {
-                ActionButtonGrid {
-                    NavigationLink {
-                        PreventiveReportFormView(activityID: activityID)
-                    } label: {
-                        Label(
-                            offlineStore.draft(for: activityID) != nil
-                                ? "Seguir editando"
-                                : (detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte"),
-                            systemImage: "doc.text.fill"
-                        )
-                    }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
-
-                    if let latestReport,
-                       latestReport.documentStatus == "FINALIZED" {
-                        NavigationLink {
-                            PDFPreviewView(versionID: latestReport.id)
-                        } label: {
-                            Label("Generar PDF", systemImage: "doc.badge.plus")
-                        }
-                        .buttonStyle(ActionTileButtonStyle())
-                    }
+            if isCompact {
+                compactReportActionContent(detail, latestReport: latestReport)
+            } else {
+                GlassPanel {
+                    reportActionContent(detail, latestReport: latestReport)
                 }
             }
         } else if let latestReport,
                   latestReport.documentStatus == "FINALIZED" {
-            GlassPanel {
-                ActionButtonGrid {
-                    NavigationLink {
-                        PDFPreviewView(versionID: latestReport.id)
-                    } label: {
-                        Label("Generar PDF", systemImage: "doc.badge.plus")
-                    }
-                    .buttonStyle(ActionTileButtonStyle(prominent: true))
+            if isCompact {
+                compactFinalizedReportButton(latestReport)
+            } else {
+                GlassPanel {
+                    finalizedReportButton(latestReport)
                 }
             }
         }
+    }
+
+    private func compactReportActionContent(
+        _ detail: APIActivityDetail,
+        latestReport: APIReportVersion?
+    ) -> some View {
+        HStack(spacing: AppSpacing.sm) {
+            NavigationLink {
+                PreventiveReportFormView(activityID: activityID)
+            } label: {
+                Label(
+                    offlineStore.draft(for: activityID) != nil
+                        ? "Seguir editando"
+                        : (detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte"),
+                    systemImage: "doc.text.fill"
+                )
+            }
+            .buttonStyle(CompactActionButtonStyle(prominent: true))
+
+            if let latestReport,
+               latestReport.documentStatus == "FINALIZED" {
+                compactFinalizedReportButton(latestReport)
+            }
+        }
+    }
+
+    private func reportActionContent(
+        _ detail: APIActivityDetail,
+        latestReport: APIReportVersion?
+    ) -> some View {
+        ActionButtonGrid {
+            NavigationLink {
+                PreventiveReportFormView(activityID: activityID)
+            } label: {
+                Label(
+                    offlineStore.draft(for: activityID) != nil
+                        ? "Seguir editando"
+                        : (detail.reportVersionCount == 0 ? "Crear reporte" : "Editar reporte"),
+                    systemImage: "doc.text.fill"
+                )
+            }
+            .buttonStyle(ActionTileButtonStyle(prominent: true))
+
+            if let latestReport,
+               latestReport.documentStatus == "FINALIZED" {
+                finalizedReportButton(latestReport)
+            }
+        }
+    }
+
+    private func finalizedReportButton(_ report: APIReportVersion) -> some View {
+        NavigationLink {
+            PDFPreviewView(versionID: report.id)
+        } label: {
+            Label("Generar PDF", systemImage: "doc.badge.plus")
+        }
+        .buttonStyle(ActionTileButtonStyle())
+    }
+
+    private func compactFinalizedReportButton(_ report: APIReportVersion) -> some View {
+        NavigationLink {
+            PDFPreviewView(versionID: report.id)
+        } label: {
+            Label("Generar PDF", systemImage: "doc.badge.plus")
+        }
+        .buttonStyle(CompactActionButtonStyle())
     }
 
     @ViewBuilder
@@ -319,23 +586,6 @@ struct PreventiveDetailView: View {
                     }
                     .buttonStyle(.bordered)
                 }
-            }
-        }
-    }
-
-    private func header(_ detail: APIActivityDetail) -> some View {
-        VStack(alignment: .leading, spacing: AppSpacing.md) {
-            Text(detail.internalCode)
-                .font(.caption.weight(.bold))
-                .foregroundStyle(BrandColor.red)
-            Text(detail.title)
-                .font(.system(.largeTitle, design: .rounded).weight(.black))
-                .lineLimit(3)
-            HStack(spacing: AppSpacing.sm) {
-                APIStatusBadge(status: detail.status)
-                Text(detail.subsystem)
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
             }
         }
     }
@@ -362,28 +612,96 @@ struct PreventiveDetailView: View {
         .accessibilityLabel("Imagen referencial del equipo del mantenimiento")
     }
 
-    private func statusPanel(_ detail: APIActivityDetail) -> some View {
-        GlassPanel {
-            HStack(spacing: AppSpacing.md) {
-                Image(systemName: "clock.badge.checkmark")
-                    .font(.title)
-                    .foregroundStyle(BrandColor.red)
-                    .frame(width: 52, height: 52)
-                    .background(BrandColor.red.opacity(0.12), in: Circle())
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Estado del mantenimiento")
-                        .font(.headline)
-                    Text("\(statusDescription(detail.status)) · \(detail.reportVersionCount) versión(es) de reporte")
-                        .font(.subheadline)
+    private func maintenanceStatusTimeline(_ detail: APIActivityDetail) -> some View {
+        let stages = [
+            (status: "SCHEDULED", title: "Programado"),
+            (status: "IN_PROGRESS", title: "En progreso"),
+            (status: "COMPLETED", title: "Completado"),
+            (status: "CLOSED", title: "Cerrado")
+        ]
+        let currentIndex = stages.firstIndex { $0.status == detail.status } ?? 0
+
+        return GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                HStack(spacing: AppSpacing.md) {
+                    Image(systemName: "clock.badge.checkmark")
+                        .font(.title2)
+                        .foregroundStyle(BrandColor.red)
+                        .frame(width: 46, height: 46)
+                        .background(BrandColor.red.opacity(0.12), in: Circle())
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Estado del mantenimiento")
+                            .font(.headline)
+                        Text(statusDescription(detail.status))
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(BrandColor.red)
+                    }
+                    Spacer()
+                    Text("\(currentIndex + 1) de \(stages.count)")
+                        .font(.caption.monospacedDigit().weight(.semibold))
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
+
+                ZStack(alignment: .top) {
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.22))
+                        .frame(height: 2)
+                        .padding(.horizontal, 48)
+                        .padding(.top, 14)
+
+                    HStack(alignment: .top, spacing: 0) {
+                        ForEach(Array(stages.enumerated()), id: \.offset) { index, stage in
+                            let isCurrent = index == currentIndex
+                            let isReached = index <= currentIndex
+
+                            VStack(spacing: AppSpacing.xs) {
+                                Image(systemName: isReached ? "checkmark" : "circle.fill")
+                                    .font(.caption.weight(.bold))
+                                    .foregroundStyle(
+                                        isReached ? Color.white : Color.secondary.opacity(0.55)
+                                    )
+                                    .frame(width: 30, height: 30)
+                                    .background(
+                                        isCurrent
+                                            ? BrandColor.red
+                                            : (isReached
+                                                ? BrandColor.green
+                                                : Color.secondary.opacity(0.14)),
+                                        in: Circle()
+                                    )
+                                    .overlay {
+                                        if isCurrent {
+                                            Circle()
+                                                .stroke(BrandColor.red.opacity(0.22), lineWidth: 6)
+                                        }
+                                    }
+                                Text(stage.title)
+                                    .font(.caption.weight(isCurrent ? .bold : .medium))
+                                    .foregroundStyle(isCurrent ? BrandColor.red : .secondary)
+                                    .multilineTextAlignment(.center)
+                                    .lineLimit(2)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .accessibilityElement(children: .ignore)
+                            .accessibilityLabel(stage.title)
+                            .accessibilityValue(
+                                isCurrent
+                                    ? "Estado actual"
+                                    : (isReached ? "Completado" : "Pendiente")
+                            )
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity)
             }
         }
     }
 
     @ViewBuilder
-    private func lifecycleActions(_ detail: APIActivityDetail) -> some View {
+    private func lifecycleActions(
+        _ detail: APIActivityDetail,
+        presentation: MaintenanceLifecycleActionPanel.Presentation = .panel
+    ) -> some View {
         if let role = session.currentUser?.role,
            MaintenanceLifecycleActionPanel.hasActions(
                status: detail.status,
@@ -414,7 +732,8 @@ struct PreventiveDetailView: View {
                             activityStore.applyOfflineLifecycle(id: activityID, command: command)
                         }
                     }
-                }
+                },
+                presentation: presentation
             )
         }
     }
@@ -423,21 +742,27 @@ struct PreventiveDetailView: View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(title: "Datos generales", subtitle: "Contexto normalizado del mantenimiento")
-                DetailTile(title: "Equipos", value: detail.assets.map(\.name).joined(separator: ", ").orFallback("Sin equipo relacionado"))
-                DetailTile(title: "Sede", value: detail.site.orFallback("No registrada"))
-                DetailTile(title: "Proyecto", value: detail.project.orFallback("No registrado"))
-                DetailTile(title: "Etapa", value: detail.stage.orFallback("No registrada"))
-                DetailTile(title: "Sistema", value: detail.system.orFallback("No registrado"))
-                DetailTile(title: "Subsistema", value: detail.subsystem)
-                DetailTile(title: "Ubicacion fisica", value: detail.locationPath.orFallback("No registrada"))
-                if let scheduledAt = detail.scheduledAt {
-                    DetailTile(title: "Programado", value: Self.dateTimeFormatter.string(from: scheduledAt))
-                }
-                if let startedAt = detail.actualStartAt {
-                    DetailTile(title: "Inicio real", value: Self.dateTimeFormatter.string(from: startedAt))
-                }
-                if let endedAt = detail.actualEndAt {
-                    DetailTile(title: "Fin real", value: Self.dateTimeFormatter.string(from: endedAt))
+                LazyVGrid(
+                    columns: [GridItem(.adaptive(minimum: 220), spacing: AppSpacing.sm)],
+                    alignment: .leading,
+                    spacing: AppSpacing.sm
+                ) {
+                    DetailTile(title: "Equipos", value: detail.assets.map(\.name).joined(separator: ", ").orFallback("Sin equipo relacionado"))
+                    DetailTile(title: "Sede", value: detail.site.orFallback("No registrada"))
+                    DetailTile(title: "Proyecto", value: detail.project.orFallback("No registrado"))
+                    DetailTile(title: "Etapa", value: detail.stage.orFallback("No registrada"))
+                    DetailTile(title: "Sistema", value: detail.system.orFallback("No registrado"))
+                    DetailTile(title: "Subsistema", value: detail.subsystem)
+                    DetailTile(title: "Ubicación física", value: detail.locationPath.orFallback("No registrada"))
+                    if let scheduledAt = detail.scheduledAt {
+                        DetailTile(title: "Programado", value: Self.dateTimeFormatter.string(from: scheduledAt))
+                    }
+                    if let startedAt = detail.actualStartAt {
+                        DetailTile(title: "Inicio real", value: Self.dateTimeFormatter.string(from: startedAt))
+                    }
+                    if let endedAt = detail.actualEndAt {
+                        DetailTile(title: "Fin real", value: Self.dateTimeFormatter.string(from: endedAt))
+                    }
                 }
             }
         }
@@ -702,6 +1027,25 @@ struct PreventiveDetailView: View {
         )
     }
 
+    private var visiblePreviousReports: [APIPreventiveHistoryReport] {
+        previousReportPages[previousReportsPage]
+            ?? (previousReportsPage == 0 ? guide?.previousReports ?? [] : [])
+    }
+
+    private var showsPreviousReportsPagination: Bool {
+        previousReportsPageCount > 1
+    }
+
+    private var previousReportsPageCount: Int {
+        let total = previousReportsResolvedTotal
+            ?? guide?.previousReportsTotal
+            ?? ((guide?.previousReports.count ?? 0) + (guide?.previousReportsHasMore == true ? 1 : 0))
+        return max(
+            1,
+            Int(ceil(Double(total) / Double(previousReportsPageSize)))
+        )
+    }
+
     private var previousReports: some View {
         ContentGlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
@@ -713,10 +1057,10 @@ struct PreventiveDetailView: View {
                 if isLoadingGuide, guide == nil {
                     ProgressView()
                         .frame(maxWidth: .infinity, alignment: .center)
-                } else if let reports = guide?.previousReports, !reports.isEmpty {
+                } else if !visiblePreviousReports.isEmpty {
                     GlassEffectContainer(spacing: AppSpacing.sm) {
                         LazyVStack(alignment: .leading, spacing: AppSpacing.sm) {
-                            ForEach(reports) { report in
+                            ForEach(visiblePreviousReports) { report in
                                 NavigationLink {
                                     PDFPreviewView(versionID: report.versionID)
                                 } label: {
@@ -733,20 +1077,14 @@ struct PreventiveDetailView: View {
                             .foregroundStyle(BrandColor.red)
                     }
 
-                    if guide?.previousReportsHasMore == true {
-                        Button {
-                            Task { await loadMorePreviousReports() }
-                        } label: {
-                            if isLoadingMoreHistory {
-                                ProgressView()
-                                    .frame(maxWidth: .infinity)
-                            } else {
-                                Label("Mostrar más reportes", systemImage: "ellipsis.circle")
-                                    .frame(maxWidth: .infinity)
-                            }
+                    if showsPreviousReportsPagination {
+                        PaginationBar(
+                            currentPage: previousReportsPage,
+                            pageCount: previousReportsPageCount,
+                            isLoading: isLoadingMoreHistory
+                        ) { selectedPage in
+                            Task { await showPreviousReportsPage(selectedPage) }
                         }
-                        .buttonStyle(ActionTileButtonStyle())
-                        .disabled(isLoadingMoreHistory)
                     }
                 } else {
                     Text("Aun no hay reportes anteriores para este mantenimiento y equipo.")

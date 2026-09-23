@@ -380,7 +380,11 @@ class PostgresReportWriter:
                     or template.report_code
                 )
 
-        previous_reports, previous_reports_has_more = await self._previous_preventive_reports(
+        (
+            previous_reports,
+            previous_reports_has_more,
+            previous_reports_total,
+        ) = await self._previous_preventive_reports(
             activity,
             limit=previous_reports_limit,
             offset=previous_reports_offset,
@@ -393,6 +397,7 @@ class PostgresReportWriter:
             manual_checklist=await self._manual_checklist(activity),
             operational_checklist=await self._operational_checklist(activity),
             previous_reports=previous_reports,
+            previous_reports_total=previous_reports_total,
             previous_reports_has_more=previous_reports_has_more,
             previous_reports_offset=previous_reports_offset,
         )
@@ -2826,9 +2831,9 @@ class PostgresReportWriter:
         *,
         limit: int,
         offset: int,
-    ) -> tuple[list[PreventiveHistoryReportDTO], bool]:
+    ) -> tuple[list[PreventiveHistoryReportDTO], bool, int]:
         if activity.maintenance_template_id is None:
-            return [], False
+            return [], False, 0
 
         linked_assets = (
             await self._session.execute(
@@ -2853,41 +2858,52 @@ class PostgresReportWriter:
         # is_business_anchor hid their valid historical reports.
         scope_asset_ids = [asset_id for asset_id, _, _ in linked_assets]
         if not scope_asset_ids:
-            return [], False
+            return [], False, 0
+
+        history_filters = (
+            MaintenanceActivityRecord.id != activity.id,
+            MaintenanceActivityRecord.activity_type == "PREVENTIVE",
+            MaintenanceActivityRecord.maintenance_template_id
+            == activity.maintenance_template_id,
+            MaintenanceActivityRecord.status.in_(["COMPLETED", "CLOSED"]),
+            select(MaintenanceActivityAssetRecord.id)
+            .where(
+                MaintenanceActivityAssetRecord.maintenance_activity_id
+                == MaintenanceActivityRecord.id,
+                MaintenanceActivityAssetRecord.asset_id.in_(scope_asset_ids),
+            )
+            .exists(),
+            select(MaintenanceReportRecord.id)
+            .where(
+                MaintenanceReportRecord.maintenance_activity_id
+                == MaintenanceActivityRecord.id,
+                MaintenanceReportRecord.report_kind.in_(
+                    ["PREVENTIVE", "PREVENTIVE_MAIN"]
+                ),
+                select(ReportVersionRecord.id)
+                .where(
+                    ReportVersionRecord.maintenance_report_id
+                    == MaintenanceReportRecord.id,
+                    ReportVersionRecord.document_status == "FINALIZED",
+                )
+                .exists(),
+            )
+            .exists(),
+        )
+
+        total = int(
+            await self._session.scalar(
+                select(func.count(MaintenanceActivityRecord.id)).where(
+                    *history_filters
+                )
+            )
+            or 0
+        )
 
         previous_activities = (
             await self._session.scalars(
                 select(MaintenanceActivityRecord)
-                .where(
-                    MaintenanceActivityRecord.id != activity.id,
-                    MaintenanceActivityRecord.activity_type == "PREVENTIVE",
-                    MaintenanceActivityRecord.maintenance_template_id
-                    == activity.maintenance_template_id,
-                    MaintenanceActivityRecord.status.in_(["COMPLETED", "CLOSED"]),
-                    select(MaintenanceActivityAssetRecord.id)
-                    .where(
-                        MaintenanceActivityAssetRecord.maintenance_activity_id
-                        == MaintenanceActivityRecord.id,
-                        MaintenanceActivityAssetRecord.asset_id.in_(scope_asset_ids),
-                    )
-                    .exists(),
-                    select(MaintenanceReportRecord.id)
-                    .where(
-                        MaintenanceReportRecord.maintenance_activity_id
-                        == MaintenanceActivityRecord.id,
-                        MaintenanceReportRecord.report_kind.in_(
-                            ["PREVENTIVE", "PREVENTIVE_MAIN"]
-                        ),
-                        select(ReportVersionRecord.id)
-                        .where(
-                            ReportVersionRecord.maintenance_report_id
-                            == MaintenanceReportRecord.id,
-                            ReportVersionRecord.document_status == "FINALIZED",
-                        )
-                        .exists(),
-                    )
-                    .exists(),
-                )
+                .where(*history_filters)
                 .order_by(
                     func.coalesce(
                         MaintenanceActivityRecord.completed_at,
@@ -2901,7 +2917,7 @@ class PostgresReportWriter:
             )
         ).all()
         if not previous_activities:
-            return [], False
+            return [], False, total
 
         has_more = len(previous_activities) > limit
         previous_activities = previous_activities[:limit]
@@ -2957,7 +2973,7 @@ class PostgresReportWriter:
                 (report, version, final_result, actual_date),
             )
         if not latest_by_activity:
-            return [], has_more
+            return [], has_more, total
 
         equipment_rows = (
             await self._session.execute(
@@ -3021,7 +3037,7 @@ class PostgresReportWriter:
                     document_status=version.document_status,
                 )
             )
-        return history, has_more
+        return history, has_more, total
 
     async def _available_participants(self) -> list[ReportEditorUserDTO]:
         users = (

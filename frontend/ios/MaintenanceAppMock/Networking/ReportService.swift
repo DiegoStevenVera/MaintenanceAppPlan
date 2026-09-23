@@ -474,6 +474,7 @@ struct APIPreventiveGuide: Decodable {
     let manualChecklist: [APIManualChecklistItem]?
     let operationalChecklist: [APIOperationalChecklistItem]?
     let previousReports: [APIPreventiveHistoryReport]
+    let previousReportsTotal: Int?
     let previousReportsHasMore: Bool
     let previousReportsOffset: Int
 
@@ -484,6 +485,7 @@ struct APIPreventiveGuide: Decodable {
         case manualChecklist = "manual_checklist"
         case operationalChecklist = "operational_checklist"
         case previousReports = "previous_reports"
+        case previousReportsTotal = "previous_reports_total"
         case previousReportsHasMore = "previous_reports_has_more"
         case previousReportsOffset = "previous_reports_offset"
     }

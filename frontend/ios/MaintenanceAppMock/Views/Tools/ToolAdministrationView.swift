@@ -402,41 +402,10 @@ struct ToolAdministrationView: View {
     }
 
     private var inventoryPagination: some View {
-        HStack(spacing: AppSpacing.xs) {
-            inventoryPreviousPageButton
-            inventoryPageButtons
-            inventoryNextPageButton
+        PaginationBar(currentPage: inventoryPage, pageCount: pageCount) { selectedPage in
+            inventoryPage = selectedPage
         }
-        .frame(maxWidth: .infinity, alignment: .center)
         .padding(.vertical, AppSpacing.sm)
-    }
-
-    private var inventoryPreviousPageButton: some View {
-        Button { inventoryPage = max(0, inventoryPage - 1) } label: {
-            Image(systemName: "chevron.left")
-        }
-        .buttonStyle(.glass)
-        .disabled(inventoryPage == 0)
-    }
-
-    private var inventoryPageButtons: some View {
-        ForEach(visiblePages, id: \.self) { page in
-            Button { inventoryPage = page } label: {
-                Text(String(page + 1))
-                    .font(.subheadline.weight(.semibold))
-                    .frame(width: 34, height: 34)
-            }
-            .buttonStyle(.glass)
-            .tint(page == inventoryPage ? BrandColor.red : .primary)
-        }
-    }
-
-    private var inventoryNextPageButton: some View {
-        Button { inventoryPage = min(max(0, pageCount - 1), inventoryPage + 1) } label: {
-            Image(systemName: "chevron.right")
-        }
-        .buttonStyle(.glass)
-        .disabled(inventoryPage >= pageCount - 1)
     }
 
     private var movementContent: some View {
@@ -478,12 +447,6 @@ struct ToolAdministrationView: View {
 
     private var pageCount: Int {
         max(1, Int(ceil(Double(filteredInventoryItems.count) / Double(inventoryPageSize))))
-    }
-
-    private var visiblePages: [Int] {
-        let lastPage = pageCount - 1
-        let start = min(max(0, inventoryPage - 2), max(0, lastPage - 4))
-        return Array(start...min(lastPage, start + 4))
     }
 
     private var filteredInventoryItems: [ToolInventoryItemEntry] {
@@ -1628,22 +1591,9 @@ struct PreventiveTemplateListView: View {
     }
 
     private var pagination: some View {
-        HStack(spacing: AppSpacing.xs) {
-            Button { page = max(0, page - 1) } label: { Image(systemName: "chevron.left") }
-                .buttonStyle(.glass)
-                .disabled(page == 0)
-            ForEach(visiblePages, id: \.self) { value in
-                Button { page = value } label: {
-                    Text(String(value + 1)).frame(width: 32, height: 32)
-                }
-                .buttonStyle(.glass)
-                .tint(value == page ? BrandColor.red : .primary)
-            }
-            Button { page = min(pageCount - 1, page + 1) } label: { Image(systemName: "chevron.right") }
-                .buttonStyle(.glass)
-                .disabled(page >= pageCount - 1)
+        PaginationBar(currentPage: page, pageCount: pageCount) { selectedPage in
+            page = selectedPage
         }
-        .frame(maxWidth: .infinity)
     }
 
     private var subsystems: [String] {
@@ -1669,12 +1619,6 @@ struct PreventiveTemplateListView: View {
 
     private var pageCount: Int {
         max(1, Int(ceil(Double(filteredRows.count) / Double(pageSize))))
-    }
-
-    private var visiblePages: [Int] {
-        let last = pageCount - 1
-        let start = min(max(0, page - 2), max(0, last - 4))
-        return Array(start...min(last, start + 4))
     }
 
     @MainActor private func load() async {
@@ -2329,24 +2273,9 @@ private struct OperationalChecklistToolPicker: View {
     }
 
     private var pagination: some View {
-        HStack(spacing: AppSpacing.xs) {
-            Button { page = max(0, page - 1) } label: { Image(systemName: "chevron.left") }
-                .buttonStyle(.glass).disabled(page == 0)
-            ForEach(visiblePages, id: \.self) { value in
-                Button { page = value } label: { Text(String(value + 1)).frame(width: 32, height: 32) }
-                    .buttonStyle(.glass)
-                    .tint(value == page ? BrandColor.red : .primary)
-            }
-            Button { page = min(pageCount - 1, page + 1) } label: { Image(systemName: "chevron.right") }
-                .buttonStyle(.glass).disabled(page >= pageCount - 1)
+        PaginationBar(currentPage: page, pageCount: pageCount) { selectedPage in
+            page = selectedPage
         }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var visiblePages: [Int] {
-        let last = pageCount - 1
-        let start = min(max(0, page - 2), max(0, last - 4))
-        return Array(start...min(last, start + 4))
     }
 
     @MainActor private func load() async {
