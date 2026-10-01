@@ -14,11 +14,18 @@ class UserRecord(Base):
     name: Mapped[str] = mapped_column(String(160), nullable=False)
     email: Mapped[str] = mapped_column(String(160), nullable=False, unique=True, index=True)
     role: Mapped[str] = mapped_column(String(40), nullable=False)
-    role_label: Mapped[str] = mapped_column(String(80), nullable=False)
+    role_label: Mapped[str] = mapped_column(String(120), nullable=False)
+    job_title: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     password_hash: Mapped[str] = mapped_column(String(240), nullable=False)
     legacy_id: Mapped[int | None] = mapped_column(Integer, unique=True)
     work_area_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("work_areas.id"), index=True)
     is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+    )
+    appears_in_schedule: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         default=True,
@@ -50,7 +57,9 @@ class RefreshSessionRecord(Base):
         index=True,
     )
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

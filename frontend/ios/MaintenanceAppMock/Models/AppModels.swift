@@ -40,6 +40,7 @@ enum UserRole: String, CaseIterable, Identifiable, Codable {
     var canEditMaintenance: Bool { self != .boss }
     var canCloseMaintenance: Bool { self == .coordinator || self == .administrator }
     var canEditPlanning: Bool { self == .administrator }
+    var canEditSchedules: Bool { self == .coordinator || self == .administrator }
 }
 
 struct AppUser: Identifiable, Codable {

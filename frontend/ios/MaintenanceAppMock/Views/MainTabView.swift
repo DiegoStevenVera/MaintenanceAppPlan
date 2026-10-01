@@ -44,6 +44,13 @@ struct MainTabView: View {
                 Label("Equipos", systemImage: "square.stack.3d.up")
             }
 
+            NavigationStack {
+                TeamScheduleView()
+            }
+            .tabItem {
+                Label("Horario", systemImage: "calendar.day.timeline.leading")
+            }
+
             if session.currentUser?.role == .administrator {
                 NavigationStack {
                     StockListView()
@@ -56,6 +63,12 @@ struct MainTabView: View {
                 }
                 .tabItem {
                     Label("Herramientas", systemImage: "wrench.and.screwdriver.fill")
+                }
+                NavigationStack {
+                    AdministrationView()
+                }
+                .tabItem {
+                    Label("Administracion", systemImage: "person.2.badge.gearshape.fill")
                 }
             }
 

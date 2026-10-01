@@ -44,6 +44,8 @@ async def seed_database() -> None:
                     email=user["email"],
                     role=_role_to_backend(user["role"]),
                     role_label=_role_label(user["role"]),
+                    job_title=_role_label(user["role"]),
+                    appears_in_schedule=user["role"] != "boss",
                     password_hash=hash_password("123456"),
                 )
             )
@@ -106,7 +108,9 @@ async def seed_database() -> None:
                     code=event["code"],
                     sap_code=event["sapCode"],
                     name=event["name"],
-                    affected_asset_id=_asset_id_for_name(app_state["assets"], event["affectedAsset"]),
+                    affected_asset_id=_asset_id_for_name(
+                        app_state["assets"], event["affectedAsset"]
+                    ),
                     affected_asset_path=event["affectedAsset"],
                     subsystem=event["subsystem"],
                     severity=event["severity"].upper(),

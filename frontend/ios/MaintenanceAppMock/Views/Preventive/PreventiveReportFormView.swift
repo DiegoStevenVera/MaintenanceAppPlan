@@ -235,9 +235,15 @@ struct PreventiveReportFormView: View {
             }
         }
         .sheet(isPresented: $isShowingCamera) {
-            CameraPhotoPicker { image in
-                Task { await addEvidence(from: image) }
-            }
+            CameraPhotoPicker(
+                savesCapturedImageToPhotoLibrary: true,
+                onImageCaptured: { image in
+                    Task { await addEvidence(from: image) }
+                },
+                onPhotoLibrarySaveError: { message in
+                    errorMessage = message
+                }
+            )
             .ignoresSafeArea()
         }
     }

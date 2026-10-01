@@ -1,8 +1,13 @@
+import Photos
 import SwiftUI
 import UIKit
 
+private let evidenceTitleCharacterLimit = 127
+
 struct CameraPhotoPicker: UIViewControllerRepresentable {
+    var savesCapturedImageToPhotoLibrary = false
     let onImageCaptured: (UIImage) -> Void
+    var onPhotoLibrarySaveError: (String) -> Void = { _ in }
 
     @Environment(\.dismiss) private var dismiss
 
@@ -34,6 +39,19 @@ struct CameraPhotoPicker: UIViewControllerRepresentable {
         ) {
             if let image = info[.originalImage] as? UIImage {
                 parent.onImageCaptured(image)
+                if parent.savesCapturedImageToPhotoLibrary {
+                    Task {
+                        do {
+                            try await PhotoLibraryEvidenceSaver.save(image)
+                        } catch {
+                            await MainActor.run {
+                                self.parent.onPhotoLibrarySaveError(
+                                    error.localizedDescription
+                                )
+                            }
+                        }
+                    }
+                }
             }
             parent.dismiss()
         }
@@ -41,6 +59,26 @@ struct CameraPhotoPicker: UIViewControllerRepresentable {
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
             parent.dismiss()
         }
+    }
+}
+
+private enum PhotoLibraryEvidenceSaver {
+    static func save(_ image: UIImage) async throws {
+        let status = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        guard status == .authorized || status == .limited else {
+            throw PhotoLibraryEvidenceSaveError.accessDenied
+        }
+        try await PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.creationRequestForAsset(from: image)
+        }
+    }
+}
+
+private enum PhotoLibraryEvidenceSaveError: LocalizedError {
+    case accessDenied
+
+    var errorDescription: String? {
+        "La evidencia se agregó al reporte, pero no se pudo guardar en Fotos. Habilita el acceso en Configuración."
     }
 }
 
@@ -57,14 +95,22 @@ struct EditableReportEvidenceGrid: View {
                 ReportEvidenceImageTile(
                     id: item.id,
                     title: evidenceTitle(item.title, fallback: item.originalFileName),
+                    editableTitle: item.title ?? "",
                     mediaType: item.mediaType,
                     contentBase64: item.contentBase64,
-                    attachmentID: item.attachmentID
-                ) {
-                    withAnimation(.snappy) {
-                        evidence.removeAll { $0.id == item.id }
+                    attachmentID: item.attachmentID,
+                    onTitleChange: { newTitle in
+                        guard let index = evidence.firstIndex(where: { $0.id == item.id }) else {
+                            return
+                        }
+                        evidence[index].title = newTitle
+                    },
+                    onDelete: {
+                        withAnimation(.snappy) {
+                            evidence.removeAll { $0.id == item.id }
+                        }
                     }
-                }
+                )
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -90,9 +136,11 @@ struct StoredReportEvidenceGrid: View {
                             fallback: "Evidencia"
                         )
                     ),
+                    editableTitle: nil,
                     mediaType: item.mediaType,
                     contentBase64: nil,
                     attachmentID: item.id,
+                    onTitleChange: nil,
                     onDelete: nil
                 )
             }
@@ -113,9 +161,11 @@ private struct ReportEvidenceImageTile: View {
 
     let id: String
     let title: String
+    let editableTitle: String?
     let mediaType: String?
     let contentBase64: String?
     let attachmentID: String?
+    let onTitleChange: ((String) -> Void)?
     let onDelete: (() -> Void)?
 
     @State private var loadedImage: UIImage?
@@ -176,19 +226,50 @@ private struct ReportEvidenceImageTile: View {
             }
             .buttonStyle(.plain)
 
-            HStack(alignment: .firstTextBaseline, spacing: AppSpacing.sm) {
+            if let onTitleChange {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Título")
+                            .font(.caption.weight(.semibold))
+                        Spacer(minLength: AppSpacing.sm)
+                        Text("\(editableTitleValue.count)/\(evidenceTitleCharacterLimit)")
+                            .font(.caption.monospacedDigit())
+                    }
+                    .foregroundStyle(
+                        editableTitleValue.count == evidenceTitleCharacterLimit
+                            ? BrandColor.red
+                            : .secondary
+                    )
+                    HStack(spacing: AppSpacing.sm) {
+                        TextField(
+                            "Título de la imagen",
+                            text: Binding(
+                                get: { editableTitleValue },
+                                set: { newValue in
+                                    onTitleChange(
+                                        String(newValue.prefix(evidenceTitleCharacterLimit))
+                                    )
+                                }
+                            )
+                        )
+                        .textFieldStyle(.roundedBorder)
+                        .autocorrectionDisabled()
+                        .accessibilityLabel("Título de la imagen")
+
+                        if let onDelete {
+                            Button(role: .destructive, action: onDelete) {
+                                Image(systemName: "trash")
+                                    .frame(width: 36, height: 36)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Eliminar \(title)")
+                        }
+                    }
+                }
+            } else {
                 Text(title)
                     .font(.subheadline.weight(.semibold))
                     .lineLimit(2)
-                Spacer(minLength: 0)
-                if let onDelete {
-                    Button(role: .destructive, action: onDelete) {
-                        Image(systemName: "trash")
-                            .frame(width: 36, height: 36)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Eliminar \(title)")
-                }
             }
         }
         .padding(AppSpacing.sm)
@@ -203,13 +284,7 @@ private struct ReportEvidenceImageTile: View {
             NavigationStack {
                 Group {
                     if let loadedImage {
-                        ScrollView([.horizontal, .vertical]) {
-                            Image(uiImage: loadedImage)
-                                .resizable()
-                                .scaledToFit()
-                                .frame(maxWidth: .infinity, minHeight: 420)
-                                .padding()
-                        }
+                        ReportEvidenceImageViewer(image: loadedImage)
                     }
                 }
                 .background(Color.black)
@@ -223,7 +298,12 @@ private struct ReportEvidenceImageTile: View {
                     }
                 }
             }
+            .presentationDetents([.large])
         }
+    }
+
+    private var editableTitleValue: String {
+        String((editableTitle ?? "").prefix(evidenceTitleCharacterLimit))
     }
 
     @MainActor
@@ -262,5 +342,23 @@ private struct ReportEvidenceImageTile: View {
         } catch {
             didFail = true
         }
+    }
+}
+
+private struct ReportEvidenceImageViewer: View {
+    let image: UIImage
+
+    var body: some View {
+        ZStack {
+            Color.black
+                .ignoresSafeArea()
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .padding(AppSpacing.md)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Vista ampliada de la evidencia")
+        .accessibilityHint("La imagen está ajustada completamente a la pantalla")
     }
 }

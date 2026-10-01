@@ -989,7 +989,6 @@ private struct EquipmentWideRow: View {
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
         .contentShape(.rect)
-        .overlay(alignment: .bottom) { Divider() }
         .accessibilityElement(children: .combine)
         .accessibilityHint("Abre el detalle del equipo")
     }

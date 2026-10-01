@@ -52,6 +52,7 @@ from modules.organizational_context.infrastructure.postgres.models import (
     SystemRecord,
     WorkAreaRecord,
 )
+from modules.workforce_scheduling.infrastructure.postgres import models as _schedule_models  # noqa: F401
 
 __all__ = [
     "AppStateSnapshotRecord",

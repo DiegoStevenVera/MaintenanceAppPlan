@@ -35,6 +35,23 @@ def test_pcon_requires_authentication() -> None:
     assert response.status_code == 401
 
 
+def test_administration_is_restricted_to_administrators() -> None:
+    unauthorized = client.get("/api/v1/administration/bootstrap")
+    assert unauthorized.status_code == 401
+
+    engineer = client.get(
+        "/api/v1/administration/bootstrap",
+        headers=authorization_headers(),
+    )
+    assert engineer.status_code == 403
+
+    administrator = client.get(
+        "/api/v1/administration/bootstrap",
+        headers=authorization_headers(email="admin@maintenance.local"),
+    )
+    assert administrator.status_code == 503
+
+
 def test_pcon_seed_backend_reports_that_postgres_is_required() -> None:
     engineer = client.get(
         "/api/v1/pcon/plan",

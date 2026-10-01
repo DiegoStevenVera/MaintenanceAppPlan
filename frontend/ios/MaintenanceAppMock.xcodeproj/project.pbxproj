@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+        AA0000000000000000000029 /* AdministrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000029; };
+        AA0000000000000000000028 /* TeamScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000028; };
         AA0000000000000000000027 /* ToolAdministrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000027; };
 		AA0000000000000000000001 /* MaintenanceAppMockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000001 /* MaintenanceAppMockApp.swift */; };
 		AA0000000000000000000002 /* DesignSystem/DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000002 /* DesignSystem/DesignTokens.swift */; };
@@ -35,6 +37,8 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+        BB0000000000000000000029 /* AdministrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Administration/AdministrationView.swift; sourceTree = "<group>"; };
+        BB0000000000000000000028 /* TeamScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Schedule/TeamScheduleView.swift; sourceTree = "<group>"; };
         BB0000000000000000000027 /* ToolAdministrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Tools/ToolAdministrationView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000001 /* MaintenanceAppMockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MaintenanceAppMockApp.swift; sourceTree = "<group>"; };
 		BB0000000000000000000002 /* DesignSystem/DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem/DesignTokens.swift; sourceTree = "<group>"; };
@@ -111,6 +115,8 @@
 				BB0000000000000000000025 /* Views/Planning/PCONPlanningView.swift */,
 				BB0000000000000000000026 /* Views/Shared/ReportEvidenceGrid.swift */,
                 BB0000000000000000000027 /* ToolAdministrationView.swift */,
+                BB0000000000000000000028 /* TeamScheduleView.swift */,
+                BB0000000000000000000029 /* AdministrationView.swift */,
 				BB0000000000000000000030 /* Config/Environment.xcconfig */,
 			);
 			path = MaintenanceAppMock;
@@ -217,6 +223,8 @@
 				AA0000000000000000000025 /* Views/Planning/PCONPlanningView.swift in Sources */,
 				AA0000000000000000000026 /* Views/Shared/ReportEvidenceGrid.swift in Sources */,
                 AA0000000000000000000027 /* ToolAdministrationView.swift in Sources */,
+                AA0000000000000000000028 /* TeamScheduleView.swift in Sources */,
+                AA0000000000000000000029 /* AdministrationView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,0 +1,1 @@
+"""Workforce scheduling bounded context."""
