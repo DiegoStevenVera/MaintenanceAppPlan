@@ -693,6 +693,7 @@ struct APIReportEditor: Codable {
     let sapOrder: String?
     let sapOrderEditable: Bool
     let availableTools: [APIEditorTool]
+    let conclusionOptions: [APIEditorConclusion]?
     let requiredToolNames: [String]
     let manualChecklist: [APIManualChecklistItem]?
     var operationalChecklist: [APIOperationalChecklistItem]?
@@ -707,6 +708,7 @@ struct APIReportEditor: Codable {
         case sapOrder = "sap_order"
         case sapOrderEditable = "sap_order_editable"
         case availableTools = "available_tools"
+        case conclusionOptions = "conclusion_options"
         case requiredToolNames = "required_tool_names"
         case manualChecklist = "manual_checklist"
         case operationalChecklist = "operational_checklist"
@@ -728,6 +730,12 @@ struct APIReportEditor: Codable {
         case stockAssets = "stock_assets"
         case inventoryLocations = "inventory_locations"
     }
+}
+
+struct APIEditorConclusion: Codable, Identifiable, Equatable {
+    let id: String
+    let summary: String
+    let description: String
 }
 
 struct APIReportWriteResult: Decodable {

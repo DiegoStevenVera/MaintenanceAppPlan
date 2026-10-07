@@ -416,6 +416,34 @@ async def delete_proposal(
 
 
 @router.post(
+    "/sessions/{session_id}/proposals/{activity_id}/confirm",
+    response_model=WeeklyPlanningDetailDTO,
+)
+async def confirm_proposal(
+    session_id: UUID,
+    activity_id: UUID,
+    current_user: UserDTO = Depends(planning_editors),
+    session: AsyncSession = Depends(get_session),
+) -> WeeklyPlanningDetailDTO:
+    _require_postgres()
+    repository = PostgresPlanningRepository(session)
+    try:
+        detail = await repository.confirm_proposal(
+            session_id=session_id,
+            activity_id=activity_id,
+            user_id=current_user.id,
+        )
+        await session.commit()
+        return detail
+    except PlanningNotFoundError as error:
+        await session.rollback()
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except PlanningValidationError as error:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post(
     "/sessions/{session_id}/confirm",
     response_model=WeeklyPlanningDetailDTO,
 )

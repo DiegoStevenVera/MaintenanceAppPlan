@@ -265,6 +265,7 @@ private struct AdministrationService {
 private enum AdministrationSection: String, CaseIterable, Identifiable {
     case people = "Usuarios y personal"
     case organization = "Estructura organizacional"
+    case operations = "Configuracion operativa"
     var id: String { rawValue }
 }
 
@@ -309,6 +310,7 @@ struct AdministrationView: View {
     @State private var query = ""
     @State private var showInactive = false
     @State private var sheet: AdministrationSheet?
+    @State private var isShowingOfflineWork = false
     @State private var isLoading = false
     @State private var errorMessage: String?
 
@@ -317,17 +319,15 @@ struct AdministrationView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     header
-                    Picker("Modulo", selection: $section) {
-                        ForEach(AdministrationSection.allCases) { item in
-                            Text(item.rawValue).tag(item)
-                        }
-                    }
-                    .pickerStyle(.segmented)
+                    administrationSectionPicker(isWide: geometry.size.width >= 900)
 
-                    if section == .people {
+                    switch section {
+                    case .people:
                         peopleContent(isWide: geometry.size.width >= 900)
-                    } else {
+                    case .organization:
                         organizationContent(isWide: geometry.size.width >= 900)
+                    case .operations:
+                        operationsContent(isWide: geometry.size.width >= 900)
                     }
 
                     if let errorMessage {
@@ -360,6 +360,9 @@ struct AdministrationView: View {
                 }
             }
         }
+        .sheet(isPresented: $isShowingOfflineWork) {
+            OfflineWorkCenterView()
+        }
         .overlay {
             if isLoading && snapshot.users.isEmpty {
                 ProgressView("Cargando administracion...")
@@ -369,10 +372,18 @@ struct AdministrationView: View {
         }
     }
 
+    @ViewBuilder
     private var header: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(alignment: .bottom) { headerTitle; Spacer(); createButton }
-            VStack(alignment: .leading, spacing: AppSpacing.md) { headerTitle; createButton }
+            HStack(alignment: .bottom) {
+                headerTitle
+                Spacer()
+                if section != .operations { createButton }
+            }
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                headerTitle
+                if section != .operations { createButton }
+            }
         }
     }
 
@@ -392,6 +403,104 @@ struct AdministrationView: View {
                 Label(section == .people ? "Nuevo usuario" : "Nuevo registro", systemImage: "plus")
             }
             .buttonStyle(ActionTileButtonStyle(prominent: true))
+    }
+
+    @ViewBuilder
+    private func administrationSectionPicker(isWide: Bool) -> some View {
+        if isWide {
+            Picker("Modulo", selection: $section) {
+                ForEach(AdministrationSection.allCases) { item in
+                    Text(item.rawValue).tag(item)
+                }
+            }
+            .pickerStyle(.segmented)
+        } else {
+            HStack(spacing: AppSpacing.md) {
+                Text("Modulo")
+                    .font(.headline)
+                Spacer()
+                Picker("Modulo", selection: $section) {
+                    ForEach(AdministrationSection.allCases) { item in
+                        Text(item.rawValue).tag(item)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+            .padding(.horizontal, AppSpacing.md)
+            .frame(minHeight: 52)
+            .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func operationsContent(isWide: Bool) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(
+                    title: "Configuracion operativa",
+                    subtitle: "Administra plantillas y recursos locales de la aplicacion"
+                )
+                LazyVGrid(
+                    columns: [
+                        GridItem(
+                            .adaptive(minimum: isWide ? 360 : 280),
+                            spacing: AppSpacing.md
+                        )
+                    ],
+                    spacing: AppSpacing.md
+                ) {
+                    NavigationLink {
+                        PreventiveTemplateListView()
+                    } label: {
+                        administrationActionCard(
+                            title: "Checklists preventivos",
+                            subtitle: "Crea y edita las plantillas usadas en los reportes preventivos.",
+                            systemImage: "checklist"
+                        )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        isShowingOfflineWork = true
+                    } label: {
+                        administrationActionCard(
+                            title: "Trabajo offline",
+                            subtitle: "Gestiona catalogos, trabajos descargados y sincronizacion local.",
+                            systemImage: "ipad.and.arrow.forward"
+                        )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private func administrationActionCard(
+        title: String,
+        subtitle: String,
+        systemImage: String
+    ) -> some View {
+        HStack(spacing: AppSpacing.md) {
+            Image(systemName: systemImage)
+                .font(.title2)
+                .foregroundStyle(BrandColor.red)
+                .frame(width: 48, height: 48)
+                .background(BrandColor.redSubtle, in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.leading)
+            }
+            Spacer()
+            Image(systemName: "chevron.right")
+                .foregroundStyle(.tertiary)
+        }
+        .padding(AppSpacing.md)
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
     }
 
     @ViewBuilder

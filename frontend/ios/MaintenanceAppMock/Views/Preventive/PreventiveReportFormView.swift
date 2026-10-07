@@ -948,14 +948,36 @@ struct PreventiveReportFormView: View {
                         Text("Equipo no operativo").tag("Equipo no operativo")
                         Text("Equipo medio operativo").tag("Equipo medio operativo")
                     }
-                    MaintenanceTextArea(
-                        title: "Comentarios adicionales del mantenimiento",
-                        placeholder: "Registrar conclusiones, restricciones u observaciones",
-                        text: $additionalComments,
-                        systemImage: "text.bubble",
-                        minimumLines: 3,
-                        maximumLines: 5
-                    )
+                    if editor?.calibrationRequired == true {
+                        let options = editor?.conclusionOptions ?? []
+                        MaintenanceChoiceField(
+                            "Comentarios adicionales del mantenimiento",
+                            systemImage: "text.bubble",
+                            selection: $additionalComments
+                        ) {
+                            Text("Seleccionar conclusión").tag("")
+                            ForEach(options) { option in
+                                Text(option.summary).tag(option.description)
+                            }
+                        }
+                        if options.isEmpty {
+                            Label(
+                                "No hay conclusiones configuradas para este mantenimiento.",
+                                systemImage: "exclamationmark.triangle"
+                            )
+                            .font(.caption)
+                            .foregroundStyle(BrandColor.amber)
+                        }
+                    } else {
+                        MaintenanceTextArea(
+                            title: "Comentarios adicionales del mantenimiento",
+                            placeholder: "Registrar conclusiones, restricciones u observaciones",
+                            text: $additionalComments,
+                            systemImage: "text.bubble",
+                            minimumLines: 3,
+                            maximumLines: 5
+                        )
+                    }
                 }
             }
         }

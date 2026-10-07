@@ -1745,6 +1745,117 @@ class PostgresPlanningRepository:
         await self.session.flush()
         return await self.get_session_detail(session_id)
 
+    async def confirm_proposal(
+        self,
+        *,
+        session_id: UUID,
+        activity_id: UUID,
+        user_id: str,
+    ) -> WeeklyPlanningDetailDTO:
+        planning_session = (
+            await self.session.execute(
+                select(WeeklyPlanningSessionRecord)
+                .where(WeeklyPlanningSessionRecord.id == session_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if planning_session is None:
+            raise PlanningNotFoundError("Sesión semanal no encontrada")
+        if planning_session.status != "DRAFT":
+            raise PlanningValidationError("La semana ya fue confirmada")
+
+        revision = (
+            await self.session.execute(
+                select(MaintenanceScheduleRevisionRecord)
+                .where(
+                    MaintenanceScheduleRevisionRecord.weekly_planning_session_id
+                    == session_id,
+                    MaintenanceScheduleRevisionRecord.maintenance_activity_id
+                    == activity_id,
+                    MaintenanceScheduleRevisionRecord.status == "PROPOSED",
+                )
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if revision is None:
+            raise PlanningNotFoundError("Propuesta no encontrada")
+
+        activity = (
+            await self.session.execute(
+                select(MaintenanceActivityRecord)
+                .where(MaintenanceActivityRecord.id == activity_id)
+                .with_for_update()
+            )
+        ).scalar_one_or_none()
+        if activity is None or activity.activity_type != "PREVENTIVE":
+            raise PlanningNotFoundError("Actividad preventiva no encontrada")
+        if activity.status != "SCHEDULED":
+            raise PlanningValidationError(
+                f"{activity.title} cambió de estado y ya no se puede programar"
+            )
+
+        self.validate_within_week(
+            planning_session.week_start,
+            revision.proposed_start_at,
+            revision.proposed_end_at,
+        )
+        changed_confirmed_date = (
+            activity.scheduled_start_at is not None
+            and (
+                activity.scheduled_start_at != revision.proposed_start_at
+                or activity.scheduled_end_at != revision.proposed_end_at
+            )
+        )
+        if changed_confirmed_date and not (revision.reason or "").strip():
+            raise PlanningValidationError(
+                f"La reprogramación de {activity.title} requiere un motivo"
+            )
+
+        previous_confirmed = (
+            await self.session.execute(
+                select(MaintenanceScheduleRevisionRecord).where(
+                    MaintenanceScheduleRevisionRecord.maintenance_activity_id
+                    == activity.id,
+                    MaintenanceScheduleRevisionRecord.status == "CONFIRMED",
+                )
+            )
+        ).scalars().all()
+        for previous in previous_confirmed:
+            previous.status = "SUPERSEDED"
+
+        confirmed_at = datetime.now(timezone.utc)
+        activity.scheduled_start_at = revision.proposed_start_at
+        activity.scheduled_end_at = revision.proposed_end_at
+        revision.status = "CONFIRMED"
+        revision.confirmed_by_user_id = user_id
+        revision.confirmed_at = confirmed_at
+
+        legacy_schedule = (
+            await self.session.execute(
+                select(PreventiveScheduleRecord).where(
+                    PreventiveScheduleRecord.maintenance_activity_id == activity.id
+                )
+            )
+        ).scalar_one_or_none()
+        if legacy_schedule:
+            legacy_schedule.assigned_date = revision.proposed_start_at
+            legacy_schedule.scheduled_at = revision.proposed_start_at.isoformat()
+
+        remaining = await self.session.scalar(
+            select(func.count(MaintenanceScheduleRevisionRecord.id)).where(
+                MaintenanceScheduleRevisionRecord.weekly_planning_session_id
+                == session_id,
+                MaintenanceScheduleRevisionRecord.status == "PROPOSED",
+            )
+        )
+        if not remaining:
+            planning_session.status = "CONFIRMED"
+            planning_session.confirmed_by_user_id = user_id
+            planning_session.confirmed_at = confirmed_at
+
+        await self.session.flush()
+        return await self.get_session_detail(session_id)
+
     async def list_history(self, limit: int) -> list[PlanningHistoryItemDTO]:
         rows = (
             await self.session.execute(

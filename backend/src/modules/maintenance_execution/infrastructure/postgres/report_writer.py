@@ -70,6 +70,7 @@ from modules.maintenance_execution.infrastructure.postgres.report_models import 
     ReportVersionRecord,
 )
 from modules.maintenance_execution.infrastructure.postgres.template_models import (
+    MaintenanceTemplateConclusionRecord,
     MaintenanceTemplateRecord,
     MaintenanceTemplateStepRecord,
     MaintenanceTemplateTestOptionRecord,
@@ -88,6 +89,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     ReportDraftWriteRequest,
     ReportEditorAssetDTO,
     ReportEditorActionTypeDTO,
+    ReportEditorConclusionDTO,
     ReportEditorDTO,
     ReportEditorToolDTO,
     ReportEditorUserDTO,
@@ -347,6 +349,9 @@ class PostgresReportWriter:
                 activity.id,
                 (activity.actual_start_at or datetime.now(timezone.utc)).date(),
             ),
+            conclusion_options=await self._template_conclusions(activity)
+            if track_circuit_asset is not None
+            else [],
             required_tool_names=await self._required_tool_names(activity),
             manual_checklist=await self._manual_checklist(activity),
             operational_checklist=await self._operational_checklist(activity, preventive_draft),
@@ -355,6 +360,32 @@ class PostgresReportWriter:
             comments=comments,
             tool_deliveries=await self._tool_deliveries(activity.id),
         )
+
+    async def _template_conclusions(
+        self,
+        activity: MaintenanceActivityRecord,
+    ) -> list[ReportEditorConclusionDTO]:
+        if activity.maintenance_template_id is None:
+            return []
+        records = (
+            await self._session.scalars(
+                select(MaintenanceTemplateConclusionRecord)
+                .where(
+                    MaintenanceTemplateConclusionRecord.maintenance_template_id
+                    == activity.maintenance_template_id,
+                    MaintenanceTemplateConclusionRecord.is_active.is_(True),
+                )
+                .order_by(MaintenanceTemplateConclusionRecord.summary)
+            )
+        ).all()
+        return [
+            ReportEditorConclusionDTO(
+                id=str(record.id),
+                summary=record.summary,
+                description=(record.description or record.summary).strip(),
+            )
+            for record in records
+        ]
 
     async def get_preventive_guide(
         self,

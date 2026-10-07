@@ -569,6 +569,12 @@ class ReportEditorToolDTO(BaseModel):
     is_selectable: bool = False
 
 
+class ReportEditorConclusionDTO(BaseModel):
+    id: str
+    summary: str
+    description: str
+
+
 class ManualChecklistItemDTO(BaseModel):
     id: str
     name: str
@@ -660,6 +666,7 @@ class ReportEditorDTO(BaseModel):
     sap_order: str | None = None
     sap_order_editable: bool = False
     available_tools: list[ReportEditorToolDTO] = Field(default_factory=list)
+    conclusion_options: list[ReportEditorConclusionDTO] = Field(default_factory=list)
     required_tool_names: list[str] = Field(default_factory=list)
     manual_checklist: list[ManualChecklistItemDTO] = Field(default_factory=list)
     operational_checklist: list[OperationalChecklistItemDTO] = Field(

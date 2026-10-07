@@ -4,10 +4,8 @@ struct ProfileView: View {
     @EnvironmentObject private var session: SessionStore
     @AppStorage("isDarkModeEnabled") private var isDarkModeEnabled = false
     @State private var isChangingPassword = false
-    @State private var isSelectingRole = false
     @State private var sessionError: String?
     @State private var isReturningToAdministrator = false
-    @State private var isShowingOfflineWork = false
 
     var body: some View {
         ScrollView {
@@ -48,27 +46,10 @@ struct ProfileView: View {
 
                 if session.isRolePreviewActive {
                     rolePreviewPanel
-                } else if session.currentUser?.role == .administrator {
-                    administratorTestPanel
                 }
 
                 GlassPanel {
                     ActionButtonGrid {
-                        if session.currentUser?.role == .administrator {
-                            NavigationLink {
-                                PreventiveTemplateListView()
-                            } label: {
-                                Label("Checklists preventivos", systemImage: "checklist")
-                            }
-                            .buttonStyle(ActionTileButtonStyle())
-                        }
-                        Button {
-                            isShowingOfflineWork = true
-                        } label: {
-                            Label("Trabajo offline", systemImage: "ipad.and.arrow.forward")
-                        }
-                        .buttonStyle(ActionTileButtonStyle())
-
                         Button {
                             isChangingPassword = true
                         } label: {
@@ -97,13 +78,6 @@ struct ProfileView: View {
             ChangePasswordView()
                 .environmentObject(session)
         }
-        .sheet(isPresented: $isSelectingRole) {
-            RolePreviewPickerView()
-                .environmentObject(session)
-        }
-        .sheet(isPresented: $isShowingOfflineWork) {
-            OfflineWorkCenterView()
-        }
         .alert(
             "No se pudo cambiar la vista",
             isPresented: Binding(
@@ -117,28 +91,11 @@ struct ProfileView: View {
         }
     }
 
-    private var administratorTestPanel: some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Vista de prueba",
-                    subtitle: "Prueba la aplicación con los permisos reales de otro rol"
-                )
-                Button {
-                    isSelectingRole = true
-                } label: {
-                    Label("Cambiar rol de prueba", systemImage: "person.2.badge.gearshape.fill")
-                }
-                .buttonStyle(ActionTileButtonStyle(prominent: true))
-            }
-        }
-    }
-
     private var rolePreviewPanel: some View {
         GlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 SectionHeaderText(
-                    title: "Vista de prueba activa",
+                    title: "Sesion temporal activa",
                     subtitle: "La sesión administrativa permanece protegida en este iPad"
                 )
                 Label(
@@ -175,140 +132,6 @@ struct ProfileView: View {
             }
             isReturningToAdministrator = false
         }
-    }
-}
-
-private struct RolePreviewPickerView: View {
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var session: SessionStore
-    @State private var options: [RolePreviewOption] = []
-    @State private var selectedRole: UserRole?
-    @State private var isLoading = true
-    @State private var isSwitching = false
-    @State private var errorMessage: String?
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    if isLoading {
-                        ProgressView("Consultando roles disponibles")
-                    } else if options.isEmpty {
-                        ContentUnavailableView(
-                            "Sin roles disponibles",
-                            systemImage: "person.slash",
-                            description: Text(
-                                "No existen usuarios activos con otro rol para probar."
-                            )
-                        )
-                    } else {
-                        ForEach(options) { option in
-                            if let role = option.role {
-                                Button {
-                                    selectedRole = role
-                                } label: {
-                                    HStack(spacing: AppSpacing.md) {
-                                        Image(systemName: symbol(for: role))
-                                            .foregroundStyle(BrandColor.red)
-                                            .frame(width: 28)
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            Text(option.roleLabel)
-                                                .foregroundStyle(.primary)
-                                            Text(option.userName)
-                                                .font(.caption)
-                                                .foregroundStyle(.secondary)
-                                        }
-                                        Spacer()
-                                        if selectedRole == role {
-                                            Image(systemName: "checkmark.circle.fill")
-                                                .foregroundStyle(BrandColor.red)
-                                        }
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                            }
-                        }
-                    }
-                } header: {
-                    Text("Rol")
-                } footer: {
-                    Text(
-                        "Se abrirá la sesión de un usuario activo con este rol. "
-                        + "Los permisos aplicados serán los del backend."
-                    )
-                }
-
-                if let errorMessage {
-                    Section {
-                        Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(BrandColor.red)
-                    }
-                }
-            }
-            .navigationTitle("Cambiar rol de prueba")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Probar rol") {
-                        switchRole()
-                    }
-                    .disabled(isSwitching || selectedRole == nil)
-                }
-            }
-            .overlay {
-                if isSwitching {
-                    ProgressView("Cambiando sesión")
-                        .padding(AppSpacing.lg)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-                }
-            }
-            .task {
-                await loadOptions()
-            }
-        }
-    }
-
-    private func symbol(for role: UserRole) -> String {
-        switch role {
-        case .maintenanceEngineer:
-            return "person.crop.circle.fill"
-        case .coordinator:
-            return "person.crop.square.fill"
-        case .boss:
-            return "person.crop.rectangle.fill"
-        case .administrator:
-            return "person.badge.key.fill"
-        }
-    }
-
-    private func switchRole() {
-        guard let selectedRole else { return }
-        isSwitching = true
-        errorMessage = nil
-        Task {
-            do {
-                let user = try await session.previewRole(selectedRole)
-                _ = user
-                dismiss()
-            } catch {
-                errorMessage = error.localizedDescription
-                isSwitching = false
-            }
-        }
-    }
-
-    private func loadOptions() async {
-        isLoading = true
-        errorMessage = nil
-        do {
-            options = try await session.rolePreviewOptions()
-            selectedRole = options.first?.role
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isLoading = false
     }
 }
 
