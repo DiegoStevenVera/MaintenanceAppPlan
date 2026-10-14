@@ -482,7 +482,7 @@ struct PreventiveDetailView: View {
             $0.reportKind != "CALIBRATION"
         }
 
-        if detail.status == "IN_PROGRESS", session.currentUser?.role != .boss {
+        if detail.status == "IN_PROGRESS", session.canEdit(.preventive) {
             if isCompact {
                 compactReportActionContent(detail, latestReport: latestReport)
             } else {
@@ -552,7 +552,7 @@ struct PreventiveDetailView: View {
 
     private func finalizedReportButton(_ report: APIReportVersion) -> some View {
         NavigationLink {
-            PDFPreviewView(versionID: report.id)
+            PDFPreviewView(versionID: report.id, packageActivityID: activityID)
         } label: {
             Label("Generar PDF", systemImage: "doc.badge.plus")
         }
@@ -561,7 +561,7 @@ struct PreventiveDetailView: View {
 
     private func compactFinalizedReportButton(_ report: APIReportVersion) -> some View {
         NavigationLink {
-            PDFPreviewView(versionID: report.id)
+            PDFPreviewView(versionID: report.id, packageActivityID: activityID)
         } label: {
             Label("Generar PDF", systemImage: "doc.badge.plus")
         }
@@ -702,7 +702,8 @@ struct PreventiveDetailView: View {
         _ detail: APIActivityDetail,
         presentation: MaintenanceLifecycleActionPanel.Presentation = .panel
     ) -> some View {
-        if let role = session.currentUser?.role,
+        if session.canEdit(.preventive),
+           let role = session.currentUser?.role,
            MaintenanceLifecycleActionPanel.hasActions(
                status: detail.status,
                role: role

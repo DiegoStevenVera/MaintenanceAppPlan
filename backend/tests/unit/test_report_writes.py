@@ -2,8 +2,13 @@ import pytest
 import asyncio
 import base64
 import re
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
+from modules.maintenance_execution.application import document_package as package_module
+from modules.maintenance_execution.application.document_package import (
+    ReportDocumentPackageService,
+)
 from modules.maintenance_execution.infrastructure.pdf_service import (
     PreventivePDFService,
 )
@@ -23,6 +28,9 @@ from modules.maintenance_execution.interfaces.schemas import (
     PreventiveReportWriteDTO,
     ReportParticipantWriteDTO,
     ReportDraftWriteRequest,
+    GeneratedReportDTO,
+    ReportDocumentPackageDTO,
+    ReportDocumentPackageItemDTO,
 )
 
 
@@ -232,3 +240,74 @@ def test_pdf_signature_is_scaled_into_the_complete_canvas() -> None:
         for pair in points.group(1).split()
     ]
     assert all(0 <= x <= 260 and 0 <= y <= 90 for x, y in coordinates)
+
+
+def test_document_package_generates_only_missing_pdf(monkeypatch) -> None:
+    generated = GeneratedReportDTO(
+        id="generated-preventive",
+        report_version_id="preventive-version",
+        file_name="preventive.pdf",
+        file_format="pdf",
+        generated_at=datetime.now(timezone.utc),
+        download_path="/preventive.pdf",
+    )
+    initial = ReportDocumentPackageDTO(
+        activity_id="activity",
+        documents=[
+            ReportDocumentPackageItemDTO(
+                version_id="preventive-version",
+                report_kind="PREVENTIVE",
+                display_name="Reporte preventivo",
+                document_status="FINALIZED",
+                generated_report=generated,
+            ),
+            ReportDocumentPackageItemDTO(
+                version_id="calibration-version",
+                report_kind="CALIBRATION",
+                display_name="Reporte de calibración",
+                document_status="FINALIZED",
+            ),
+        ],
+    )
+    completed = initial.model_copy(deep=True)
+    completed.documents[1].generated_report = generated.model_copy(
+        update={
+            "id": "generated-calibration",
+            "report_version_id": "calibration-version",
+            "file_name": "calibration.pdf",
+        }
+    )
+
+    service = ReportDocumentPackageService(None)
+    service.get = AsyncMock(side_effect=[initial, completed])
+    preventive_service = type(
+        "PDFService",
+        (),
+        {"generate": AsyncMock()},
+    )()
+    calibration_service = type(
+        "PDFService",
+        (),
+        {"generate": AsyncMock()},
+    )()
+    monkeypatch.setattr(
+        package_module,
+        "PreventivePDFService",
+        lambda _session: preventive_service,
+    )
+    monkeypatch.setattr(
+        package_module,
+        "CalibrationPDFService",
+        lambda _session: calibration_service,
+    )
+
+    result = asyncio.run(
+        service.generate(activity_id="activity", user_id="user")
+    )
+
+    preventive_service.generate.assert_not_awaited()
+    calibration_service.generate.assert_awaited_once_with(
+        version_id="calibration-version",
+        user_id="user",
+    )
+    assert result.documents[1].generated_report is not None

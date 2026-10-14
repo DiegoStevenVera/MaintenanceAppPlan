@@ -38,7 +38,8 @@ struct APIClient {
     func post<RequestBody: Encodable, ResponseBody: Decodable>(
         _ path: String,
         body: RequestBody,
-        bearerToken: String? = nil
+        bearerToken: String? = nil,
+        timeoutInterval: TimeInterval = 15
     ) async throws -> ResponseBody {
         guard let baseURL = URL(string: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw APIError.invalidBaseURL
@@ -46,7 +47,7 @@ struct APIClient {
 
         var request = URLRequest(url: endpointURL(baseURL: baseURL, path: path))
         request.httpMethod = "POST"
-        request.timeoutInterval = 15
+        request.timeoutInterval = timeoutInterval
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         applyAuthorization(bearerToken, to: &request)
         request.httpBody = try JSONEncoder.apiEncoder.encode(body)
@@ -59,7 +60,8 @@ struct APIClient {
 
     func post<ResponseBody: Decodable>(
         _ path: String,
-        bearerToken: String
+        bearerToken: String,
+        timeoutInterval: TimeInterval = 15
     ) async throws -> ResponseBody {
         guard let baseURL = URL(string: baseURLString.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             throw APIError.invalidBaseURL
@@ -67,7 +69,7 @@ struct APIClient {
 
         var request = URLRequest(url: endpointURL(baseURL: baseURL, path: path))
         request.httpMethod = "POST"
-        request.timeoutInterval = 15
+        request.timeoutInterval = timeoutInterval
         applyAuthorization(bearerToken, to: &request)
 
         let (data, response) = try await responseData(for: request)

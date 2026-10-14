@@ -2,6 +2,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from modules.identity_access.application.permissions import AppModule, PermissionLevel
 from shared_kernel.schemas import UserRole
 
 
@@ -66,6 +67,23 @@ class ManagedUserDTO(BaseModel):
     is_active: bool
 
 
+class RoleModulePermissionDTO(BaseModel):
+    module: AppModule
+    label: str
+    permission_level: PermissionLevel
+
+
+class RolePermissionGroupDTO(BaseModel):
+    role: UserRole
+    role_label: str
+    is_locked: bool = False
+    permissions: list[RoleModulePermissionDTO]
+
+
+class RolePermissionWriteDTO(BaseModel):
+    permissions: dict[AppModule, PermissionLevel]
+
+
 class AdministrationBootstrapDTO(BaseModel):
     users: list[ManagedUserDTO]
     work_areas: list[WorkAreaDTO]
@@ -74,6 +92,7 @@ class AdministrationBootstrapDTO(BaseModel):
     stages: list[StageDTO]
     systems: list[SystemDTO]
     subsystems: list[SubsystemDTO]
+    role_permissions: list[RolePermissionGroupDTO]
 
 
 class UserWriteRequest(BaseModel):

@@ -7,28 +7,34 @@ struct MainTabView: View {
 
     var body: some View {
         TabView {
-            NavigationStack {
-                HomeView()
-            }
-            .tabItem {
-                Label("Inicio", systemImage: "house.fill")
-            }
-
-            NavigationStack {
-                PreventiveListView()
-            }
-            .tabItem {
-                Label("Preventivos", systemImage: "checklist")
+            if session.canView(.home) {
+                NavigationStack {
+                    HomeView()
+                }
+                .tabItem {
+                    Label("Inicio", systemImage: "house.fill")
+                }
             }
 
-            NavigationStack {
-                DatabaseCorrectiveListView()
-            }
-            .tabItem {
-                Label("Correctivos", systemImage: "wrench.and.screwdriver")
+            if session.canView(.preventive) {
+                NavigationStack {
+                    PreventiveListView()
+                }
+                .tabItem {
+                    Label("Preventivos", systemImage: "checklist")
+                }
             }
 
-            if session.currentUser?.role == .administrator {
+            if session.canView(.corrective) {
+                NavigationStack {
+                    DatabaseCorrectiveListView()
+                }
+                .tabItem {
+                    Label("Correctivos", systemImage: "wrench.and.screwdriver")
+                }
+            }
+
+            if session.canView(.pcon) {
                 NavigationStack {
                     PCONPlanningView()
                 }
@@ -37,33 +43,41 @@ struct MainTabView: View {
                 }
             }
 
-            NavigationStack {
-                AssetSearchView()
+            if session.canView(.equipment) {
+                NavigationStack {
+                    AssetSearchView()
+                }
+                .tabItem {
+                    Label("Equipos", systemImage: "square.stack.3d.up")
+                }
             }
-            .tabItem {
-                Label("Equipos", systemImage: "square.stack.3d.up")
+/**
+            if session.canView(.schedule) {
+                NavigationStack {
+                    TeamScheduleView()
+                }
+                .tabItem {
+                    Label("Horario", systemImage: "calendar.day.timeline.leading")
+                }
             }
-
-            NavigationStack {
-                TeamScheduleView()
-            }
-            .tabItem {
-                Label("Horario", systemImage: "calendar.day.timeline.leading")
-            }
-
-            if session.currentUser?.role == .administrator {
+ */
+            if session.canView(.stock) {
                 NavigationStack {
                     StockListView()
                 }
                 .tabItem {
                     Label("Stock", systemImage: "shippingbox.fill")
                 }
+            }
+            if session.canView(.tools) {
                 NavigationStack {
                     ToolAdministrationView()
                 }
                 .tabItem {
                     Label("Herramientas", systemImage: "wrench.and.screwdriver.fill")
                 }
+            }
+            if session.currentUser?.role == .administrator {
                 NavigationStack {
                     AdministrationView()
                 }
@@ -72,11 +86,13 @@ struct MainTabView: View {
                 }
             }
 
-            NavigationStack {
-                ProfileView()
-            }
-            .tabItem {
-                Label("Perfil", systemImage: "person.crop.circle")
+            if session.canView(.profile) {
+                NavigationStack {
+                    ProfileView()
+                }
+                .tabItem {
+                    Label("Perfil", systemImage: "person.crop.circle")
+                }
             }
         }
         // Keep the connectivity notice away from iPadOS's adaptive tab bar.

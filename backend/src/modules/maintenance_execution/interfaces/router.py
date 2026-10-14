@@ -11,6 +11,9 @@ from modules.maintenance_execution.application.lifecycle import (
     MaintenanceLifecycleCommand,
     MaintenanceLifecyclePermissionError,
 )
+from modules.maintenance_execution.application.document_package import (
+    ReportDocumentPackageService,
+)
 from modules.identity_access.interfaces.dependencies import get_current_user, require_roles
 from modules.maintenance_execution.infrastructure.postgres.repository import (
     PostgresMaintenanceRepository,
@@ -45,6 +48,7 @@ from modules.maintenance_execution.interfaces.schemas import (
     ReportDraftWriteRequest,
     ReportEditorDTO,
     ReportWriteResultDTO,
+    ReportDocumentPackageDTO,
     ReopenMaintenanceRequest,
     StartMaintenanceRequest,
 )
@@ -146,6 +150,55 @@ async def list_maintenance_activity_reports(
     if await repository.get_activity(activity_id) is None:
         raise HTTPException(status_code=404, detail="Maintenance activity not found")
     return await repository.list_activity_reports(activity_id)
+
+
+@router.get(
+    "/maintenance-activities/{activity_id}/document-package",
+    response_model=ReportDocumentPackageDTO,
+)
+async def get_report_document_package(
+    activity_id: str,
+    session: AsyncSession = Depends(get_session),
+) -> ReportDocumentPackageDTO:
+    if not uses_postgres():
+        raise HTTPException(status_code=404, detail="Maintenance activity not found")
+    if await PostgresMaintenanceRepository(session).get_activity(activity_id) is None:
+        raise HTTPException(status_code=404, detail="Maintenance activity not found")
+    try:
+        return await ReportDocumentPackageService(session).get(activity_id)
+    except ReportValidationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.post(
+    "/maintenance-activities/{activity_id}/document-package",
+    response_model=ReportDocumentPackageDTO,
+)
+async def generate_report_document_package(
+    activity_id: str,
+    current_user: UserDTO = Depends(operational_roles),
+    session: AsyncSession = Depends(get_session),
+) -> ReportDocumentPackageDTO:
+    if not uses_postgres():
+        raise HTTPException(status_code=404, detail="Maintenance activity not found")
+    if await PostgresMaintenanceRepository(session).get_activity(activity_id) is None:
+        raise HTTPException(status_code=404, detail="Maintenance activity not found")
+    try:
+        package = await ReportDocumentPackageService(session).generate(
+            activity_id=activity_id,
+            user_id=current_user.id,
+        )
+        await session.commit()
+        return package
+    except ReportValidationError as error:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except (OSError, ValueError) as error:
+        await session.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=f"No se pudo generar el paquete de PDF: {error}",
+        ) from error
 
 
 @router.get(

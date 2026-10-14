@@ -1896,7 +1896,7 @@ struct PreventiveTemplateDetailView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if session.currentUser?.role == .administrator {
+                if session.canEdit(.tools) {
                     Button("Agregar herramienta", systemImage: "plus") { adding = true }
                         .buttonStyle(.glassProminent)
                         .tint(BrandColor.red)
@@ -1937,7 +1937,7 @@ struct PreventiveTemplateDetailView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             Text(item.defaultQuantity?.formatted() ?? "—")
                 .frame(width: 70, alignment: .trailing)
-            if session.currentUser?.role == .administrator {
+            if session.canEdit(.tools) {
                 HStack(spacing: AppSpacing.xs) {
                     Button { editingItem = item } label: { Image(systemName: "pencil") }
                         .buttonStyle(.glass)
@@ -1962,7 +1962,7 @@ struct PreventiveTemplateDetailView: View {
             detail = try await session.withValidAccessToken {
                 try await toolClient().get("api/v1/preventive-templates/\(templateID)", bearerToken: $0)
             }
-            if session.currentUser?.role == .administrator {
+            if session.canEdit(.tools) {
                 let page: ToolInventoryItemPage = try await session.withValidAccessToken {
                     try await toolClient().get(
                         "api/v1/tool-admin/items",

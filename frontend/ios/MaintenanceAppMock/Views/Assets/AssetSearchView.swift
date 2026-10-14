@@ -683,14 +683,14 @@ struct AssetSearchView: View {
             HStack(alignment: .center, spacing: AppSpacing.md) {
                 pageTitle
                 Spacer()
-                if session.currentUser?.role == .administrator {
+                if session.canEdit(.equipment) {
                     newEquipmentButton
                 }
             }
 
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 pageTitle
-                if session.currentUser?.role == .administrator {
+                if session.canEdit(.equipment) {
                     newEquipmentButton
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
@@ -1233,7 +1233,7 @@ struct AssetDetailView: View {
                 ComponentAdministrationSheet(
                     equipment: equipment,
                     nodes: assetStore.trees[assetID] ?? [],
-                    canFullyAdminister: session.currentUser?.role == .administrator
+                    canFullyAdminister: session.canEdit(.equipment)
                 )
                 .environmentObject(session)
                 .environmentObject(assetStore)
@@ -1289,7 +1289,7 @@ struct AssetDetailView: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            if session.currentUser?.role == .administrator {
+            if session.canEdit(.equipment) {
                 HStack(spacing: AppSpacing.sm) {
                     Button {
                         isPresentingEditor = true
@@ -1433,7 +1433,7 @@ struct AssetDetailView: View {
             equipmentID: assetID,
             componentCount: equipment.componentCount,
             nodes: assetStore.trees[assetID] ?? [],
-            canFullyAdminister: session.currentUser?.role == .administrator
+            canFullyAdminister: session.canEdit(.equipment)
         ) {
             isPresentingComponentAdmin = true
         }

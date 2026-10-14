@@ -50,12 +50,14 @@ struct ProfileView: View {
 
                 GlassPanel {
                     ActionButtonGrid {
-                        Button {
-                            isChangingPassword = true
-                        } label: {
-                            Label("Cambiar password", systemImage: "key.fill")
+                        if session.canEdit(.profile) {
+                            Button {
+                                isChangingPassword = true
+                            } label: {
+                                Label("Cambiar password", systemImage: "key.fill")
+                            }
+                            .buttonStyle(ActionTileButtonStyle(prominent: true))
                         }
-                        .buttonStyle(ActionTileButtonStyle(prominent: true))
 
                         Button {
                             Task {

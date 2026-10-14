@@ -611,6 +611,38 @@ struct APIGeneratedReport: Decodable {
     }
 }
 
+struct APIReportDocumentPackageItem: Decodable, Identifiable {
+    let versionID: String
+    let reportKind: String
+    let displayName: String
+    let documentStatus: String
+    let generatedReport: APIGeneratedReport?
+
+    var id: String { versionID }
+
+    enum CodingKeys: String, CodingKey {
+        case versionID = "version_id"
+        case reportKind = "report_kind"
+        case displayName = "display_name"
+        case documentStatus = "document_status"
+        case generatedReport = "generated_report"
+    }
+}
+
+struct APIReportDocumentPackage: Decodable {
+    let activityID: String
+    let documents: [APIReportDocumentPackageItem]
+
+    var isGenerated: Bool {
+        !documents.isEmpty && documents.allSatisfy { $0.generatedReport != nil }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case activityID = "activity_id"
+        case documents
+    }
+}
+
 struct APIReportVersionDetail: Decodable {
     let id: String
     let reportKind: String
@@ -846,6 +878,27 @@ struct ReportAPIService {
         try await client.post(
             "/api/v1/report-versions/\(versionID)/generate-pdf",
             bearerToken: accessToken
+        )
+    }
+
+    func documentPackage(
+        activityID: String,
+        accessToken: String
+    ) async throws -> APIReportDocumentPackage {
+        try await client.get(
+            "/api/v1/maintenance-activities/\(activityID)/document-package",
+            bearerToken: accessToken
+        )
+    }
+
+    func generateDocumentPackage(
+        activityID: String,
+        accessToken: String
+    ) async throws -> APIReportDocumentPackage {
+        try await client.post(
+            "/api/v1/maintenance-activities/\(activityID)/document-package",
+            bearerToken: accessToken,
+            timeoutInterval: 60
         )
     }
 

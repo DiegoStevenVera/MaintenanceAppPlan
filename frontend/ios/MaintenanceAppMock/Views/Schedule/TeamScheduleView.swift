@@ -553,7 +553,7 @@ struct TeamScheduleView: View {
 
     private func canEdit(_ date: Date) -> Bool {
         guard store.schedule?.canEdit == true else { return false }
-        if session.currentUser?.role == .administrator { return true }
+        if session.canEdit(.schedule) { return true }
         return Calendar.schedule.startOfDay(for: date) >= Calendar.schedule.startOfDay(for: Date())
     }
 

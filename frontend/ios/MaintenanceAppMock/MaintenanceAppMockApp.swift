@@ -65,6 +65,7 @@ private struct AuthenticatedRootView: View {
                     .background(MaintenanceScreenBackground())
             } else if session.isAuthenticated {
                 MainTabView()
+                    .id(session.sessionViewID)
                     .transition(.opacity.combined(with: .scale(scale: 0.98)))
             } else {
                 LoginView()

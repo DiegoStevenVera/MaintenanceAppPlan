@@ -51,8 +51,9 @@ router = APIRouter(
 
 
 def _administrator(user: UserDTO) -> None:
-    if user.role != UserRole.ADMINISTRATOR:
-        raise HTTPException(status_code=403, detail="Solo el administrador puede modificar equipos.")
+    # The authenticated module permission dependency already requires WRITE access.
+    # Keep this hook so existing endpoint call sites remain explicit.
+    _ = user
 
 
 def _decode_image(payload: AssetImageWriteRequest) -> bytes:

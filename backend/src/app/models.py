@@ -21,7 +21,11 @@ from modules.asset_management.infrastructure.postgres.models import (
     AssetHistoryRecord,
     AssetRecord,
 )
-from modules.identity_access.infrastructure.postgres.models import RefreshSessionRecord, UserRecord
+from modules.identity_access.infrastructure.postgres.models import (
+    RefreshSessionRecord,
+    RoleModulePermissionRecord,
+    UserRecord,
+)
 from modules.maintenance_execution.infrastructure.postgres import (
     report_models as _report_models,  # noqa: F401
 )
@@ -71,6 +75,7 @@ __all__ = [
     "PreventiveScheduleRecord",
     "ProjectRecord",
     "RefreshSessionRecord",
+    "RoleModulePermissionRecord",
     "SiteRecord",
     "SlotTypeRecord",
     "StageRecord",

@@ -782,7 +782,7 @@ struct PCONPlanningView: View {
     }
 
     private var canEdit: Bool {
-        session.currentUser?.role.canEditPlanning == true
+        session.canEdit(.pcon)
     }
 
     var body: some View {

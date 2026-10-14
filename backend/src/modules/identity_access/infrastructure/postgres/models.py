@@ -67,3 +67,17 @@ class RefreshSessionRecord(Base):
         server_default=func.now(),
     )
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RoleModulePermissionRecord(Base):
+    __tablename__ = "role_module_permissions"
+
+    role: Mapped[str] = mapped_column(String(40), primary_key=True)
+    module: Mapped[str] = mapped_column(String(40), primary_key=True)
+    permission_level: Mapped[str] = mapped_column(String(16), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )

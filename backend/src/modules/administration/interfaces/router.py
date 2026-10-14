@@ -11,6 +11,9 @@ from modules.administration.interfaces.schemas import (
     ManagedUserDTO,
     ProjectDTO,
     ProjectWriteRequest,
+    RoleModulePermissionDTO,
+    RolePermissionGroupDTO,
+    RolePermissionWriteDTO,
     SiteOptionDTO,
     SiteWriteRequest,
     StageDTO,
@@ -23,9 +26,16 @@ from modules.administration.interfaces.schemas import (
     WorkAreaDTO,
     WorkAreaWriteRequest,
 )
+from modules.identity_access.application.permissions import (
+    AppModule,
+    MODULE_LABELS,
+    PermissionLevel,
+    default_permissions,
+)
 from modules.identity_access.application.security import hash_password
 from modules.identity_access.infrastructure.postgres.models import (
     RefreshSessionRecord,
+    RoleModulePermissionRecord,
     UserRecord,
 )
 from modules.identity_access.interfaces.dependencies import require_roles
@@ -64,6 +74,48 @@ def _clean_optional(value: str | None) -> str | None:
         return None
     normalized = value.strip()
     return normalized or None
+
+
+ROLE_LABELS = {
+    UserRole.MAINTENANCE_ENGINEER: "Ingeniero",
+    UserRole.COORDINATOR: "Coordinador",
+    UserRole.BOSS: "Jefe",
+    UserRole.ADMINISTRATOR: "Administrador",
+}
+
+
+async def _permission_groups(session: AsyncSession) -> list[RolePermissionGroupDTO]:
+    records = list((await session.scalars(select(RoleModulePermissionRecord))).all())
+    stored = {
+        (record.role, record.module): record.permission_level for record in records
+    }
+    groups: list[RolePermissionGroupDTO] = []
+    for role in UserRole:
+        resolved = default_permissions(role)
+        if role != UserRole.ADMINISTRATOR:
+            for module in AppModule:
+                value = stored.get((role.value, module.value))
+                if value:
+                    try:
+                        resolved[module] = PermissionLevel(value)
+                    except ValueError:
+                        pass
+        groups.append(
+            RolePermissionGroupDTO(
+                role=role,
+                role_label=ROLE_LABELS[role],
+                is_locked=role == UserRole.ADMINISTRATOR,
+                permissions=[
+                    RoleModulePermissionDTO(
+                        module=module,
+                        label=MODULE_LABELS[module],
+                        permission_level=resolved[module],
+                    )
+                    for module in AppModule
+                ],
+            )
+        )
+    return groups
 
 
 async def _active_area(
@@ -248,7 +300,54 @@ async def bootstrap(
             )
             for item in subsystems
         ],
+        role_permissions=await _permission_groups(session),
     )
+
+
+@router.put("/permissions/{role}", response_model=RolePermissionGroupDTO)
+async def update_role_permissions(
+    role: UserRole,
+    payload: RolePermissionWriteDTO,
+    session: AsyncSession = Depends(get_session),
+) -> RolePermissionGroupDTO:
+    _require_postgres()
+    if role == UserRole.ADMINISTRATOR:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Los permisos del administrador estan protegidos.",
+        )
+    missing = set(AppModule) - set(payload.permissions)
+    if missing:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "Debes definir el permiso de todos los modulos.",
+        )
+    existing = {
+        record.module: record
+        for record in (
+            await session.scalars(
+                select(RoleModulePermissionRecord).where(
+                    RoleModulePermissionRecord.role == role.value
+                )
+            )
+        ).all()
+    }
+    for module in AppModule:
+        level = payload.permissions[module]
+        record = existing.get(module.value)
+        if record is None:
+            session.add(
+                RoleModulePermissionRecord(
+                    role=role.value,
+                    module=module.value,
+                    permission_level=level.value,
+                )
+            )
+        else:
+            record.permission_level = level.value
+    await session.commit()
+    groups = await _permission_groups(session)
+    return next(group for group in groups if group.role == role)
 
 
 @router.post(

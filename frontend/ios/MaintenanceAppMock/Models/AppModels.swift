@@ -43,6 +43,40 @@ enum UserRole: String, CaseIterable, Identifiable, Codable {
     var canEditSchedules: Bool { self == .coordinator || self == .administrator }
 }
 
+enum AppModulePermission: String, CaseIterable, Identifiable, Codable {
+    case home = "HOME"
+    case preventive = "PREVENTIVE"
+    case corrective = "CORRECTIVE"
+    case pcon = "PCON"
+    case equipment = "EQUIPMENT"
+    case schedule = "SCHEDULE"
+    case stock = "STOCK"
+    case tools = "TOOLS"
+    case profile = "PROFILE"
+
+    var id: String { rawValue }
+}
+
+enum PermissionLevel: String, CaseIterable, Identifiable, Codable, Comparable {
+    case none = "NONE"
+    case read = "READ"
+    case write = "WRITE"
+
+    var id: String { rawValue }
+
+    static func < (lhs: PermissionLevel, rhs: PermissionLevel) -> Bool {
+        lhs.rank < rhs.rank
+    }
+
+    private var rank: Int {
+        switch self {
+        case .none: 0
+        case .read: 1
+        case .write: 2
+        }
+    }
+}
+
 struct AppUser: Identifiable, Codable {
     let id: String
     let name: String

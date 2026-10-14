@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -14,15 +15,24 @@ from modules.identity_access.application.security import (
     token_digest,
 )
 from modules.identity_access.application.seed_users import SEED_USERS
+from modules.identity_access.application.permissions import (
+    AppModule,
+    MODULE_LABELS,
+    PermissionLevel,
+    default_permissions,
+)
+from modules.identity_access.infrastructure.postgres.models import RoleModulePermissionRecord
 from modules.identity_access.infrastructure.postgres.repository import PostgresUserRepository
 from modules.identity_access.interfaces.dependencies import get_current_user, require_roles
 from modules.identity_access.interfaces.schemas import (
     ChangePasswordRequest,
+    CurrentPermissionsDTO,
     ImpersonateRoleRequest,
     LoginRequest,
     LogoutRequest,
     RefreshTokenRequest,
     RolePreviewOptionDTO,
+    ModulePermissionDTO,
     TokenPairDTO,
     UserDTO,
 )
@@ -127,6 +137,42 @@ async def logout(
 @router.get("/me", response_model=UserDTO)
 async def get_me(current_user: UserDTO = Depends(get_current_user)) -> UserDTO:
     return current_user
+
+
+@router.get("/me/permissions", response_model=CurrentPermissionsDTO)
+async def get_my_permissions(
+    current_user: UserDTO = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> CurrentPermissionsDTO:
+    resolved = default_permissions(current_user.role)
+    if uses_postgres() and current_user.role != UserRole.ADMINISTRATOR:
+        records = list(
+            (
+                await session.scalars(
+                    select(RoleModulePermissionRecord).where(
+                        RoleModulePermissionRecord.role == current_user.role.value
+                    )
+                )
+            ).all()
+        )
+        for record in records:
+            try:
+                resolved[AppModule(record.module)] = PermissionLevel(
+                    record.permission_level
+                )
+            except ValueError:
+                continue
+    return CurrentPermissionsDTO(
+        role=current_user.role,
+        permissions=[
+            ModulePermissionDTO(
+                module=module,
+                label=MODULE_LABELS[module],
+                permission_level=resolved[module],
+            )
+            for module in AppModule
+        ],
+    )
 
 
 @router.get("/impersonation-roles", response_model=list[RolePreviewOptionDTO])

@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 
+from modules.identity_access.application.permissions import AppModule, PermissionLevel
 from shared_kernel.schemas import UserRole
 
 
@@ -37,6 +38,17 @@ class RolePreviewOptionDTO(BaseModel):
     role: UserRole
     role_label: str
     user_name: str
+
+
+class ModulePermissionDTO(BaseModel):
+    module: AppModule
+    label: str
+    permission_level: PermissionLevel
+
+
+class CurrentPermissionsDTO(BaseModel):
+    role: UserRole
+    permissions: list[ModulePermissionDTO]
 
 
 class TokenPairDTO(BaseModel):

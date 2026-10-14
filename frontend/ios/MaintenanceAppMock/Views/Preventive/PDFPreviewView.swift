@@ -102,19 +102,29 @@ private enum CalibrationVersionSection: Int, CaseIterable, Identifiable {
 struct PDFPreviewView: View {
     @EnvironmentObject private var session: SessionStore
     let versionID: String
+    let packageActivityID: String?
 
     @State private var detail: APIReportVersionDetail?
+    @State private var documentPackage: APIReportDocumentPackage?
     @State private var pdfData: Data?
     @State private var pdfURL: URL?
+    @State private var presentedPDF: PresentedPDF?
     @State private var isLoading = true
     @State private var isGenerating = false
     @State private var isPreparingEmail = false
-    @State private var isPresentingPDF = false
+    @State private var isChoosingPackageDocument = false
     @State private var mailDraft: ReportEmailDraft?
+    @State private var emailShareDraft: ReportEmailShareDraft?
     @State private var errorMessage: String?
+    @State private var statusMessage: String?
     @State private var selectedPreventiveSection = PreventiveVersionSection.general
     @State private var selectedCorrectiveSection = CorrectiveVersionSection.event
     @State private var selectedCalibrationSection = CalibrationVersionSection.general
+
+    init(versionID: String, packageActivityID: String? = nil) {
+        self.versionID = versionID
+        self.packageActivityID = packageActivityID
+    }
 
     private var reportService: ReportAPIService {
         ReportAPIService(
@@ -130,7 +140,7 @@ struct PDFPreviewView: View {
                 pinnedViews: [.sectionHeaders]
             ) {
                 if let detail {
-                    if detail.reportKind == "PREVENTIVE" {
+                    if isPreventive(detail.reportKind) {
                         preventiveVersionTitleBar(detail)
                         preventiveVersionHeader(detail)
                         Section {
@@ -176,6 +186,11 @@ struct PDFPreviewView: View {
                         .foregroundStyle(.red)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                if let statusMessage {
+                    Text(statusMessage)
+                        .foregroundStyle(BrandColor.green)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(AppSpacing.lg)
             .frame(maxWidth: 1_420, alignment: .leading)
@@ -184,22 +199,37 @@ struct PDFPreviewView: View {
         .background(MaintenanceScreenBackground())
         .navigationTitle("Versión del reporte")
         .task { await loadDetail() }
-        .sheet(isPresented: $isPresentingPDF) {
-            if let pdfData {
-                PDFDocumentViewer(data: pdfData)
-            }
+        .fullScreenCover(item: $presentedPDF) { presentedPDF in
+            PDFDocumentViewer(data: presentedPDF.data)
+                .interactiveDismissDisabled()
         }
         .sheet(item: $mailDraft) { draft in
             ReportMailComposer(draft: draft) { result in
                 switch result {
                 case .success(.sent):
-                    errorMessage = "Correo preparado y enviado desde Mail."
+                    statusMessage = "Correo enviado desde Mail."
                 case .success:
                     break
                 case .failure(let error):
                     errorMessage = error.localizedDescription
                 }
             }
+        }
+        .sheet(item: $emailShareDraft) { draft in
+            ReportEmailShareSheet(draft: draft)
+        }
+        .alert(
+            "No se pudo completar la acción",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: { isPresented in
+                    if !isPresented { errorMessage = nil }
+                }
+            )
+        ) {
+            Button("Aceptar", role: .cancel) {}
+        } message: {
+            Text(errorMessage ?? "Ocurrió un error inesperado.")
         }
     }
 
@@ -486,8 +516,11 @@ struct PDFPreviewView: View {
     }
 
     private func preventiveVersionActions(_ detail: APIReportVersionDetail) -> some View {
-        HStack(spacing: AppSpacing.sm) {
-            if detail.generatedReport != nil {
+        let usesDocumentPackage = packageActivityID != nil && isPreventive(detail.reportKind)
+        return HStack(spacing: AppSpacing.sm) {
+            if usesDocumentPackage {
+                packageActions(detail)
+            } else if detail.generatedReport != nil {
                 Button("Abrir PDF", systemImage: "doc.viewfinder") {
                     Task { await loadPDF() }
                 }
@@ -500,12 +533,12 @@ struct PDFPreviewView: View {
                 .disabled(isGenerating)
             }
 
-            if detail.generatedReport != nil {
+            if !usesDocumentPackage, detail.generatedReport != nil {
                 Button {
                     Task { await prepareEmail(for: detail) }
                 } label: {
                     if isPreparingEmail {
-                        ProgressView()
+                        Label("Preparando...", systemImage: "arrow.triangle.2.circlepath")
                     } else {
                         Label("Enviar por correo", systemImage: "envelope.fill")
                     }
@@ -515,6 +548,100 @@ struct PDFPreviewView: View {
             }
         }
         .fixedSize(horizontal: true, vertical: false)
+    }
+
+    @ViewBuilder
+    private func packageActions(_ detail: APIReportVersionDetail) -> some View {
+        let documents = documentPackage?.documents ?? []
+        if documentPackage?.isGenerated == true {
+            if documents.count == 1,
+               let document = documents.first,
+               let generatedReport = document.generatedReport {
+                Button("Abrir PDF", systemImage: "doc.viewfinder") {
+                    Task {
+                        await loadPDF(
+                            versionID: document.versionID,
+                            fileName: generatedReport.fileName
+                        )
+                    }
+                }
+                .buttonStyle(.glassProminent)
+            } else {
+                Button("Abrir PDFs", systemImage: "doc.on.doc.fill") {
+                    isChoosingPackageDocument = true
+                }
+                .buttonStyle(.glassProminent)
+                .popover(
+                    isPresented: $isChoosingPackageDocument,
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .top
+                ) {
+                    packageDocumentPicker(documents)
+                        .presentationCompactAdaptation(.popover)
+                }
+            }
+
+            Button {
+                Task { await prepareEmail(for: detail) }
+            } label: {
+                if isPreparingEmail {
+                    Label("Preparando...", systemImage: "arrow.triangle.2.circlepath")
+                } else {
+                    Label("Enviar por correo", systemImage: "envelope.fill")
+                }
+            }
+            .buttonStyle(.glass)
+            .disabled(isGenerating || isPreparingEmail)
+        } else {
+            Button(
+                isGenerating
+                    ? "Generando..."
+                    : (documents.count == 1 ? "Generar PDF" : "Generar PDFs"),
+                systemImage: "doc.badge.plus"
+            ) {
+                Task { await generatePDF() }
+            }
+            .buttonStyle(.glassProminent)
+            .disabled(isGenerating || documentPackage == nil)
+        }
+    }
+
+    private func packageDocumentPicker(
+        _ documents: [APIReportDocumentPackageItem]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            Text("Abrir documento")
+                .font(.headline)
+            Text("Selecciona el PDF que deseas revisar.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+
+            ForEach(documents) { document in
+                if let generatedReport = document.generatedReport {
+                    Button {
+                        isChoosingPackageDocument = false
+                        Task {
+                            await loadPDF(
+                                versionID: document.versionID,
+                                fileName: generatedReport.fileName
+                            )
+                        }
+                    } label: {
+                        Label(
+                            document.displayName,
+                            systemImage: document.reportKind == "CALIBRATION"
+                                ? "waveform.path.ecg"
+                                : "doc.text.fill"
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, AppSpacing.sm)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(AppSpacing.lg)
+        .frame(width: 340)
     }
 
     private var preventiveSectionSelector: some View {
@@ -1244,8 +1371,17 @@ struct PDFPreviewView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            detail = try await session.withValidAccessToken { token in
+            let loadedDetail = try await session.withValidAccessToken { token in
                 try await reportService.versionDetail(versionID: versionID, accessToken: token)
+            }
+            detail = loadedDetail
+            if let packageActivityID, isPreventive(loadedDetail.reportKind) {
+                documentPackage = try await session.withValidAccessToken { token in
+                    try await reportService.documentPackage(
+                        activityID: packageActivityID,
+                        accessToken: token
+                    )
+                }
             }
         } catch {
             errorMessage = error.localizedDescription
@@ -1256,34 +1392,57 @@ struct PDFPreviewView: View {
     private func generatePDF() async {
         isGenerating = true
         errorMessage = nil
+        statusMessage = nil
         defer { isGenerating = false }
         do {
-            _ = try await session.withValidAccessToken { token in
-                try await reportService.generatePDF(versionID: versionID, accessToken: token)
+            if let packageActivityID,
+               detail.map({ isPreventive($0.reportKind) }) == true {
+                let generatedPackage = try await session.withValidAccessToken { token in
+                    try await reportService.generateDocumentPackage(
+                        activityID: packageActivityID,
+                        accessToken: token
+                    )
+                }
+                documentPackage = generatedPackage
+                let count = generatedPackage.documents.count
+                statusMessage = count == 1
+                    ? "El PDF quedó listo."
+                    : "Los \(count) PDF del mantenimiento quedaron listos."
+            } else {
+                _ = try await session.withValidAccessToken { token in
+                    try await reportService.generatePDF(versionID: versionID, accessToken: token)
+                }
+                await loadDetail()
+                await loadPDF()
             }
-            await loadDetail()
-            await loadPDF()
         } catch {
             errorMessage = error.localizedDescription
         }
     }
 
     @MainActor
-    private func loadPDF() async {
+    private func loadPDF(
+        versionID requestedVersionID: String? = nil,
+        fileName requestedFileName: String? = nil
+    ) async {
         errorMessage = nil
         do {
+            let resolvedVersionID = requestedVersionID ?? versionID
             let data = try await session.withValidAccessToken { token in
-                try await reportService.downloadPDF(versionID: versionID, accessToken: token)
+                try await reportService.downloadPDF(
+                    versionID: resolvedVersionID,
+                    accessToken: token
+                )
             }
             let fallbackName = detail?.reportKind == "CORRECTIVE"
                 ? "reporte-correctivo.pdf"
                 : "reporte-preventivo.pdf"
-            let fileName = detail?.generatedReport?.fileName ?? fallbackName
+            let fileName = requestedFileName ?? detail?.generatedReport?.fileName ?? fallbackName
             let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
             try data.write(to: url, options: .atomic)
             pdfData = data
             pdfURL = url
-            isPresentingPDF = true
+            presentedPDF = PresentedPDF(data: data)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1292,10 +1451,6 @@ struct PDFPreviewView: View {
     @MainActor
     private func prepareEmail(for detail: APIReportVersionDetail) async {
         guard !isPreparingEmail else { return }
-        guard MFMailComposeViewController.canSendMail() else {
-            errorMessage = "Configura una cuenta en la app Mail del iPad para enviar el reporte."
-            return
-        }
         guard let recipient = session.currentUser?.email, !recipient.isEmpty else {
             errorMessage = "No se encontró el correo del usuario actual."
             return
@@ -1305,23 +1460,76 @@ struct PDFPreviewView: View {
         isPreparingEmail = true
         defer { isPreparingEmail = false }
         do {
-            let attachmentData: Data
-            if let pdfData {
-                attachmentData = pdfData
-            } else {
-                attachmentData = try await session.withValidAccessToken { token in
-                    try await reportService.downloadPDF(versionID: versionID, accessToken: token)
+            let attachments: [ReportEmailAttachment]
+            if packageActivityID != nil, isPreventive(detail.reportKind) {
+                guard let documentPackage, documentPackage.isGenerated else {
+                    errorMessage = "Genera todos los PDF antes de preparar el correo."
+                    return
                 }
+                attachments = try await session.withValidAccessToken { token in
+                    var downloaded: [ReportEmailAttachment] = []
+                    for document in documentPackage.documents {
+                        guard let generatedReport = document.generatedReport else { continue }
+                        let data = try await reportService.downloadPDF(
+                            versionID: document.versionID,
+                            accessToken: token
+                        )
+                        downloaded.append(
+                            ReportEmailAttachment(
+                                data: data,
+                                fileName: generatedReport.fileName
+                            )
+                        )
+                    }
+                    return downloaded
+                }
+            } else {
+                let attachmentData: Data
+                if let pdfData {
+                    attachmentData = pdfData
+                } else {
+                    attachmentData = try await session.withValidAccessToken { token in
+                        try await reportService.downloadPDF(
+                            versionID: versionID,
+                            accessToken: token
+                        )
+                    }
+                }
+                let fileName = detail.generatedReport?.fileName
+                    ?? (detail.reportKind == "CORRECTIVE"
+                        ? "reporte-correctivo.pdf"
+                        : "reporte-preventivo.pdf")
+                attachments = [
+                    ReportEmailAttachment(data: attachmentData, fileName: fileName)
+                ]
             }
-            let fileName = detail.generatedReport?.fileName
-                ?? (detail.reportKind == "CORRECTIVE" ? "reporte-correctivo.pdf" : "reporte-preventivo.pdf")
-            mailDraft = ReportEmailDraft(
+            guard !attachments.isEmpty else {
+                errorMessage = "No se encontraron PDF generados para adjuntar."
+                return
+            }
+
+            let draft = ReportEmailDraft(
                 recipient: recipient,
                 subject: emailSubject(for: detail),
                 body: emailBody(for: detail),
-                attachmentData: attachmentData,
-                attachmentFileName: fileName
+                attachments: attachments
             )
+            if MFMailComposeViewController.canSendMail() {
+                mailDraft = draft
+            } else {
+                let fileURLs = try attachments.map { attachment in
+                    let fileName = URL(fileURLWithPath: attachment.fileName).lastPathComponent
+                    let url = FileManager.default.temporaryDirectory
+                        .appendingPathComponent(fileName)
+                    try attachment.data.write(to: url, options: .atomic)
+                    return url
+                }
+                emailShareDraft = ReportEmailShareDraft(
+                    subject: draft.subject,
+                    body: draft.body,
+                    fileURLs: fileURLs
+                )
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1360,6 +1568,10 @@ struct PDFPreviewView: View {
             ?? detail.correctiveReport?.correctiveStartedAt
             ?? detail.activity.actualStartAt
             ?? detail.createdAt
+    }
+
+    private func isPreventive(_ reportKind: String) -> Bool {
+        reportKind == "PREVENTIVE" || reportKind == "PREVENTIVE_MAIN"
     }
 
     private func reportEndedAt(for detail: APIReportVersionDetail) -> Date? {
@@ -1425,13 +1637,48 @@ struct PDFDocumentViewer: View {
     }
 }
 
+private struct PresentedPDF: Identifiable {
+    let id = UUID()
+    let data: Data
+}
+
 private struct ReportEmailDraft: Identifiable {
     let id = UUID()
     let recipient: String
     let subject: String
     let body: String
-    let attachmentData: Data
-    let attachmentFileName: String
+    let attachments: [ReportEmailAttachment]
+}
+
+private struct ReportEmailAttachment {
+    let data: Data
+    let fileName: String
+}
+
+private struct ReportEmailShareDraft: Identifiable {
+    let id = UUID()
+    let subject: String
+    let body: String
+    let fileURLs: [URL]
+}
+
+private struct ReportEmailShareSheet: UIViewControllerRepresentable {
+    let draft: ReportEmailShareDraft
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let activityItems: [Any] = [draft.body] + draft.fileURLs.map { $0 as Any }
+        let controller = UIActivityViewController(
+            activityItems: activityItems,
+            applicationActivities: nil
+        )
+        controller.setValue(draft.subject, forKey: "subject")
+        return controller
+    }
+
+    func updateUIViewController(
+        _ uiViewController: UIActivityViewController,
+        context: Context
+    ) {}
 }
 
 private struct ReportMailComposer: UIViewControllerRepresentable {
@@ -1449,11 +1696,13 @@ private struct ReportMailComposer: UIViewControllerRepresentable {
         composer.setToRecipients([draft.recipient])
         composer.setSubject(draft.subject)
         composer.setMessageBody(draft.body, isHTML: false)
-        composer.addAttachmentData(
-            draft.attachmentData,
-            mimeType: "application/pdf",
-            fileName: draft.attachmentFileName
-        )
+        for attachment in draft.attachments {
+            composer.addAttachmentData(
+                attachment.data,
+                mimeType: "application/pdf",
+                fileName: attachment.fileName
+            )
+        }
         return composer
     }
 
@@ -1497,7 +1746,7 @@ private struct PDFKitView: UIViewRepresentable {
     }
 
     func updateUIView(_ view: PDFView, context: Context) {
-        view.document = PDFDocument(data: data)
+        // The presented payload is immutable; resetting the document here interrupts scrolling.
     }
 }
 

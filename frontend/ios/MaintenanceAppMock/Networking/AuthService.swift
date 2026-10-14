@@ -32,6 +32,14 @@ struct AuthService {
         return response.appUser
     }
 
+    func permissions(accessToken: String) async throws -> [AppModulePermission: PermissionLevel] {
+        let response: CurrentPermissionsResponse = try await client.get(
+            "api/v1/auth/me/permissions",
+            bearerToken: accessToken
+        )
+        return Dictionary(uniqueKeysWithValues: response.permissions.map { ($0.module, $0.level) })
+    }
+
     func logout(refreshToken: String) async throws {
         try await client.postWithoutResponse(
             "api/v1/auth/logout",
@@ -187,6 +195,20 @@ private struct APIUser: Decodable {
     }
 }
 
+private struct CurrentPermissionsResponse: Decodable {
+    let permissions: [ModulePermissionResponse]
+}
+
+private struct ModulePermissionResponse: Decodable {
+    let module: AppModulePermission
+    let level: PermissionLevel
+
+    enum CodingKeys: String, CodingKey {
+        case module
+        case level = "permission_level"
+    }
+}
+
 struct KeychainStore {
     enum Key: String {
         case accessToken
@@ -267,6 +289,8 @@ private enum KeychainError: LocalizedError {
 @MainActor
 final class SessionStore: ObservableObject {
     @Published private(set) var currentUser: AppUser?
+    @Published private(set) var permissions: [AppModulePermission: PermissionLevel] = [:]
+    @Published private(set) var sessionViewID = UUID()
     @Published private(set) var isRestoring = true
     @Published private(set) var rolePreviewAdministrator: AppUser?
 
@@ -284,6 +308,14 @@ final class SessionStore: ObservableObject {
         rolePreviewAdministrator != nil
     }
 
+    func canView(_ module: AppModulePermission) -> Bool {
+        resolvedPermission(for: module) >= .read
+    }
+
+    func canEdit(_ module: AppModulePermission) -> Bool {
+        resolvedPermission(for: module) == .write
+    }
+
     func restoreSession() async -> AppUser? {
         defer { isRestoring = false }
         rolePreviewAdministrator = cachedAdministrator()
@@ -299,12 +331,18 @@ final class SessionStore: ObservableObject {
         do {
             let user = try await service.currentUser(accessToken: accessToken)
             currentUser = user
+            await loadPermissions(service: service, accessToken: accessToken, role: user.role)
             return user
         } catch APIClient.APIError.unauthorized {
             do {
                 let renewed = try await service.refresh(refreshToken: refreshToken)
                 try persist(renewed)
                 currentUser = renewed.user
+                await loadPermissions(
+                    service: service,
+                    accessToken: renewed.accessToken,
+                    role: renewed.user.role
+                )
                 return renewed.user
             } catch APIClient.APIError.unauthorized {
                 clearLocalSession()
@@ -312,11 +350,13 @@ final class SessionStore: ObservableObject {
             } catch {
                 let cachedUser = cachedUser()
                 currentUser = cachedUser
+                permissions = cachedPermissions() ?? defaultPermissions(for: cachedUser?.role)
                 return cachedUser
             }
         } catch {
             let cachedUser = cachedUser()
             currentUser = cachedUser
+            permissions = cachedPermissions() ?? defaultPermissions(for: cachedUser?.role)
             return cachedUser
         }
     }
@@ -327,6 +367,12 @@ final class SessionStore: ObservableObject {
             .login(email: email, password: password)
         try persist(authenticated)
         UserDefaults.standard.set(normalizedURL, forKey: "apiBaseURL")
+        await loadPermissions(
+            service: AuthService(baseURLString: normalizedURL),
+            accessToken: authenticated.accessToken,
+            role: authenticated.user.role
+        )
+        sessionViewID = UUID()
         currentUser = authenticated.user
         return authenticated.user
     }
@@ -368,6 +414,12 @@ final class SessionStore: ObservableObject {
         }
         try persist(preview)
         rolePreviewAdministrator = administrator
+        await loadPermissions(
+            service: AuthService(baseURLString: baseURL),
+            accessToken: preview.accessToken,
+            role: preview.user.role
+        )
+        sessionViewID = UUID()
         currentUser = preview.user
         return preview.user
     }
@@ -392,6 +444,12 @@ final class SessionStore: ObservableObject {
             .refresh(refreshToken: refreshToken)
         try persist(administrator)
         clearAdministratorPreview()
+        await loadPermissions(
+            service: AuthService(baseURLString: baseURL),
+            accessToken: administrator.accessToken,
+            role: administrator.user.role
+        )
+        sessionViewID = UUID()
         currentUser = administrator.user
         return administrator.user
     }
@@ -443,6 +501,11 @@ final class SessionStore: ObservableObject {
             let renewed = try await task.value
             try persist(renewed)
             currentUser = renewed.user
+            await loadPermissions(
+                service: AuthService(baseURLString: baseURL),
+                accessToken: renewed.accessToken,
+                role: renewed.user.role
+            )
             return renewed
         } catch APIClient.APIError.unauthorized {
             clearLocalSession()
@@ -465,7 +528,10 @@ final class SessionStore: ObservableObject {
         try? keychain.delete(.refreshToken)
         clearAdministratorPreview()
         UserDefaults.standard.removeObject(forKey: cachedUserKey)
+        UserDefaults.standard.removeObject(forKey: cachedPermissionsKey)
         currentUser = nil
+        permissions = [:]
+        sessionViewID = UUID()
     }
 
     private func clearAdministratorPreview() {
@@ -487,5 +553,65 @@ final class SessionStore: ObservableObject {
             return nil
         }
         return try? JSONDecoder().decode(AppUser.self, from: data)
+    }
+
+    private var cachedPermissionsKey: String { "authenticatedPermissionsCache" }
+
+    private func loadPermissions(
+        service: AuthService,
+        accessToken: String,
+        role: UserRole
+    ) async {
+        do {
+            permissions = try await service.permissions(accessToken: accessToken)
+            if let data = try? JSONEncoder().encode(permissions) {
+                UserDefaults.standard.set(data, forKey: cachedPermissionsKey)
+            }
+        } catch {
+            permissions = cachedPermissions() ?? defaultPermissions(for: role)
+        }
+    }
+
+    private func cachedPermissions() -> [AppModulePermission: PermissionLevel]? {
+        guard let data = UserDefaults.standard.data(forKey: cachedPermissionsKey) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(
+            [AppModulePermission: PermissionLevel].self,
+            from: data
+        )
+    }
+
+    private func resolvedPermission(for module: AppModulePermission) -> PermissionLevel {
+        if currentUser?.role == .administrator { return .write }
+        return permissions[module] ?? defaultPermissions(for: currentUser?.role)[module] ?? .none
+    }
+
+    private func defaultPermissions(
+        for role: UserRole?
+    ) -> [AppModulePermission: PermissionLevel] {
+        guard let role else { return [:] }
+        if role == .administrator {
+            return Dictionary(uniqueKeysWithValues: AppModulePermission.allCases.map { ($0, .write) })
+        }
+        var result = Dictionary(
+            uniqueKeysWithValues: AppModulePermission.allCases.map { ($0, PermissionLevel.none) }
+        )
+        for module in [
+            AppModulePermission.home,
+            .preventive,
+            .corrective,
+            .equipment,
+            .schedule,
+            .profile,
+        ] {
+            result[module] = .read
+        }
+        if role == .maintenanceEngineer || role == .coordinator {
+            result[.preventive] = .write
+            result[.corrective] = .write
+        }
+        if role == .coordinator { result[.schedule] = .write }
+        return result
     }
 }

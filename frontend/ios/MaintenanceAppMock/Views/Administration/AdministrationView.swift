@@ -8,15 +8,49 @@ private struct AdministrationSnapshot: Decodable {
     let stages: [ManagedStage]
     let systems: [ManagedSystem]
     let subsystems: [ManagedSubsystem]
+    let rolePermissions: [ManagedRolePermissions]
 
     enum CodingKeys: String, CodingKey {
         case users, sites, projects, stages, systems, subsystems
         case workAreas = "work_areas"
+        case rolePermissions = "role_permissions"
     }
 
     static let empty = AdministrationSnapshot(
-        users: [], workAreas: [], sites: [], projects: [], stages: [], systems: [], subsystems: []
+        users: [], workAreas: [], sites: [], projects: [], stages: [], systems: [], subsystems: [], rolePermissions: []
     )
+}
+
+private struct ManagedRolePermissions: Decodable, Identifiable {
+    let role: String
+    let roleLabel: String
+    let isLocked: Bool
+    let permissions: [ManagedModulePermission]
+
+    var id: String { role }
+
+    enum CodingKeys: String, CodingKey {
+        case role, permissions
+        case roleLabel = "role_label"
+        case isLocked = "is_locked"
+    }
+}
+
+private struct ManagedModulePermission: Decodable, Identifiable {
+    let module: String
+    let label: String
+    let permissionLevel: String
+
+    var id: String { module }
+
+    enum CodingKeys: String, CodingKey {
+        case module, label
+        case permissionLevel = "permission_level"
+    }
+}
+
+private struct RolePermissionsPayload: Encodable {
+    let permissions: [String: String]
 }
 
 private struct ManagedUser: Decodable, Identifiable, Hashable {
@@ -260,11 +294,20 @@ private struct AdministrationService {
             try await client.post("api/v1/administration/subsystems", body: payload, bearerToken: token)
         }
     }
+
+    func savePermissions(role: String, permissions: [String: String], token: String) async throws {
+        let _: ManagedRolePermissions = try await client.put(
+            "api/v1/administration/permissions/\(role)",
+            body: RolePermissionsPayload(permissions: permissions),
+            bearerToken: token
+        )
+    }
 }
 
 private enum AdministrationSection: String, CaseIterable, Identifiable {
     case people = "Usuarios y personal"
     case organization = "Estructura organizacional"
+    case permissions = "Permisos por perfil"
     case operations = "Configuracion operativa"
     var id: String { rawValue }
 }
@@ -313,6 +356,9 @@ struct AdministrationView: View {
     @State private var isShowingOfflineWork = false
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var selectedPermissionRole = "MAINTENANCE_ENGINEER"
+    @State private var permissionDrafts: [String: [String: String]] = [:]
+    @State private var isSavingPermissions = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -326,6 +372,8 @@ struct AdministrationView: View {
                         peopleContent(isWide: geometry.size.width >= 900)
                     case .organization:
                         organizationContent(isWide: geometry.size.width >= 900)
+                    case .permissions:
+                        permissionsContent(isWide: geometry.size.width >= 900)
                     case .operations:
                         operationsContent(isWide: geometry.size.width >= 900)
                     }
@@ -378,11 +426,11 @@ struct AdministrationView: View {
             HStack(alignment: .bottom) {
                 headerTitle
                 Spacer()
-                if section != .operations { createButton }
+                if section == .people || section == .organization { createButton }
             }
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 headerTitle
-                if section != .operations { createButton }
+                if section == .people || section == .organization { createButton }
             }
         }
     }
@@ -429,6 +477,169 @@ struct AdministrationView: View {
             .padding(.horizontal, AppSpacing.md)
             .frame(minHeight: 52)
             .background(Color.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private func permissionsContent(isWide: Bool) -> some View {
+        GlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                SectionHeaderText(
+                    title: "Permisos por perfil",
+                    subtitle: "Define qué módulos puede ver cada perfil y si puede modificarlos. Administración permanece reservada para administradores."
+                )
+
+                if isWide {
+                    HStack(alignment: .top, spacing: AppSpacing.lg) {
+                        permissionRoleList.frame(width: 260)
+                        permissionEditor
+                    }
+                } else {
+                    Picker("Perfil", selection: $selectedPermissionRole) {
+                        ForEach(snapshot.rolePermissions) { group in
+                            Text(group.roleLabel).tag(group.role)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .padding(.horizontal, AppSpacing.md)
+                    .frame(maxWidth: .infinity, minHeight: 52, alignment: .leading)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
+                    permissionEditor
+                }
+            }
+        }
+    }
+
+    private var permissionRoleList: some View {
+        VStack(spacing: AppSpacing.xs) {
+            ForEach(snapshot.rolePermissions) { group in
+                Button {
+                    selectedPermissionRole = group.role
+                } label: {
+                    HStack {
+                        Image(systemName: group.isLocked ? "lock.fill" : "person.crop.circle")
+                        Text(group.roleLabel)
+                            .fontWeight(selectedPermissionRole == group.role ? .semibold : .regular)
+                        Spacer()
+                        if selectedPermissionRole == group.role {
+                            Image(systemName: "chevron.right")
+                        }
+                    }
+                    .foregroundStyle(selectedPermissionRole == group.role ? BrandColor.red : .primary)
+                    .padding(AppSpacing.md)
+                    .background(
+                        selectedPermissionRole == group.role ? BrandColor.redSubtle : Color.clear,
+                        in: RoundedRectangle(cornerRadius: 8)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var permissionEditor: some View {
+        if let group = snapshot.rolePermissions.first(where: { $0.role == selectedPermissionRole }) {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(group.roleLabel).font(.title3.bold())
+                        Text(group.isLocked ? "Acceso total protegido" : "Selecciona el nivel de acceso por módulo")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !group.isLocked {
+                        Button {
+                            Task { await savePermissions(for: group.role) }
+                        } label: {
+                            if isSavingPermissions {
+                                ProgressView().tint(.white)
+                            } else {
+                                Label("Guardar permisos", systemImage: "checkmark.circle.fill")
+                            }
+                        }
+                        .buttonStyle(ActionTileButtonStyle(prominent: true))
+                        .disabled(isSavingPermissions)
+                    }
+                }
+
+                ForEach(group.permissions) { permission in
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: AppSpacing.md) {
+                            permissionModuleLabel(permission)
+                            Spacer()
+                            permissionLevelPicker(group: group, permission: permission)
+                                .frame(width: 430)
+                        }
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            permissionModuleLabel(permission)
+                            permissionLevelPicker(group: group, permission: permission)
+                        }
+                    }
+                    .padding(AppSpacing.md)
+                    .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+                }
+
+                Label(
+                    "Los cambios se aplican al volver a iniciar sesión o al renovar la sesión.",
+                    systemImage: "info.circle"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+            }
+        } else {
+            ContentUnavailableView(
+                "Sin perfiles",
+                systemImage: "person.crop.circle.badge.questionmark"
+            )
+        }
+    }
+
+    private func permissionModuleLabel(_ permission: ManagedModulePermission) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(permission.label).font(.headline)
+            Text(permissionDescription(permission.module))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    private func permissionLevelPicker(
+        group: ManagedRolePermissions,
+        permission: ManagedModulePermission
+    ) -> some View {
+        Picker(
+            permission.label,
+            selection: permissionBinding(role: group.role, module: permission.module)
+        ) {
+            Text("Sin acceso").tag("NONE")
+            Text("Solo lectura").tag("READ")
+            Text("Puede modificar").tag("WRITE")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .disabled(group.isLocked)
+    }
+
+    private func permissionBinding(role: String, module: String) -> Binding<String> {
+        Binding(
+            get: { permissionDrafts[role]?[module] ?? "NONE" },
+            set: { permissionDrafts[role, default: [:]][module] = $0 }
+        )
+    }
+
+    private func permissionDescription(_ module: String) -> String {
+        switch module {
+        case "HOME": "Panel principal y resumen operativo"
+        case "PREVENTIVE": "Mantenimientos y reportes preventivos"
+        case "CORRECTIVE": "Eventos y reportes correctivos"
+        case "PCON": "Planificación anual, mensual y semanal"
+        case "EQUIPMENT": "Inventario y detalle de equipos"
+        case "SCHEDULE": "Horario del equipo de trabajo"
+        case "STOCK": "Existencias y movimientos de almacén"
+        case "TOOLS": "Herramientas y asignaciones"
+        case "PROFILE": "Perfil personal y credenciales"
+        default: "Módulo de la aplicación"
         }
     }
 
@@ -681,7 +892,42 @@ struct AdministrationView: View {
             snapshot = try await session.withValidAccessToken { token in
                 try await AdministrationService(baseURL: baseURL).bootstrap(token: token)
             }
+            permissionDrafts = Dictionary(
+                uniqueKeysWithValues: snapshot.rolePermissions.map { group in
+                    (
+                        group.role,
+                        Dictionary(
+                            uniqueKeysWithValues: group.permissions.map {
+                                ($0.module, $0.permissionLevel)
+                            }
+                        )
+                    )
+                }
+            )
+            if !snapshot.rolePermissions.contains(where: { $0.role == selectedPermissionRole }) {
+                selectedPermissionRole = snapshot.rolePermissions.first?.role ?? ""
+            }
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    private func savePermissions(for role: String) async {
+        guard let baseURL = UserDefaults.standard.string(forKey: "apiBaseURL"),
+              let values = permissionDrafts[role] else { return }
+        isSavingPermissions = true
+        errorMessage = nil
+        defer { isSavingPermissions = false }
+        do {
+            try await session.withValidAccessToken { token in
+                try await AdministrationService(baseURL: baseURL).savePermissions(
+                    role: role,
+                    permissions: values,
+                    token: token
+                )
+            }
+            await load()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
     private func saveUser(id: String?, payload: ManagedUserPayload) async throws {

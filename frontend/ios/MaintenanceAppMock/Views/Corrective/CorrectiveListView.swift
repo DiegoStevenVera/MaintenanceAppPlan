@@ -90,7 +90,7 @@ struct DatabaseCorrectiveListView: View {
                     systemImage: isSelectingOfflineWork ? "xmark.circle" : "arrow.down.circle"
                 )
             }
-            if session.currentUser?.role.canEditMaintenance == true {
+            if session.canEdit(.corrective) {
                 Button {
                     isCreatingEvent = true
                 } label: {

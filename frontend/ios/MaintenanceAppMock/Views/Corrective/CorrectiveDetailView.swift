@@ -370,7 +370,7 @@ struct CorrectiveDetailView: View {
     ) -> some View {
         let latestReport = detail.reports.first
 
-        if detail.status == "IN_PROGRESS", session.currentUser?.role != .boss {
+        if detail.status == "IN_PROGRESS", session.canEdit(.corrective) {
             if isCompact {
                 compactReportActions(detail, latestReport: latestReport)
             } else {
@@ -516,7 +516,8 @@ struct CorrectiveDetailView: View {
         _ detail: APIActivityDetail,
         presentation: MaintenanceLifecycleActionPanel.Presentation = .panel
     ) -> some View {
-        if let role = session.currentUser?.role,
+        if session.canEdit(.corrective),
+           let role = session.currentUser?.role,
            MaintenanceLifecycleActionPanel.hasActions(
                status: detail.status,
                role: role

@@ -464,6 +464,19 @@ class GeneratedReportDTO(BaseModel):
     download_path: str
 
 
+class ReportDocumentPackageItemDTO(BaseModel):
+    version_id: str
+    report_kind: str
+    display_name: str
+    document_status: str
+    generated_report: GeneratedReportDTO | None = None
+
+
+class ReportDocumentPackageDTO(BaseModel):
+    activity_id: str
+    documents: list[ReportDocumentPackageItemDTO] = Field(default_factory=list)
+
+
 class ChecklistSelectedToolDTO(BaseModel):
     id: str
     name: str
