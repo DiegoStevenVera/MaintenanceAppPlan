@@ -199,8 +199,11 @@ struct PDFPreviewView: View {
         .background(MaintenanceScreenBackground())
         .navigationTitle("Versión del reporte")
         .task { await loadDetail() }
-        .fullScreenCover(item: $presentedPDF) { presentedPDF in
+        .sheet(item: $presentedPDF) { presentedPDF in
             PDFDocumentViewer(data: presentedPDF.data)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.hidden)
+                .presentationContentInteraction(.scrolls)
                 .interactiveDismissDisabled()
         }
         .sheet(item: $mailDraft) { draft in

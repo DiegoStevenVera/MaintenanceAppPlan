@@ -61,7 +61,7 @@ struct MainTabView: View {
                 }
             }
  */
-            if session.canView(.stock) {
+            if session.currentUser?.role == .administrator {
                 NavigationStack {
                     StockListView()
                 }
