@@ -18,6 +18,7 @@ from modules.asset_management.infrastructure.postgres.catalog_models import (
     EquipmentCategoryRecord,
 )
 from modules.asset_management.infrastructure.postgres.models import AssetImageRecord, AssetRecord
+from modules.asset_management.infrastructure.postgres.domain_models import InventoryLocationRecord
 from modules.asset_management.infrastructure.postgres.repository import PostgresAssetRepository
 from modules.asset_management.infrastructure.seed_repository import asset_repository
 from modules.asset_management.interfaces.schemas import (
@@ -33,6 +34,8 @@ from modules.asset_management.interfaces.schemas import (
     EquipmentCategoryOptionDTO,
     GeographicLocationOptionDTO,
     StockAssetDTO,
+    StockAssetWriteRequest,
+    StockAdministrationCatalogDTO,
 )
 from modules.identity_access.interfaces.dependencies import get_current_user, require_roles
 from modules.identity_access.interfaces.schemas import UserDTO
@@ -125,6 +128,7 @@ async def list_assets(
 async def list_stock_assets(
     q: str | None = None,
     subsystem: str | None = None,
+    status: str | None = None,
     inventory_location: str | None = None,
     limit: int = Query(default=100, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
@@ -136,11 +140,101 @@ async def list_stock_assets(
     assets, total = await PostgresAssetRepository(session).list_stock_assets(
         q=q,
         subsystem=subsystem,
+        status=status,
         inventory_location=inventory_location,
         limit=limit,
         offset=offset,
     )
     return Page(items=assets, total=total, limit=limit, offset=offset)
+
+
+@router.get("/stock/administration/catalog", response_model=StockAdministrationCatalogDTO)
+async def stock_administration_catalog(
+    session: AsyncSession = Depends(get_session),
+    _: UserDTO = Depends(require_roles(UserRole.ADMINISTRATOR)),
+) -> StockAdministrationCatalogDTO:
+    if not uses_postgres():
+        raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
+    categories = list((await session.scalars(
+        select(EquipmentCategoryRecord)
+        .where(EquipmentCategoryRecord.is_active.is_(True))
+        .order_by(EquipmentCategoryRecord.name_n1, EquipmentCategoryRecord.name_n2)
+    )).all())
+    subsystems = list((await session.scalars(
+        select(SubsystemRecord)
+        .where(SubsystemRecord.is_active.is_(True))
+        .order_by(SubsystemRecord.code)
+    )).all())
+    statuses = list((await session.scalars(
+        select(AssetStatusRecord)
+        .where(AssetStatusRecord.is_active.is_(True))
+        .order_by(AssetStatusRecord.name)
+    )).all())
+    locations = list((await session.scalars(
+        select(InventoryLocationRecord)
+        .where(InventoryLocationRecord.is_active.is_(True))
+        .order_by(InventoryLocationRecord.name)
+    )).all())
+    return StockAdministrationCatalogDTO(
+        categories=[EquipmentCategoryOptionDTO(
+            id=item.id, subsystem_id=item.subsystem_id,
+            name_n1=item.name_n1, name_n2=item.name_n2,
+        ) for item in categories],
+        subsystems=[AssetCatalogOptionDTO(id=item.id, code=item.code, name=item.name) for item in subsystems],
+        statuses=[AssetCatalogOptionDTO(id=item.id, code=item.code, name=item.name) for item in statuses],
+        inventory_locations=[AssetCatalogOptionDTO(id=item.id, name=item.name) for item in locations],
+    )
+
+
+@router.get("/stock/{asset_id}", response_model=StockAssetDTO)
+async def get_stock_asset(
+    asset_id: str,
+    session: AsyncSession = Depends(get_session),
+    _: UserDTO = Depends(require_roles(UserRole.ADMINISTRATOR)),
+) -> StockAssetDTO:
+    if not uses_postgres():
+        raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
+    asset = await PostgresAssetRepository(session).get_stock_asset(asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail="El elemento de stock no existe.")
+    return asset
+
+
+@router.post("/stock", response_model=StockAssetDTO, status_code=status.HTTP_201_CREATED)
+async def create_stock_asset(
+    payload: StockAssetWriteRequest,
+    session: AsyncSession = Depends(get_session),
+    _: UserDTO = Depends(require_roles(UserRole.ADMINISTRATOR)),
+) -> StockAssetDTO:
+    if not uses_postgres():
+        raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
+    try:
+        asset = await PostgresAssetRepository(session).create_stock_asset(payload)
+        await session.commit()
+        return asset
+    except (IntegrityError, ValueError) as error:
+        await session.rollback()
+        detail = str(error) if isinstance(error, ValueError) else "El código ya está registrado."
+        raise HTTPException(status_code=409, detail=detail) from error
+
+
+@router.put("/stock/{asset_id}", response_model=StockAssetDTO)
+async def update_stock_asset(
+    asset_id: str,
+    payload: StockAssetWriteRequest,
+    session: AsyncSession = Depends(get_session),
+    _: UserDTO = Depends(require_roles(UserRole.ADMINISTRATOR)),
+) -> StockAssetDTO:
+    if not uses_postgres():
+        raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
+    try:
+        asset = await PostgresAssetRepository(session).update_stock_asset(asset_id, payload)
+        await session.commit()
+        return asset
+    except (IntegrityError, ValueError) as error:
+        await session.rollback()
+        detail = str(error) if isinstance(error, ValueError) else "El código ya está registrado."
+        raise HTTPException(status_code=409, detail=detail) from error
 
 
 @router.get("/administration/catalog", response_model=AssetAdministrationCatalogDTO)
@@ -290,8 +384,10 @@ async def add_asset_image(
     if not uses_postgres():
         raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
     asset = await session.get(AssetRecord, asset_id)
-    if asset is None or not asset.is_business_anchor:
-        raise HTTPException(status_code=404, detail="Equipo no encontrado.")
+    if asset is None or (
+        not asset.is_business_anchor and asset.current_inventory_location_id is None
+    ):
+        raise HTTPException(status_code=404, detail="Activo no encontrado.")
     content = _decode_image(payload)
     existing_count = await session.scalar(
         select(func.count())

@@ -25,6 +25,7 @@ from modules.asset_management.interfaces.schemas import (
     AssetImageDTO,
     AssetTreeNodeDTO,
     AssetWriteRequest,
+    StockAssetWriteRequest,
     StockAssetDTO,
 )
 from modules.maintenance_execution.infrastructure.postgres.report_models import (
@@ -285,6 +286,7 @@ class PostgresAssetRepository:
         *,
         q: str | None = None,
         subsystem: str | None = None,
+        status: str | None = None,
         inventory_location: str | None = None,
         limit: int = 200,
         offset: int = 0,
@@ -320,6 +322,8 @@ class PostgresAssetRepository:
             )
         if subsystem:
             stmt = stmt.where(func.lower(AssetRecord.subsystem) == subsystem.casefold())
+        if status:
+            stmt = stmt.where(func.lower(AssetRecord.status) == status.casefold())
         if inventory_location:
             stmt = stmt.where(
                 func.lower(InventoryLocationRecord.name) == inventory_location.casefold()
@@ -329,10 +333,12 @@ class PostgresAssetRepository:
             select(func.count()).select_from(stmt.order_by(None).subquery())
         )
         rows = (await self._session.execute(stmt.limit(limit).offset(offset))).all()
+        images = await self._images_by_asset([record.id for record, _, _ in rows])
         return [
             StockAssetDTO(
                 id=record.id,
                 name=record.name,
+                category=record.category,
                 asset_type=record.asset_type,
                 serial_number=record.serial_number,
                 internal_code=record.internal_code,
@@ -342,9 +348,164 @@ class PostgresAssetRepository:
                 subsystem=record.subsystem,
                 manufacturer=manufacturer,
                 model=record.model,
+                software_version=record.software_version,
+                equipment_category_id=record.equipment_category_id,
+                subsystem_id=record.subsystem_id,
+                status_id=record.status_id,
+                inventory_location_id=record.current_inventory_location_id,
+                images=images.get(record.id, []),
             )
             for record, location, manufacturer in rows
         ], total or 0
+
+    async def get_stock_asset(self, asset_id: str) -> StockAssetDTO | None:
+        row = (
+            await self._session.execute(
+                select(
+                    AssetRecord,
+                    InventoryLocationRecord.name.label("inventory_location"),
+                    ManufacturerRecord.name.label("manufacturer"),
+                )
+                .join(
+                    InventoryLocationRecord,
+                    InventoryLocationRecord.id == AssetRecord.current_inventory_location_id,
+                )
+                .outerjoin(
+                    ManufacturerRecord,
+                    ManufacturerRecord.id == AssetRecord.manufacturer_id,
+                )
+                .where(
+                    AssetRecord.id == asset_id,
+                    AssetRecord.current_inventory_location_id.is_not(None),
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        record, location, manufacturer = row
+        images = (await self._images_by_asset([record.id])).get(record.id, [])
+        return StockAssetDTO(
+            id=record.id,
+            name=record.name,
+            category=record.category,
+            asset_type=record.asset_type,
+            serial_number=record.serial_number,
+            internal_code=record.internal_code,
+            part_number=record.part_number,
+            status=record.status,
+            inventory_location=location,
+            subsystem=record.subsystem,
+            manufacturer=manufacturer,
+            model=record.model,
+            software_version=record.software_version,
+            equipment_category_id=record.equipment_category_id,
+            subsystem_id=record.subsystem_id,
+            status_id=record.status_id,
+            inventory_location_id=record.current_inventory_location_id,
+            images=images,
+        )
+
+    async def create_stock_asset(
+        self, payload: StockAssetWriteRequest
+    ) -> StockAssetDTO:
+        code = payload.serial_or_code.strip()
+        if await self._serial_or_code_exists(code):
+            raise ValueError("Ya existe un activo con ese código o número de serie.")
+        category, subsystem, asset_status, location = await self._stock_master_data(
+            payload
+        )
+        record = AssetRecord(
+            id=str(uuid4()),
+            name=payload.name.strip(),
+            category=category.name_n1,
+            asset_type=self._category_type_name(category),
+            subsystem=subsystem.code,
+            serial_or_code=code,
+            part_number=self._empty_to_none(payload.part_number),
+            status=asset_status.name,
+            physical_location=location.name,
+            is_business_anchor=False,
+            parent_id=None,
+            children=[],
+            internal_code=code,
+            serial_number=code,
+            serial_number_status="KNOWN",
+            model=self._empty_to_none(payload.model),
+            software_version=self._empty_to_none(payload.software_version),
+            business_label="Elemento de stock",
+            registration_method="MANUAL",
+            is_mobile=True,
+            manufacturer_id=await self._manufacturer_id(payload.manufacturer),
+            equipment_category_id=category.id,
+            subsystem_id=subsystem.id,
+            status_id=asset_status.id,
+            current_inventory_location_id=location.id,
+        )
+        self._session.add(record)
+        await self._session.flush()
+        result = await self.get_stock_asset(record.id)
+        if result is None:
+            raise ValueError("No se pudo recuperar el elemento de stock creado.")
+        return result
+
+    async def update_stock_asset(
+        self, asset_id: str, payload: StockAssetWriteRequest
+    ) -> StockAssetDTO:
+        record = await self._session.get(AssetRecord, asset_id)
+        if record is None or record.current_inventory_location_id is None:
+            raise ValueError("El elemento de stock no existe.")
+        code = payload.serial_or_code.strip()
+        if await self._serial_or_code_exists(code, excluding_id=asset_id):
+            raise ValueError("Ya existe un activo con ese código o número de serie.")
+
+        category, subsystem, asset_status, location = await self._stock_master_data(
+            payload
+        )
+
+        record.name = payload.name.strip()
+        record.category = category.name_n1
+        record.asset_type = self._category_type_name(category)
+        record.subsystem = subsystem.code
+        record.serial_or_code = code
+        record.internal_code = code
+        record.serial_number = code
+        record.serial_number_status = "KNOWN"
+        record.part_number = self._empty_to_none(payload.part_number)
+        record.status = asset_status.name
+        record.physical_location = location.name
+        record.model = self._empty_to_none(payload.model)
+        record.software_version = self._empty_to_none(payload.software_version)
+        record.manufacturer_id = await self._manufacturer_id(payload.manufacturer)
+        record.equipment_category_id = category.id
+        record.subsystem_id = subsystem.id
+        record.status_id = asset_status.id
+        record.current_inventory_location_id = location.id
+        await self._session.flush()
+        result = await self.get_stock_asset(asset_id)
+        if result is None:
+            raise ValueError("No se pudo recuperar el elemento de stock actualizado.")
+        return result
+
+    async def _stock_master_data(self, payload: StockAssetWriteRequest):
+        category = await self._session.get(
+            EquipmentCategoryRecord, payload.equipment_category_id
+        )
+        subsystem = await self._session.get(SubsystemRecord, payload.subsystem_id)
+        asset_status = await self._session.get(AssetStatusRecord, payload.status_id)
+        location = await self._session.get(
+            InventoryLocationRecord, payload.inventory_location_id
+        )
+        if category is None or not category.is_active:
+            raise ValueError("La categoría seleccionada no está disponible.")
+        if subsystem is None or not subsystem.is_active:
+            raise ValueError("El subsistema seleccionado no está disponible.")
+        if category.subsystem_id != subsystem.id:
+            raise ValueError("La categoría no pertenece al subsistema seleccionado.")
+        if asset_status is None or not asset_status.is_active:
+            raise ValueError("El estado seleccionado no está disponible.")
+        if location is None or not location.is_active:
+            raise ValueError("La ubicación de stock seleccionada no está disponible.")
+        return category, subsystem, asset_status, location
 
     async def get_tree(self, asset_id: str) -> list[AssetTreeNodeDTO]:
         rows = (

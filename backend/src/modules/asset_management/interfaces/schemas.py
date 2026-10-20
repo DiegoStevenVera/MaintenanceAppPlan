@@ -118,6 +118,7 @@ class AssetTreeNodeDTO(BaseModel):
 class StockAssetDTO(BaseModel):
     id: str
     name: str
+    category: str
     asset_type: str
     serial_number: str | None = None
     internal_code: str | None = None
@@ -127,6 +128,34 @@ class StockAssetDTO(BaseModel):
     subsystem: str
     manufacturer: str | None = None
     model: str | None = None
+    software_version: str | None = None
+    equipment_category_id: UUID | None = None
+    subsystem_id: UUID | None = None
+    status_id: UUID | None = None
+    inventory_location_id: UUID
+    images: list[AssetImageDTO] = Field(default_factory=list)
+
+
+class StockAssetWriteRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=240)
+    serial_or_code: str = Field(min_length=1, max_length=120)
+    part_number: str | None = Field(default=None, max_length=120)
+    equipment_category_id: UUID
+    subsystem_id: UUID
+    status_id: UUID
+    inventory_location_id: UUID
+    manufacturer: str | None = Field(default=None, max_length=160)
+    model: str | None = Field(default=None, max_length=120)
+    software_version: str | None = Field(default=None, max_length=120)
+
+
+class StockAdministrationCatalogDTO(BaseModel):
+    categories: list[EquipmentCategoryOptionDTO]
+    subsystems: list[AssetCatalogOptionDTO]
+    statuses: list[AssetCatalogOptionDTO]
+    inventory_locations: list[AssetCatalogOptionDTO]
 
 
 class AssetHistoryEntryDTO(BaseModel):

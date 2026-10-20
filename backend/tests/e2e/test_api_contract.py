@@ -238,6 +238,33 @@ def test_stock_contract_requires_authentication() -> None:
     }
 
 
+def test_stock_administration_routes_require_an_administrator() -> None:
+    engineer = client.get(
+        "/api/v1/assets/stock/administration/catalog",
+        headers=authorization_headers(),
+    )
+    assert engineer.status_code == 403
+
+    administrator = client.get(
+        "/api/v1/assets/stock/administration/catalog",
+        headers=authorization_headers(email="admin@maintenance.local"),
+    )
+    assert administrator.status_code == 501
+
+    detail = client.get(
+        "/api/v1/assets/stock/example-id",
+        headers=authorization_headers(),
+    )
+    assert detail.status_code == 403
+
+    create = client.post(
+        "/api/v1/assets/stock",
+        headers=authorization_headers(),
+        json={},
+    )
+    assert create.status_code == 403
+
+
 def test_asset_tree_returns_components_without_physical_locations() -> None:
     response = client.get(
         "/api/v1/assets/asset-frontam-colectora/tree",
