@@ -46,6 +46,7 @@ build/
 *.sqlite
 *.sqlite3
 *.db
+!backend/data/ats_line/dc_sys_source.sqlite3
 generated/
 tmp/
 temp/

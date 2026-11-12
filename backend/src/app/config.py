@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     report_storage_path: str = "storage/reports"
     report_logo_path: str = "assets/Hitachi-Logo-v2.png"
     calibration_report_file_prefix: str = "Report_Calibration"
+    ats_line_data_path: str = "data/ats_line/dc_sys_source.sqlite3"
 
     @property
     def resolved_database_url(self) -> str:
@@ -60,6 +61,11 @@ class Settings(BaseSettings):
     @property
     def resolved_report_logo(self) -> Path:
         path = Path(self.report_logo_path)
+        return path if path.is_absolute() else BACKEND_ROOT / path
+
+    @property
+    def resolved_ats_line_data(self) -> Path:
+        path = Path(self.ats_line_data_path)
         return path if path.is_absolute() else BACKEND_ROOT / path
 
     model_config = SettingsConfigDict(

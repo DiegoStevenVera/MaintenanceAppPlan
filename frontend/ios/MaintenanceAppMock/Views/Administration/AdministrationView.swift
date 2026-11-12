@@ -639,6 +639,7 @@ struct AdministrationView: View {
         case "STOCK": "Existencias y movimientos de almacén"
         case "TOOLS": "Herramientas y asignaciones"
         case "PROFILE": "Perfil personal y credenciales"
+        case "ATS_LINE": "Plano interactivo de la línea ATS"
         default: "Módulo de la aplicación"
         }
     }

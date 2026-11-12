@@ -99,6 +99,7 @@ async def _permission_for(
 
 def _module_for_path(path: str) -> AppModule | None:
     mappings = (
+        ("/ats-line", AppModule.ATS_LINE),
         ("/pcon", AppModule.PCON),
         ("/assets/stock", AppModule.STOCK),
         ("/assets", AppModule.EQUIPMENT),

@@ -23,6 +23,7 @@ COPY src /app/backend/src
 COPY migrations /app/backend/migrations
 COPY alembic.ini /app/backend/alembic.ini
 COPY assets /app/backend/assets
+COPY data /app/backend/data
 
 RUN pip install .
 

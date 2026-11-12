@@ -53,6 +53,7 @@ enum AppModulePermission: String, CaseIterable, Identifiable, Codable {
     case stock = "STOCK"
     case tools = "TOOLS"
     case profile = "PROFILE"
+    case atsLine = "ATS_LINE"
 
     var id: String { rawValue }
 }

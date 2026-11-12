@@ -13,6 +13,7 @@ class AppModule(StrEnum):
     STOCK = "STOCK"
     TOOLS = "TOOLS"
     PROFILE = "PROFILE"
+    ATS_LINE = "ATS_LINE"
 
 
 class PermissionLevel(StrEnum):
@@ -31,6 +32,7 @@ MODULE_LABELS: dict[AppModule, str] = {
     AppModule.STOCK: "Stock",
     AppModule.TOOLS: "Herramientas",
     AppModule.PROFILE: "Perfil",
+    AppModule.ATS_LINE: "Linea ATS",
 }
 
 
@@ -45,6 +47,7 @@ def default_permissions(role: UserRole) -> dict[AppModule, PermissionLevel]:
         AppModule.EQUIPMENT,
         AppModule.SCHEDULE,
         AppModule.PROFILE,
+        AppModule.ATS_LINE,
     }
     permissions = {module: PermissionLevel.NONE for module in AppModule}
     for module in visible:

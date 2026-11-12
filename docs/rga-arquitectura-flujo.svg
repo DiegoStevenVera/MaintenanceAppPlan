@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080" role="img" aria-labelledby="title desc">
+<title id="title">Flujo de arquitectura RGA: prueba local e integración propuesta</title>
+<desc id="desc">Diagrama visual con dos flujos: prueba local en Mac con navegador, Open WebUI, Ollama, Gemma, Qwen e índice local; propuesta de integración RGA iOS mediante HTTPS y autenticación con backend RAG, Ollama, documentos e índice vectorial.</desc>
+<defs>
+  <linearGradient id="header" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#122B40"/><stop offset="1" stop-color="#1B405B"/></linearGradient>
+  <filter id="shadow" x="-20%" y="-20%" width="140%" height="145%"><feDropShadow dx="0" dy="5" stdDeviation="7" flood-color="#14283A" flood-opacity=".12"/></filter>
+  <marker id="arrowNavy" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#1B2C3C"/></marker>
+  <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0 10 5 0 10Z" fill="#EF7517"/></marker>
+  <style>
+    text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;fill:#102A43}
+    .panelTitle{font-size:25px;font-weight:800;letter-spacing:.5px;fill:#fff}
+    .h{font-size:18px;font-weight:750}
+    .label{font-size:14px;font-weight:650;fill:#304A60}
+    .small{font-size:12px;fill:#536B80}
+    .tiny{font-size:11px;fill:#5E7488}
+    .edge{stroke:#1B2C3C;stroke-width:4;fill:none;marker-end:url(#arrowNavy)}
+    .future{stroke:#EF7517;stroke-width:4;fill:none;stroke-dasharray:11 9;marker-end:url(#arrowOrange)}
+  </style>
+</defs>
+
+<!-- canvas -->
+<rect width="1920" height="1080" fill="#F4F6F8"/>
+<rect width="1920" height="108" fill="url(#header)"/>
+<text x="52" y="40" font-size="13" font-weight="750" letter-spacing="1.8" fill="#8FC4E8">RGA · FLUJO DE ARQUITECTURA</text>
+<text x="52" y="78" font-size="30" font-weight="800" fill="#fff">Prueba local e integración propuesta</text>
+<rect x="1570" y="33" width="294" height="42" rx="21" fill="#285778" stroke="#5B83A0"/>
+<circle cx="1594" cy="54" r="6" fill="#72D1A0"/>
+<text x="1611" y="59" font-size="13" font-weight="750" fill="#fff">DIAGRAMA SIN AWS</text>
+
+<!-- two architecture zones -->
+<rect x="38" y="135" width="825" height="704" rx="18" fill="#fff" stroke="#1B2C3C" stroke-width="2.5"/>
+<rect x="38" y="135" width="825" height="62" rx="18" fill="url(#header)"/>
+<path d="M38 177v20h825v-20" fill="url(#header)"/>
+<text x="68" y="176" class="panelTitle" fill="#FFFFFF">HOY · PRUEBA LOCAL EN MAC</text>
+
+<rect x="888" y="135" width="994" height="704" rx="18" fill="#fff" stroke="#1B2C3C" stroke-width="2.5"/>
+<rect x="888" y="135" width="994" height="62" rx="18" fill="url(#header)"/>
+<path d="M888 177v20h994v-20" fill="url(#header)"/>
+<text x="918" y="176" class="panelTitle" fill="#FFFFFF">FUTURO · INTEGRACIÓN RGA (PROPUESTA)</text>
+
+<!-- icon helpers rendered inline: user -->
+<!-- User -->
+<circle cx="98" cy="323" r="24" fill="none" stroke="#15293A" stroke-width="4"/>
+<path d="M56 388c4-28 80-28 84 0" fill="none" stroke="#15293A" stroke-width="4" stroke-linecap="round"/>
+<text x="98" y="418" text-anchor="middle" class="label">Usuario</text>
+
+<!-- Tablet / browser icon -->
+<rect x="164" y="300" width="93" height="88" rx="8" fill="#fff" stroke="#15293A" stroke-width="4"/>
+<rect x="174" y="310" width="73" height="61" rx="3" fill="#E8F0F5" stroke="#15293A" stroke-width="2"/>
+<circle cx="210" cy="379" r="3" fill="#15293A"/>
+<text x="210" y="418" text-anchor="middle" class="label">Tablet / navegador</text>
+<path d="M125 347H151" class="edge"/>
+
+<!-- Mac boundary -->
+<rect x="286" y="227" width="548" height="574" rx="14" fill="#FCFDFE" stroke="#24394B" stroke-width="2.5"/>
+<rect x="286" y="227" width="548" height="56" rx="14" fill="#F0F4F7"/>
+<path d="M286 267v16h548v-16" fill="#F0F4F7"/>
+<!-- laptop icon -->
+<rect x="310" y="241" width="32" height="24" rx="3" fill="none" stroke="#23394B" stroke-width="2.5"/>
+<path d="M305 269h42l-4 4h-34z" fill="#23394B"/>
+<text x="357" y="264" class="h">Mac de desarrollo</text>
+<rect x="147" y="442" width="138" height="47" rx="10" fill="#FFF4E7" stroke="#EAA65D"/>
+<text x="216" y="461" text-anchor="middle" class="small" font-weight="800" fill="#99510D">LAN · HTTP</text>
+<text x="216" y="478" text-anchor="middle" class="tiny" fill="#99510D">actual</text>
+<path d="M257 344H352" class="edge"/>
+
+<!-- Open WebUI icon tile -->
+<rect x="355" y="321" width="124" height="124" rx="4" fill="#D41472"/>
+<!-- simple robot/chat logo -->
+<path d="M382 361h70a10 10 0 0 1 10 10v38a10 10 0 0 1-10 10h-70a10 10 0 0 1-10-10v-38a10 10 0 0 1 10-10Z" fill="none" stroke="#fff" stroke-width="5"/>
+<path d="M417 361v-14m0 0a8 8 0 1 0-1 0M388 382h12m35 0h12m-49 16h30" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+<circle cx="399" cy="382" r="5" fill="#fff"/><circle cx="435" cy="382" r="5" fill="#fff"/>
+<text x="417" y="469" text-anchor="middle" class="label">Open WebUI</text>
+<text x="417" y="489" text-anchor="middle" class="small">interfaz · RAG</text>
+
+<!-- Ollama icon tile -->
+<rect x="593" y="321" width="112" height="112" rx="4" fill="#F47A18"/>
+<!-- abstract llama mark -->
+<path d="M623 397c-7-13-5-31 2-43l-4-18 14 10c7-4 19-4 27 1l14-9-3 20c8 10 9 24 4 37-7 17-43 19-54 2Z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>
+<circle cx="639" cy="374" r="3.5" fill="#fff"/><circle cx="660" cy="374" r="3.5" fill="#fff"/>
+<path d="M642 390q8 7 16 0" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+<text x="649" y="457" text-anchor="middle" class="label">Ollama local</text>
+<text x="649" y="477" text-anchor="middle" class="small">loopback · nube off</text>
+<path d="M480 382H585" class="edge"/>
+
+<!-- Open WebUI to local document index -->
+<path d="M417 500V559" class="edge"/>
+<!-- local DB icon -->
+<ellipse cx="417" cy="591" rx="54" ry="17" fill="#fff" stroke="#5B9414" stroke-width="5"/>
+<path d="M363 591v64c0 10 24 19 54 19s54-9 54-19v-64M363 612c0 10 24 19 54 19s54-9 54-19M363 635c0 10 24 19 54 19s54-9 54-19" fill="none" stroke="#5B9414" stroke-width="5"/>
+<text x="417" y="701" text-anchor="middle" class="label">Manuales · índice vectorial</text>
+<text x="417" y="721" text-anchor="middle" class="small">chats · disco local</text>
+
+<!-- Ollama model branch -->
+<path d="M649 485V523H727" fill="none" stroke="#1B2C3C" stroke-width="3.5"/>
+<path d="M649 523H610V541" class="edge"/>
+<path d="M727 523V541" class="edge"/>
+<!-- Gemma chip -->
+<rect x="558" y="548" width="105" height="88" rx="7" fill="#F4F6F8" stroke="#F47A18" stroke-width="3"/>
+<path d="M570 540v8m15-8v8m15-8v8m15-8v8m15-8v8m15-8v8M570 636v8m15-8v8m15-8v8m15-8v8m15-8v8m15-8v8" stroke="#F47A18" stroke-width="3"/>
+<text x="610" y="582" text-anchor="middle" font-size="22" font-weight="850" fill="#F47A18">G</text>
+<text x="610" y="606" text-anchor="middle" class="small" font-weight="750">Gemma 4</text>
+<text x="610" y="623" text-anchor="middle" class="tiny">chat</text>
+<!-- Qwen chip -->
+<rect x="675" y="548" width="105" height="88" rx="7" fill="#F4F6F8" stroke="#F47A18" stroke-width="3"/>
+<path d="M687 540v8m15-8v8m15-8v8m15-8v8m15-8v8m15-8v8M687 636v8m15-8v8m15-8v8m15-8v8m15-8v8m15-8v8" stroke="#F47A18" stroke-width="3"/>
+<text x="727" y="582" text-anchor="middle" font-size="22" font-weight="850" fill="#5156A5">Q</text>
+<text x="727" y="606" text-anchor="middle" class="small" font-weight="750">Qwen3</text>
+<text x="727" y="623" text-anchor="middle" class="tiny">embeddings</text>
+
+<!-- future user + phone -->
+<circle cx="952" cy="322" r="22" fill="none" stroke="#15293A" stroke-width="4"/>
+<path d="M916 381c4-25 68-25 72 0" fill="none" stroke="#15293A" stroke-width="4" stroke-linecap="round"/>
+<text x="952" y="408" text-anchor="middle" class="label">Usuario</text>
+<!-- phone -->
+<rect x="1009" y="300" width="73" height="132" rx="12" fill="#fff" stroke="#15293A" stroke-width="4"/>
+<rect x="1018" y="317" width="55" height="96" rx="4" fill="#E7F1F8" stroke="#15293A" stroke-width="2"/>
+<path d="M1030 308h31M1034 423h22" stroke="#15293A" stroke-width="3" stroke-linecap="round"/>
+<text x="1045" y="458" text-anchor="middle" class="label">RGA · iOS</text>
+<path d="M988 347H1001" class="future"/>
+
+<!-- Auth shield -->
+<path d="M1175 287 1221 305v36c0 34-21 57-46 72-25-15-46-38-46-72v-36z" fill="#F7FBF4" stroke="#659B1B" stroke-width="5"/>
+<path d="M1164 345v-9a11 11 0 0 1 22 0v9m-27 0h32v24h-32z" fill="none" stroke="#659B1B" stroke-width="4" stroke-linejoin="round"/>
+<text x="1175" y="445" text-anchor="middle" class="label">HTTPS + auth</text>
+<text x="1175" y="465" text-anchor="middle" class="small">LAN / VPN</text>
+<path d="M1084 366H1118" class="future"/>
+
+<!-- Internal server boundary -->
+<rect x="1256" y="227" width="594" height="560" rx="13" fill="#FCFDFE" stroke="#24394B" stroke-width="2.5"/>
+<rect x="1256" y="227" width="594" height="58" rx="13" fill="#F0F4F7"/>
+<path d="M1256 269v16h594v-16" fill="#F0F4F7"/>
+<!-- server rack -->
+<rect x="1277" y="239" width="35" height="34" rx="4" fill="#23394B"/>
+<rect x="1283" y="245" width="23" height="6" rx="2" fill="none" stroke="#fff" stroke-width="1.7"/>
+<rect x="1283" y="255" width="23" height="6" rx="2" fill="none" stroke="#fff" stroke-width="1.7"/>
+<rect x="1283" y="265" width="23" height="5" rx="2" fill="none" stroke="#fff" stroke-width="1.7"/>
+<text x="1324" y="265" class="h">Servidor interno</text>
+<text x="1798" y="265" text-anchor="end" class="small">por implementar</text>
+
+<!-- Backend logo tile Python + FastAPI -->
+<rect x="1304" y="360" width="132" height="132" rx="5" fill="#D70A73"/>
+<!-- Python-inspired mark -->
+<path d="M1333 389h34c10 0 15 6 15 15v11h-34c-9 0-15 6-15 15v-25c0-10 6-16 15-16Z" fill="#F5C644"/>
+<path d="M1407 463h-34c-10 0-15-6-15-15v-11h34c9 0 15-6 15-15v25c0 10-6 16-15 16Z" fill="#4BA4D8"/>
+<circle cx="1350" cy="400" r="3" fill="#23394B"/><circle cx="1390" cy="452" r="3" fill="#23394B"/>
+<!-- FastAPI lightning mark -->
+<path d="m1382 397-13 25h13l-8 23 26-33h-15l9-15z" fill="#55C49A" stroke="#fff" stroke-width="1.5"/>
+<text x="1370" y="520" text-anchor="middle" class="label">Backend RAG</text>
+<text x="1370" y="540" text-anchor="middle" class="small">Python · FastAPI</text>
+<text x="1370" y="559" text-anchor="middle" class="small">permisos</text>
+<path d="M1224 366H1295" class="future"/>
+
+<!-- Ollama future -->
+<rect x="1590" y="317" width="112" height="112" rx="4" fill="#F47A18"/>
+<path d="M1620 393c-7-13-5-31 2-43l-4-18 14 10c7-4 19-4 27 1l14-9-3 20c8 10 9 24 4 37-7 17-43 19-54 2Z" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>
+<circle cx="1636" cy="370" r="3.5" fill="#fff"/><circle cx="1657" cy="370" r="3.5" fill="#fff"/>
+<path d="M1639 386q8 7 16 0" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>
+<text x="1646" y="451" text-anchor="middle" class="label">Ollama local</text>
+<text x="1646" y="470" text-anchor="middle" class="small">modelo de chat</text>
+<path d="M1438 389H1512V373H1581" class="future"/>
+
+<!-- Documents and vector index -->
+<ellipse cx="1646" cy="552" rx="54" ry="16" fill="#fff" stroke="#659B1B" stroke-width="5"/>
+<path d="M1592 552v57c0 10 24 19 54 19s54-9 54-19v-57M1592 574c0 10 24 19 54 19s54-9 54-19" fill="none" stroke="#659B1B" stroke-width="5"/>
+<text x="1646" y="657" text-anchor="middle" class="label">Documentos +</text>
+<text x="1646" y="677" text-anchor="middle" class="label">índice vectorial</text>
+<path d="M1438 466H1515V578H1581" class="future"/>
+
+<!-- Admin contributor -->
+<circle cx="1767" cy="707" r="17" fill="none" stroke="#15293A" stroke-width="3.5"/>
+<path d="M1737 753c3-21 57-21 60 0" fill="none" stroke="#15293A" stroke-width="3.5" stroke-linecap="round"/>
+<text x="1767" y="779" text-anchor="middle" class="small" font-weight="700">Admin · carga / permisos</text>
+<path d="M1767 688H1730V578H1708" class="future"/>
+
+<!-- response with citations -->
+<path d="M1304 471V731H1136V474H1085" fill="none" stroke="#EF7517" stroke-width="4" stroke-dasharray="11 9" marker-end="url(#arrowOrange)"/>
+<rect x="1129" y="696" width="177" height="28" rx="9" fill="#FFF"/>
+<text x="1217" y="715" text-anchor="middle" class="small" font-weight="700" fill="#A9520A">respuesta + citas</text>
+
+<!-- legend -->
+<rect x="40" y="874" width="660" height="104" rx="15" fill="#fff" stroke="#CCD6DE" stroke-width="1.5"/>
+<text x="66" y="906" class="h" font-size="16">FLUJO</text>
+<path d="M68 937H174" class="edge"/>
+<text x="194" y="942" class="label">actual / local</text>
+<path d="M365 937H471" class="future"/>
+<text x="492" y="942" class="label">propuesto para RGA</text>
+
+</svg>

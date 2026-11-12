@@ -43,6 +43,15 @@ struct MainTabView: View {
                 }
             }
 
+            if session.canView(.atsLine) {
+                NavigationStack {
+                    ATSLineView()
+                }
+                .tabItem {
+                    Label("Línea", systemImage: "point.bottomleft.forward.to.point.topright.scurvepath")
+                }
+            }
+
             if session.canView(.equipment) {
                 NavigationStack {
                     AssetSearchView()
