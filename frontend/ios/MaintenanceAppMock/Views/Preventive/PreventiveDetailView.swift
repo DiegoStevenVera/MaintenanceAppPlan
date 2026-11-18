@@ -726,6 +726,8 @@ struct PreventiveDetailView: View {
                             if let updated = activityStore.details[activityID] {
                                 await offlineStore.reconcileWorkPackage(with: updated)
                             }
+                        } else if command == .start || command == .complete {
+                            activityStore.requireConnectionForStock(id: activityID)
                         } else {
                             await offlineStore.queueLifecycle(
                                 activityID: activityID, command: command, reason: reason

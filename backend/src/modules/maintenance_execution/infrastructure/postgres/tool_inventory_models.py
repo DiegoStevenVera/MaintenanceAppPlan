@@ -11,6 +11,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
     text,
@@ -22,6 +23,7 @@ from app.database import Base
 class ToolInventoryRecord(Base):
     __tablename__ = "tool_inventory"
     __table_args__ = (
+        UniqueConstraint("inventory_item_id", name="uq_tool_inventory_item"),
         CheckConstraint(
             "available >= 0 AND unavailable >= 0", name="ck_tool_inventory_nonnegative"
         ),
@@ -30,12 +32,15 @@ class ToolInventoryRecord(Base):
             "catalog_item_id",
             "location",
             unique=True,
-            postgresql_where=text("tool_id IS NULL"),
+            postgresql_where=text("tool_id IS NULL AND inventory_item_id IS NULL"),
         ),
     )
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     catalog_item_id: Mapped[UUID] = mapped_column(Uuid, ForeignKey("tool_catalog_items.id"))
     tool_id: Mapped[UUID | None] = mapped_column(Uuid, ForeignKey("tools.id"), unique=True)
+    inventory_item_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("tool_inventory_items.id", name="fk_tool_inventory_item")
+    )
     location: Mapped[str] = mapped_column(String(200))
     available: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=0)
     unavailable: Mapped[Decimal] = mapped_column(Numeric(18, 3), default=0)
@@ -60,5 +65,10 @@ class ToolMovementRecord(Base):
     responsible_user_id: Mapped[str | None] = mapped_column(String(80), ForeignKey("users.id"))
     actor_user_id: Mapped[str] = mapped_column(String(80), ForeignKey("users.id"))
     activity_ids: Mapped[list[str]] = mapped_column(JSON, default=list)
+    automatic_activity_id: Mapped[UUID | None] = mapped_column(
+        Uuid,
+        ForeignKey("maintenance_activities.id", name="fk_tool_movement_automatic_activity"),
+        index=True,
+    )
     notes: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

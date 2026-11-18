@@ -107,6 +107,7 @@ def _module_for_path(path: str) -> AppModule | None:
         ("/tool-admin", AppModule.TOOLS),
         ("/preventive-templates", AppModule.PREVENTIVE),
         ("/corrective-events", AppModule.CORRECTIVE),
+        ("/corrective-solutions", AppModule.CORRECTIVE),
     )
     for fragment, module in mappings:
         if fragment in path:

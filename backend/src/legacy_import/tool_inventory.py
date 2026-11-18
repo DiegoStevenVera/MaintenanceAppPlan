@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from uuid import UUID, uuid4, uuid5
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -20,6 +20,7 @@ from modules.maintenance_execution.infrastructure.postgres.tool_inventory_item_m
 )
 from modules.maintenance_execution.infrastructure.postgres.tool_inventory_models import (
     ToolInventoryRecord,
+    ToolMovementRecord,
 )
 from modules.maintenance_execution.infrastructure.postgres.tool_models import (
     ToolCatalogItemRecord,
@@ -191,6 +192,18 @@ async def import_tool_inventory(
     summary = ToolInventoryImportSummary()
     imported_catalog_ids: set[UUID] = set()
     image_root = settings.resolved_attachment_root / TOOL_IMAGE_DIRECTORY
+    has_movements = await session.scalar(
+        select(ToolMovementRecord.id)
+        .join(ToolInventoryRecord, ToolInventoryRecord.id == ToolMovementRecord.inventory_id)
+        .join(ToolInventoryItemRecord, or_(
+            ToolInventoryItemRecord.id == ToolInventoryRecord.inventory_item_id,
+            ToolInventoryItemRecord.tool_id == ToolInventoryRecord.tool_id,
+        ))
+        .where(ToolInventoryItemRecord.source_file == SOURCE_NAME)
+        .limit(1)
+    )
+    if has_movements:
+        raise ValueError("No se puede reimportar un inventario con movimientos de almacén.")
     if replace:
         await session.execute(
             delete(ToolInventoryItemRecord).where(

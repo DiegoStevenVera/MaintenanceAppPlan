@@ -14,7 +14,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field
-from sqlalchemy import func, select, text, update
+from sqlalchemy import Select, case, func, or_, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -35,6 +35,7 @@ from modules.maintenance_execution.infrastructure.postgres.tool_inventory_item_m
     ToolInventoryItemImageRecord,
     ToolInventoryItemRecord,
 )
+from modules.asset_management.infrastructure.postgres.catalog_models import LocationTypeRecord
 from modules.asset_management.infrastructure.postgres.domain_models import InventoryLocationRecord
 from modules.maintenance_execution.infrastructure.postgres.template_models import (
     MaintenanceTemplateRecord,
@@ -50,6 +51,12 @@ from shared_kernel.storage import resolve_storage_reference, storage_key
 router = APIRouter(tags=["tools"], dependencies=[Depends(get_current_user)])
 admin = require_roles(UserRole.ADMINISTRATOR)
 Category = Literal["MANUAL_TOOL", "CONSUMABLE", "EQUIPMENT", "ACCESS_KEY"]
+
+
+async def movement_admin(user: UserDTO = Depends(get_current_user)) -> UserDTO:
+    if user.role != UserRole.ADMINISTRATOR:
+        fail("Solo un administrador puede registrar movimientos de herramientas.", 403)
+    return user
 
 
 class CatalogWrite(BaseModel):
@@ -95,6 +102,14 @@ class MovementWrite(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
 
 
+class InventoryIssueWrite(BaseModel):
+    id: UUID
+    quantity: Decimal = Field(gt=0, max_digits=18, decimal_places=3)
+    responsible_user_id: str = Field(min_length=1, max_length=80)
+    activity_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 class InventoryItemWrite(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True)
 
@@ -127,7 +142,10 @@ def _certification_status(
     return "VALID" if certification.next_calibration_date >= date.today() else "EXPIRED"
 
 
-def _inventory_item_payload(item, location_name, images, tool=None, certification=None):
+def _inventory_item_payload(
+    item, location_name, images, tool=None, certification=None, *,
+    quantity=None, status=None, stock_locked=False, can_issue=False,
+):
     return {
         "id": str(item.id),
         "source_file": item.source_file,
@@ -137,7 +155,7 @@ def _inventory_item_payload(item, location_name, images, tool=None, certificatio
         "model_code": item.model_code,
         "tool_code": item.tool_code,
         "label": item.label,
-        "quantity": float(item.quantity),
+        "quantity": float(item.quantity if quantity is None else quantity),
         "name": item.name,
         "description": item.description,
         "cabinet": item.cabinet,
@@ -150,7 +168,9 @@ def _inventory_item_payload(item, location_name, images, tool=None, certificatio
         else None,
         "location": location_name or item.location_text,
         "location_text": item.location_text,
-        "status": item.status,
+        "status": status,
+        "stock_locked": stock_locked,
+        "can_issue": can_issue,
         "observations": item.observations,
         "serial_number": tool.serial_number if tool else None,
         "certification_number": (
@@ -219,15 +239,31 @@ async def _catalog_for_inventory(
     return catalog
 
 
+def _active_storage_locations() -> Select[tuple[InventoryLocationRecord]]:
+    return (
+        select(InventoryLocationRecord)
+        .join(LocationTypeRecord, InventoryLocationRecord.location_type_id == LocationTypeRecord.id)
+        .where(
+            InventoryLocationRecord.is_active.is_(True),
+            LocationTypeRecord.is_active.is_(True),
+            LocationTypeRecord.code == "ALMACENAMIENTO",
+        )
+    )
+
+
 async def _inventory_location_for_payload(
     session: AsyncSession,
     payload: InventoryItemWrite,
 ) -> InventoryLocationRecord | None:
     if payload.inventory_location_id is None:
+        if payload.location_text and payload.location_text.strip():
+            fail("Selecciona un almacén del catálogo o deja la herramienta sin ubicación.", 422)
         return None
-    location = await session.get(InventoryLocationRecord, payload.inventory_location_id)
-    if location is None or not location.is_active:
-        fail("La ubicación de almacenamiento no existe o está inactiva.", 422)
+    location = await session.scalar(
+        _active_storage_locations().where(InventoryLocationRecord.id == payload.inventory_location_id)
+    )
+    if location is None:
+        fail("La ubicación debe corresponder a un almacén activo.", 422)
     return location
 
 
@@ -266,11 +302,28 @@ async def _apply_inventory_item_payload(
     item: ToolInventoryItemRecord,
     payload: InventoryItemWrite,
 ) -> None:
+    existing_stock = await _item_balance(session, item, lock=True)
+    locked = bool(existing_stock and await _balance_has_movements(session, existing_stock.id))
     location = await _inventory_location_for_payload(session, payload)
-    catalog = await _catalog_for_inventory(session, payload)
+    if locked:
+        if (
+            payload.name != item.name or payload.classification != item.classification
+            or payload.tool_code != item.tool_code
+            or payload.inventory_location_id != item.inventory_location_id
+        ):
+            fail("No puedes cambiar la identificación ni el almacén de un saldo con movimientos.", 409)
+        catalog = await get_catalog(session, existing_stock.catalog_item_id, active=False)
+    else:
+        catalog = await _catalog_for_inventory(session, payload)
     effective_status = payload.status
     linked_tool = await session.get(ToolRecord, item.tool_id) if item.tool_id else None
-    if catalog.requires_identified_unit:
+    if locked:
+        effective_status = item.status
+        if linked_tool is not None:
+            linked_tool.model = payload.model_code
+            linked_tool.brand = payload.company
+            linked_tool.tool_type = payload.category or "INSTRUMENTO"
+    elif catalog.requires_identified_unit:
         serial_number = (payload.tool_code or "").strip()
         if not serial_number:
             fail("Los equipos deben tener un código o número de serie.")
@@ -302,7 +355,7 @@ async def _apply_inventory_item_payload(
         linked_tool.model = payload.model_code
         linked_tool.brand = payload.company
         linked_tool.tool_type = payload.category or "INSTRUMENTO"
-        linked_tool.current_location = location.name if location else payload.location_text
+        linked_tool.current_location = location.name if location else None
         linked_tool.availability_status = (
             "AVAILABLE"
             if _normalized_inventory_value(payload.status) == "DISPONIBLE"
@@ -333,7 +386,7 @@ async def _apply_inventory_item_payload(
             )
         else:
             stock.catalog_item_id = catalog.id
-            stock.location = linked_tool.current_location or stock.location
+            stock.location = linked_tool.current_location or "Sin ubicación"
             open_quantity = await session.scalar(
                 text("""
                 SELECT coalesce(sum(
@@ -365,7 +418,7 @@ async def _apply_inventory_item_payload(
     item.model_code = payload.model_code
     item.tool_code = payload.tool_code
     item.label = payload.label
-    if item.tool_id is None:
+    if item.tool_id is None and not locked:
         item.quantity = payload.quantity
     item.name = payload.name
     item.description = payload.description
@@ -375,7 +428,7 @@ async def _apply_inventory_item_payload(
     item.classification = payload.classification
     item.category = payload.category
     item.inventory_location_id = location.id if location else None
-    item.location_text = location.name if location else payload.location_text
+    item.location_text = location.name if location else None
     item.status = effective_status
     item.observations = payload.observations
     session.add(item)
@@ -421,6 +474,22 @@ def fail(message: str, code: int = 422):
     raise HTTPException(code, message)
 
 
+async def _item_balance(
+    session: AsyncSession, item: ToolInventoryItemRecord, *, lock: bool = False,
+) -> ToolInventoryRecord | None:
+    query = select(ToolInventoryRecord).where(
+        ToolInventoryRecord.tool_id == item.tool_id
+        if item.tool_id else ToolInventoryRecord.inventory_item_id == item.id
+    )
+    return await session.scalar(query.with_for_update() if lock else query)
+
+
+async def _balance_has_movements(session: AsyncSession, balance_id: UUID) -> bool:
+    return bool(await session.scalar(select(
+        select(ToolMovementRecord.id).where(ToolMovementRecord.inventory_id == balance_id).exists()
+    )))
+
+
 @router.get("/tool-admin/items", dependencies=[Depends(admin)])
 async def inventory_items(
     q: str | None = None,
@@ -430,7 +499,21 @@ async def inventory_items(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_session),
 ):
-    query = select(ToolInventoryItemRecord)
+    item_model = ToolInventoryItemRecord
+    balance_model = ToolInventoryRecord
+    display_status = case(
+        (balance_model.id.is_(None), item_model.status),
+        (balance_model.available > 0, "DISPONIBLE"),
+        (balance_model.unavailable > 0, "AVERIADO"),
+        else_="SIN STOCK",
+    )
+    has_movements = select(ToolMovementRecord.id).where(
+        ToolMovementRecord.inventory_id == balance_model.id
+    ).exists()
+    query = select(item_model, balance_model.available, display_status, has_movements).outerjoin(
+        balance_model,
+        or_(balance_model.inventory_item_id == item_model.id, balance_model.tool_id == item_model.tool_id),
+    )
     if q:
         pattern = f"%{q.strip()}%"
         query = query.where(
@@ -443,17 +526,18 @@ async def inventory_items(
     if classification:
         query = query.where(ToolInventoryItemRecord.classification == classification)
     if status:
-        query = query.where(ToolInventoryItemRecord.status == status)
+        query = query.where(display_status == status)
     total = await session.scalar(
         select(func.count()).select_from(query.order_by(None).subquery())
     )
-    rows = (
-        await session.scalars(
+    entries = (
+        await session.execute(
             query.order_by(ToolInventoryItemRecord.name, ToolInventoryItemRecord.source_row_number)
             .offset(offset)
             .limit(limit)
         )
     ).all()
+    rows = [entry[0] for entry in entries]
     item_ids = [item.id for item in rows]
     images = (
         (
@@ -470,11 +554,8 @@ async def inventory_items(
     for item in rows:
         if item.inventory_location_id:
             locations[item.inventory_location_id] = item.location_text
+    active_warehouse_ids = set()
     if locations:
-        from modules.asset_management.infrastructure.postgres.domain_models import (
-            InventoryLocationRecord,
-        )
-
         locations.update(
             {
                 location.id: location.name
@@ -487,6 +568,11 @@ async def inventory_items(
                 ).all()
             }
         )
+        active_warehouse_ids = {
+            location.id for location in (await session.scalars(
+                _active_storage_locations().where(InventoryLocationRecord.id.in_(locations))
+            )).all()
+        }
     by_item = {}
     for image in images:
         by_item.setdefault(image.inventory_item_id, []).append(image)
@@ -528,8 +614,17 @@ async def inventory_items(
                 by_item.get(item.id, []),
                 tools_by_id.get(item.tool_id),
                 certifications_by_tool.get(item.tool_id),
+                quantity=available,
+                status=effective_status,
+                stock_locked=stock_locked,
+                can_issue=(
+                    item.inventory_location_id in active_warehouse_ids
+                    and item.catalog_item_id is not None
+                    and (available if available is not None else item.quantity) > 0
+                    and _normalized_inventory_value(effective_status) == "DISPONIBLE"
+                ),
             )
-            for item in rows
+            for item, available, effective_status, stock_locked in entries
         ],
         "total": total or 0,
         "limit": limit,
@@ -541,9 +636,7 @@ async def inventory_items(
 async def storage_locations(session: AsyncSession = Depends(get_session)):
     rows = (
         await session.scalars(
-            select(InventoryLocationRecord)
-            .where(InventoryLocationRecord.is_active.is_(True))
-            .order_by(InventoryLocationRecord.name)
+            _active_storage_locations().order_by(InventoryLocationRecord.name)
         )
     ).all()
     return [
@@ -579,7 +672,7 @@ async def update_inventory_item(
     payload: InventoryItemWrite,
     session: AsyncSession = Depends(get_session),
 ):
-    item = await session.get(ToolInventoryItemRecord, item_id)
+    item = await session.get(ToolInventoryItemRecord, item_id, with_for_update=True)
     if item is None:
         raise HTTPException(status_code=404, detail="Herramienta no encontrada.")
     await _apply_inventory_item_payload(session, item, payload)
@@ -592,9 +685,12 @@ async def delete_inventory_item(
     item_id: UUID,
     session: AsyncSession = Depends(get_session),
 ):
-    item = await session.get(ToolInventoryItemRecord, item_id)
+    item = await session.get(ToolInventoryItemRecord, item_id, with_for_update=True)
     if item is None:
         raise HTTPException(status_code=404, detail="Herramienta no encontrada.")
+    balance = await _item_balance(session, item, lock=True)
+    if balance and await _balance_has_movements(session, balance.id):
+        fail("No puedes eliminar una herramienta que ya tiene movimientos.", 409)
     images = (
         await session.scalars(
             select(ToolInventoryItemImageRecord).where(
@@ -928,6 +1024,7 @@ async def create_stock(payload: StockWrite, session: AsyncSession = Depends(get_
                 ToolInventoryRecord.catalog_item_id == catalog.id,
                 ToolInventoryRecord.location == payload.location,
                 ToolInventoryRecord.tool_id.is_(None),
+                ToolInventoryRecord.inventory_item_id.is_(None),
             )
         )
         if existing:
@@ -959,11 +1056,15 @@ async def movements(
     session: AsyncSession = Depends(get_session),
 ):
     rows = await session.execute(
-        text("""SELECT m.*,c.name,i.location,t.serial_number,u.name AS responsible_name,
+        text("""SELECT m.*,coalesce(item.name,c.name) AS name,c.category,i.location,
+        t.serial_number,u.name AS responsible_name,
         m.quantity-coalesce((SELECT sum(x.quantity) FROM tool_inventory_movements x WHERE x.issue_id=m.id),0) AS outstanding
         FROM tool_inventory_movements m JOIN tool_inventory i ON i.id=m.inventory_id
-        JOIN tool_catalog_items c ON c.id=i.catalog_item_id LEFT JOIN tools t ON t.id=i.tool_id
-        LEFT JOIN users u ON u.id=m.responsible_user_id
+        JOIN tool_catalog_items c ON c.id=i.catalog_item_id
+        LEFT JOIN tool_inventory_items item ON item.id=i.inventory_item_id
+        LEFT JOIN tools t ON t.id=i.tool_id
+        LEFT JOIN tool_inventory_movements original ON original.id=m.issue_id
+        LEFT JOIN users u ON u.id=coalesce(m.responsible_user_id,original.responsible_user_id)
         WHERE NOT :open_only OR (m.kind='ISSUE' AND m.quantity > coalesce((SELECT sum(x.quantity) FROM tool_inventory_movements x WHERE x.issue_id=m.id),0))
         ORDER BY m.created_at DESC,m.id LIMIT :limit OFFSET :offset"""),
         dict(open_only=open_only, limit=limit, offset=offset),
@@ -971,10 +1072,57 @@ async def movements(
     return [dict(r) for r in rows.mappings()]
 
 
+@router.post("/tool-admin/items/{item_id}/issue")
+async def issue_inventory_item(
+    item_id: UUID,
+    payload: InventoryIssueWrite,
+    user: UserDTO = Depends(movement_admin),
+    session: AsyncSession = Depends(get_session),
+):
+    item = await session.get(ToolInventoryItemRecord, item_id, with_for_update=True)
+    if item is None:
+        fail("Herramienta no encontrada.", 404)
+    stock = await _item_balance(session, item, lock=True)
+    previous = await session.get(ToolMovementRecord, payload.id)
+    if previous is None:
+        warehouse = await session.scalar(
+            _active_storage_locations().where(InventoryLocationRecord.id == item.inventory_location_id)
+        )
+        if warehouse is None:
+            fail("Asigna un almacén activo antes de registrar la salida.")
+        if not item.catalog_item_id:
+            fail("La herramienta no está vinculada al catálogo.")
+        if item.tool_id:
+            tool = await session.get(ToolRecord, item.tool_id)
+            if tool is None or not tool.is_active:
+                fail("La unidad identificada está desactivada.", 409)
+        if stock is not None and stock.location != warehouse.name:
+            if await _balance_has_movements(session, stock.id):
+                fail("El almacén ya no coincide con el saldo vinculado.", 409)
+            stock.location = warehouse.name
+        if stock is None:
+            if item.tool_id:
+                fail("La unidad identificada no tiene saldo de almacén.", 409)
+            if _normalized_inventory_value(item.status) != "DISPONIBLE" or item.quantity <= 0:
+                fail("No hay cantidad disponible suficiente.", 409)
+            stock = ToolInventoryRecord(
+                id=uuid4(), catalog_item_id=item.catalog_item_id, inventory_item_id=item.id,
+                location=warehouse.name, available=item.quantity, unavailable=0,
+            )
+            session.add(stock)
+            await session.flush()
+    if stock is None:
+        fail("El identificador corresponde a otra herramienta.", 409)
+    return await move(
+        MovementWrite(inventory_id=stock.id, kind="ISSUE", **payload.model_dump()),
+        user, session,
+    )
+
+
 @router.post("/tool-admin/movements")
 async def move(
     payload: MovementWrite,
-    user: UserDTO = Depends(admin),
+    user: UserDTO = Depends(movement_admin),
     session: AsyncSession = Depends(get_session),
 ):
     stock = await session.scalar(
@@ -1060,20 +1208,10 @@ async def move(
     elif payload.kind == "DAMAGED":
         stock.unavailable += payload.quantity
     if stock.tool_id:
-        inventory_status = (
-            "DISPONIBLE"
-            if stock.available > 0
-            else ("AVERIADO" if stock.unavailable > 0 else "SIN STOCK")
-        )
         await session.execute(
             update(ToolRecord)
             .where(ToolRecord.id == stock.tool_id)
                 .values(availability_status="AVAILABLE" if stock.available > 0 else "UNAVAILABLE")
-        )
-        await session.execute(
-            update(ToolInventoryItemRecord)
-            .where(ToolInventoryItemRecord.tool_id == stock.tool_id)
-            .values(quantity=1, status=inventory_status, location_text=stock.location)
         )
     session.add(
         ToolMovementRecord(

@@ -69,6 +69,10 @@ code, and engineering documentation are in English.
 - Component replacement against equipment hierarchy and stock. The inventory change is committed
   atomically only when the report version is finalized.
 - Corrective PDF generation and preview.
+- Consulta de soluciones: documentary search, context-based similar cases, consolidated report
+  versions/turns and evidence/source links. Separate protected offline knowledge downloads.
+  Current retrieval is textual/contextual, not semantic AI; see
+  [scope and pending stages](docs/corrective-solutions.md).
 
 ### PCON
 

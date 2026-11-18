@@ -21,6 +21,10 @@ from modules.maintenance_execution.infrastructure.postgres.models import (
     CorrectiveEventRecord,
     PreventiveScheduleRecord,
 )
+from modules.maintenance_execution.infrastructure.postgres.preventive_tool_stock import (
+    issue_checklist_stock,
+    return_checklist_stock,
+)
 from modules.maintenance_execution.infrastructure.postgres.report_models import (
     CalibrationMeasurementRecord,
     CalibrationReportDetailRecord,
@@ -488,6 +492,14 @@ class PostgresMaintenanceRepository:
         changed_at = occurred_at or datetime.now(timezone.utc)
         if changed_at.tzinfo is None:
             changed_at = changed_at.replace(tzinfo=timezone.utc)
+
+        if activity.activity_type == "PREVENTIVE":
+            if command == MaintenanceLifecycleCommand.START and activity.maintenance_template_id:
+                await issue_checklist_stock(
+                    self._session, activity.id, activity.maintenance_template_id, user_id, changed_at
+                )
+            elif command == MaintenanceLifecycleCommand.COMPLETE:
+                await return_checklist_stock(self._session, activity.id, user_id)
 
         activity.status = next_status.value
         if command == MaintenanceLifecycleCommand.START:

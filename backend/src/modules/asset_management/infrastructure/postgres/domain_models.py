@@ -6,11 +6,13 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     UniqueConstraint,
     Uuid,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -58,7 +60,13 @@ class EquipmentKindCategoryRecord(OperationalRecordMixin, Base):
 class SlotLocationRecord(CatalogRecordMixin, Base):
     __tablename__ = "slot_locations"
     __table_args__ = (
+        Index("uq_equipment_slot_path", "equipment_asset_id", "path", unique=True,
+              postgresql_where=text("equipment_asset_id IS NOT NULL")),
         CheckConstraint("level >= 1", name="ck_slot_locations_level"),
+        CheckConstraint(
+            "equipment_kind_id IS NOT NULL OR equipment_asset_id IS NOT NULL",
+            name="ck_slot_locations_scope",
+        ),
         UniqueConstraint(
             "equipment_kind_id",
             "parent_slot_location_id",
@@ -67,10 +75,13 @@ class SlotLocationRecord(CatalogRecordMixin, Base):
         ),
     )
 
-    equipment_kind_id: Mapped[UUID] = mapped_column(
+    equipment_kind_id: Mapped[UUID | None] = mapped_column(
         Uuid,
         ForeignKey("equipment_kinds.id"),
-        nullable=False,
+        index=True,
+    )
+    equipment_asset_id: Mapped[str | None] = mapped_column(
+        String(80), ForeignKey("assets.id", name="fk_slot_locations_equipment_asset", use_alter=True),
         index=True,
     )
     slot_type_id: Mapped[UUID] = mapped_column(

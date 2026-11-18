@@ -698,6 +698,10 @@ final class MaintenanceActivityStore: ObservableObject {
         transitionErrors[id] = nil
     }
 
+    func requireConnectionForStock(id: String) {
+        transitionErrors[id] = "Conéctate para confirmar el mantenimiento y actualizar el stock de herramientas."
+    }
+
     func applyOfflineLifecycle(
         id: String,
         command: MaintenanceLifecycleCommand

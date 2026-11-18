@@ -31,6 +31,12 @@ from modules.asset_management.interfaces.schemas import (
     AssetImageWriteRequest,
     AssetTreeNodeDTO,
     AssetWriteRequest,
+    ComponentDetailDTO,
+    ComponentMovementDTO,
+    ComponentWriteRequest,
+    EquipmentSlotDTO,
+    EquipmentSlotOccupancyRequest,
+    EquipmentSlotWriteRequest,
     EquipmentCategoryOptionDTO,
     GeographicLocationOptionDTO,
     StockAssetDTO,
@@ -384,10 +390,10 @@ async def add_asset_image(
     if not uses_postgres():
         raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
     asset = await session.get(AssetRecord, asset_id)
-    if asset is None or (
-        not asset.is_business_anchor and asset.current_inventory_location_id is None
-    ):
+    if asset is None:
         raise HTTPException(status_code=404, detail="Activo no encontrado.")
+    if not asset.is_business_anchor and user.role != UserRole.ADMINISTRATOR:
+        raise HTTPException(status_code=403, detail="Solo el administrador puede agregar imágenes de componentes.")
     content = _decode_image(payload)
     existing_count = await session.scalar(
         select(func.count())
@@ -500,6 +506,125 @@ async def get_asset(
     return asset
 
 
+@router.get("/{asset_id}/component-detail", response_model=ComponentDetailDTO)
+async def get_component_detail(
+    asset_id: str, session: AsyncSession = Depends(get_session),
+) -> ComponentDetailDTO:
+    if uses_postgres():
+        component = await PostgresAssetRepository(session).get_component(asset_id)
+    else:
+        asset = asset_repository.get_asset(asset_id)
+        component = ComponentDetailDTO(asset=asset) if asset and not asset.is_business_anchor else None
+    if component is None:
+        raise HTTPException(status_code=404, detail="Componente no encontrado.")
+    return component
+
+
+@router.put("/{asset_id}/component-detail", response_model=ComponentDetailDTO)
+async def update_component_detail(
+    asset_id: str, payload: ComponentWriteRequest,
+    session: AsyncSession = Depends(get_session),
+    user: UserDTO = Depends(get_current_user),
+) -> ComponentDetailDTO:
+    if user.role != UserRole.ADMINISTRATOR:
+        raise HTTPException(status_code=403, detail="Solo el administrador puede editar componentes.")
+    if not uses_postgres():
+        raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
+    try:
+        result = await PostgresAssetRepository(session).update_component(asset_id, payload)
+        if result is None:
+            raise HTTPException(status_code=404, detail="Componente no encontrado.")
+        await session.commit()
+        return result
+    except ValueError as error:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except IntegrityError as error:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="No se pudo guardar el componente. Revisa la serie.") from error
+
+
+@router.get("/{asset_id}/movements", response_model=Page[ComponentMovementDTO])
+async def get_component_movements(
+    asset_id: str,
+    limit: int = Query(default=15, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    session: AsyncSession = Depends(get_session),
+) -> Page[ComponentMovementDTO]:
+    if uses_postgres():
+        result = await PostgresAssetRepository(session).component_movements(asset_id, limit, offset)
+    else:
+        asset = asset_repository.get_asset(asset_id)
+        result = ([], 0) if asset and not asset.is_business_anchor else None
+    if result is None:
+        raise HTTPException(status_code=404, detail="Componente no encontrado.")
+    items, total = result
+    return Page(items=items, total=total, limit=limit, offset=offset)
+
+
+@router.get("/{asset_id}/component-editor-options")
+async def component_editor_options(asset_id: str, session: AsyncSession = Depends(get_session)):
+    if not uses_postgres():
+        return {"classifications": [], "statuses": []}
+    try:
+        return await PostgresAssetRepository(session).component_editor_options(asset_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.get("/{asset_id}/internal-slots", response_model=list[EquipmentSlotDTO])
+async def get_equipment_slots(asset_id: str, session: AsyncSession = Depends(get_session)):
+    if not uses_postgres():
+        asset = asset_repository.get_asset(asset_id)
+        slots = [] if asset and asset.is_business_anchor else None
+    else:
+        slots = await PostgresAssetRepository(session).equipment_slots(asset_id)
+    if slots is None:
+        raise HTTPException(status_code=404, detail="Equipo no encontrado.")
+    return slots
+
+
+def _require_slot_administrator(user: UserDTO) -> None:
+    if user.role != UserRole.ADMINISTRATOR:
+        raise HTTPException(status_code=403, detail="Solo el administrador puede gestionar espacios internos.")
+    if not uses_postgres():
+        raise HTTPException(status_code=501, detail="La administración requiere PostgreSQL.")
+
+
+@router.post("/{asset_id}/internal-slots", response_model=list[EquipmentSlotDTO], status_code=201)
+async def create_equipment_slot(
+    asset_id: str, payload: EquipmentSlotWriteRequest,
+    session: AsyncSession = Depends(get_session), user: UserDTO = Depends(get_current_user),
+):
+    _require_slot_administrator(user)
+    try:
+        slots = await PostgresAssetRepository(session).create_equipment_slot(asset_id, payload)
+        if slots is None:
+            raise HTTPException(status_code=404, detail="Equipo no encontrado.")
+        await session.commit()
+        return slots
+    except ValueError as error:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@router.put("/{asset_id}/internal-slots/{slot_id}", response_model=list[EquipmentSlotDTO])
+async def place_equipment_component(
+    asset_id: str, slot_id: UUID, payload: EquipmentSlotOccupancyRequest,
+    session: AsyncSession = Depends(get_session), user: UserDTO = Depends(get_current_user),
+):
+    _require_slot_administrator(user)
+    try:
+        slots = await PostgresAssetRepository(session).place_equipment_component(
+            asset_id, slot_id, payload, user.id
+        )
+        await session.commit()
+        return slots
+    except ValueError as error:
+        await session.rollback()
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @router.get("/{asset_id}/tree", response_model=list[AssetTreeNodeDTO])
 async def get_asset_tree(
     asset_id: str,
@@ -543,13 +668,13 @@ async def apply_component_changes(
     repository = PostgresAssetRepository(session)
     try:
         if user.role != UserRole.ADMINISTRATOR and any(
-            operation.action != "CREATE" for operation in payload.operations
+            operation.action != "CREATE" or operation.new_type_name is not None for operation in payload.operations
         ):
             raise HTTPException(
                 status_code=403,
-                detail="Solo el administrador puede editar, mover o eliminar componentes.",
+                detail="Solo el administrador puede gestionar modelos, editar, mover o eliminar componentes.",
             )
-        tree = await repository.apply_component_changes(asset_id, payload.operations)
+        tree = await repository.apply_component_changes(asset_id, payload.operations, user_id=user.id)
         await session.commit()
         return tree
     except ValueError as error:
@@ -559,7 +684,7 @@ async def apply_component_changes(
         await session.rollback()
         raise HTTPException(
             status_code=409,
-            detail="No se puede eliminar el componente porque tiene historial o referencias operativas.",
+            detail="No se pudo guardar: el componente tiene referencias protegidas o un identificador duplicado.",
         ) from error
 
 

@@ -18,6 +18,7 @@
 		AA0000000000000000000010 /* Views/Preventive/PreventiveReportFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000010 /* Views/Preventive/PreventiveReportFormView.swift */; };
 		AA0000000000000000000011 /* Views/Preventive/PDFPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000011 /* Views/Preventive/PDFPreviewView.swift */; };
 		AA0000000000000000000012 /* Views/Corrective/CorrectiveListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000012 /* Views/Corrective/CorrectiveListView.swift */; };
+		AC0000000000000000000035 /* CorrectiveSolutionsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC0000000000000000000035 /* CorrectiveSolutionsView.swift */; };
 		AA0000000000000000000013 /* Views/Corrective/CorrectiveDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000013 /* Views/Corrective/CorrectiveDetailView.swift */; };
 		AA0000000000000000000014 /* Views/Corrective/CorrectiveReportFormView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000014 /* Views/Corrective/CorrectiveReportFormView.swift */; };
 		AA0000000000000000000015 /* Views/Corrective/CorrectivePDFPreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0000000000000000000015 /* Views/Corrective/CorrectivePDFPreviewView.swift */; };
@@ -49,6 +50,7 @@
 		BB0000000000000000000010 /* Views/Preventive/PreventiveReportFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Preventive/PreventiveReportFormView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000011 /* Views/Preventive/PDFPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Preventive/PDFPreviewView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000012 /* Views/Corrective/CorrectiveListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Corrective/CorrectiveListView.swift; sourceTree = "<group>"; };
+		BC0000000000000000000035 /* CorrectiveSolutionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Corrective/CorrectiveSolutionsView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000013 /* Views/Corrective/CorrectiveDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Corrective/CorrectiveDetailView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000014 /* Views/Corrective/CorrectiveReportFormView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Corrective/CorrectiveReportFormView.swift; sourceTree = "<group>"; };
 		BB0000000000000000000015 /* Views/Corrective/CorrectivePDFPreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Views/Corrective/CorrectivePDFPreviewView.swift; sourceTree = "<group>"; };
@@ -103,6 +105,7 @@
 				BB0000000000000000000010 /* Views/Preventive/PreventiveReportFormView.swift */,
 				BB0000000000000000000011 /* Views/Preventive/PDFPreviewView.swift */,
 				BB0000000000000000000012 /* Views/Corrective/CorrectiveListView.swift */,
+				BC0000000000000000000035 /* CorrectiveSolutionsView.swift */,
 				BB0000000000000000000013 /* Views/Corrective/CorrectiveDetailView.swift */,
 				BB0000000000000000000014 /* Views/Corrective/CorrectiveReportFormView.swift */,
 				BB0000000000000000000015 /* Views/Corrective/CorrectivePDFPreviewView.swift */,
@@ -213,6 +216,7 @@
 				AA0000000000000000000010 /* Views/Preventive/PreventiveReportFormView.swift in Sources */,
 				AA0000000000000000000011 /* Views/Preventive/PDFPreviewView.swift in Sources */,
 				AA0000000000000000000012 /* Views/Corrective/CorrectiveListView.swift in Sources */,
+				AC0000000000000000000035 /* CorrectiveSolutionsView.swift in Sources */,
 				AA0000000000000000000013 /* Views/Corrective/CorrectiveDetailView.swift in Sources */,
 				AA0000000000000000000014 /* Views/Corrective/CorrectiveReportFormView.swift in Sources */,
 				F173341E30A66C280044D910 /* ATSLineView.swift in Sources */,

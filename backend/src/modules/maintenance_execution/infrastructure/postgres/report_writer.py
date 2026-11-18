@@ -1988,6 +1988,8 @@ class PostgresReportWriter:
         if not replacement_items:
             return
 
+        # Coordinate with manual component moves and internal slot assignments.
+        await self._session.execute(text("SELECT pg_advisory_xact_lock(20261117)"))
         for sequence, item, replacement in replacement_items:
             assert replacement is not None
             removed = await self._session.get(

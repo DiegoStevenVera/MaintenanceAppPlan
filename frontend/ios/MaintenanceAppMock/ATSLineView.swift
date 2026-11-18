@@ -327,12 +327,18 @@ private enum ATSLineScope: String, CaseIterable, Identifiable {
     case yard = "Patio y enlaces"
 
     var id: String { rawValue }
+
+    func includes(area: String) -> Bool {
+        switch self {
+        case .all: true
+        case .main: area == "principal"
+        case .yard: area != "principal"
+        }
+    }
 }
 
 private enum ATSLineLayer: String, CaseIterable, Identifiable {
     case segments = "Segmentos"
-    case tracks = "CDV"
-    case blocks = "CV / bloques"
     case tags = "Balizas"
     case signals = "Señales"
     case platforms = "Plataformas"
@@ -343,6 +349,61 @@ private enum ATSLineLayer: String, CaseIterable, Identifiable {
     case labels = "Nombres"
 
     var id: String { rawValue }
+}
+
+private enum ATSLineSymbol: String, CaseIterable, Identifiable {
+    case main = "Vía principal"
+    case yard = "Patio"
+    case links = "Enlaces"
+    case tag = "Baliza"
+    case signal = "Señal"
+    case platform = "Plataforma"
+    case turnout = "Desvío"
+    case buffer = "Tope"
+    case stop = "Parada operacional"
+    case calibration = "Calibración"
+    case selection = "Selección"
+
+    var id: String { rawValue }
+
+    var color: Color {
+        switch self {
+        case .main: Color(red: 0.08, green: 0.55, blue: 0.61)
+        case .yard: Color(red: 0.23, green: 0.39, blue: 0.66)
+        case .links: Color(red: 0.55, green: 0.34, blue: 0.66)
+        case .tag: .cyan
+        case .signal: Color(red: 0.87, green: 0.36, blue: 0.34)
+        case .platform: BrandColor.green
+        case .turnout: .indigo
+        case .buffer: .brown
+        case .stop, .calibration: BrandColor.amber
+        case .selection: BrandColor.red
+        }
+    }
+
+    func path(at center: CGPoint, scale: CGFloat) -> Path {
+        func rect(_ halfWidth: CGFloat, _ halfHeight: CGFloat) -> CGRect {
+            CGRect(x: center.x - halfWidth * scale, y: center.y - halfHeight * scale,
+                   width: 2 * halfWidth * scale, height: 2 * halfHeight * scale)
+        }
+        switch self {
+        case .tag: return Path(ellipseIn: rect(7, 7))
+        case .stop: return Path(ellipseIn: rect(6, 6))
+        case .signal:
+            var path = Path()
+            path.move(to: CGPoint(x: center.x, y: center.y - 9 * scale))
+            path.addLine(to: CGPoint(x: center.x + 9 * scale, y: center.y + 7 * scale))
+            path.addLine(to: CGPoint(x: center.x - 9 * scale, y: center.y + 7 * scale))
+            path.closeSubpath()
+            return path
+        case .turnout: return Path(roundedRect: rect(7, 7), cornerRadius: 2 * scale)
+        case .buffer: return Path(rect(9, 5))
+        case .selection:
+            return Path(ellipseIn: rect(12, 12)).strokedPath(StrokeStyle(lineWidth: 3 * scale))
+        case .main, .yard, .links, .platform, .calibration:
+            return Path(roundedRect: rect(11, 2.5), cornerRadius: 2.5 * scale)
+        }
+    }
 }
 
 private struct ATSLineSelection: Identifiable, Equatable {
@@ -390,15 +451,6 @@ private struct ATSLineCatalogItem: Identifiable, Equatable {
     }
 }
 
-private enum ATSLinePreset: String, CaseIterable, Identifiable {
-    case operation = "Operación"
-    case balises = "Balizas"
-    case stops = "Paradas"
-    case calibration = "Calibración"
-
-    var id: String { rawValue }
-}
-
 @MainActor
 private final class ATSLineStore: ObservableObject {
     @Published private(set) var data: ATSLineData?
@@ -407,7 +459,6 @@ private final class ATSLineStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var searchText = ""
     @Published var scope = ATSLineScope.all
-    @Published var selectedTrack = ""
     @Published var selectedKind = "Todos"
     @Published var layers: Set<ATSLineLayer> = [
         .segments, .tags, .signals, .platforms, .switches, .buffers, .stops,
@@ -454,9 +505,8 @@ private final class ATSLineStore: ObservableObject {
         let term = normalized(searchText)
         return catalogItems.filter { item in
             let kindMatches = selectedKind == "Todos" || item.kind == selectedKind
-            let trackMatches = selectedTrack.isEmpty || item.track == selectedTrack
             let scopeMatches = trackAllowed(item.track)
-            return kindMatches && trackMatches && scopeMatches
+            return kindMatches && scopeMatches
                 && (term.isEmpty || item.searchText.contains(term))
         }
     }
@@ -515,19 +565,6 @@ private final class ATSLineStore: ObservableObject {
         select(item.selection, session: session, focus: true)
     }
 
-    func applyPreset(_ preset: ATSLinePreset) {
-        switch preset {
-        case .operation:
-            layers = [.segments, .tags, .signals, .platforms, .switches, .buffers, .stops]
-        case .balises:
-            layers = [.segments, .tags, .signals, .labels]
-        case .stops:
-            layers = [.segments, .platforms, .stops, .labels]
-        case .calibration:
-            layers = [.segments, .tags, .calibration, .labels]
-        }
-    }
-
     func toggleLayer(_ layer: ATSLineLayer) {
         if layers.contains(layer) {
             layers.remove(layer)
@@ -549,18 +586,20 @@ private final class ATSLineStore: ObservableObject {
     }
 
     func focusSelection() {
-        guard let point = selection?.point else { return }
+        guard let point = visibleSelection?.point else { return }
         requestFocus(point)
+    }
+
+    var visibleSelection: ATSLineSelection? {
+        guard let selection else { return nil }
+        if let track = selection.track ?? selection.segmentID.flatMap({ data?.segmentByID[$0]?.track }),
+           !trackAllowed(track) { return nil }
+        return selection
     }
 
     func trackAllowed(_ track: String) -> Bool {
         guard !track.isEmpty, track != "—" else { return true }
-        if !selectedTrack.isEmpty { return track == selectedTrack }
-        switch scope {
-        case .all: return true
-        case .main: return area(for: track) == "principal"
-        case .yard: return area(for: track) != "principal"
-        }
+        return scope.includes(area: area(for: track))
     }
 
     func area(for track: String) -> String {
@@ -866,7 +905,7 @@ struct ATSLineView: View {
                 VStack(alignment: .leading, spacing: AppSpacing.sm) {
                     header
                     if let data = store.data {
-                        controls(data)
+                        controls
                         workspace(data: data, isWide: proxy.size.width >= 920)
                     } else if store.isLoading {
                         loadingState
@@ -950,35 +989,24 @@ struct ATSLineView: View {
         .padding(.top, AppSpacing.xs)
     }
 
-    private func controls(_ data: ATSLineData) -> some View {
+    private var controls: some View {
         GlassPanel {
             VStack(spacing: AppSpacing.sm) {
-                if isWideLayout {
+                ViewThatFits(in: .horizontal) {
                     HStack(spacing: AppSpacing.sm) {
                         scopePicker
                             .frame(width: 360)
-                        actionControls(data)
+                        actionRow
                     }
-                } else {
-                    scopePicker
-                    ScrollView(.horizontal) {
-                        HStack(spacing: AppSpacing.xs) { actionControls(data) }
-                    }
-                    .scrollIndicators(.hidden)
-                }
-                ScrollView(.horizontal) {
-                    HStack(spacing: AppSpacing.xs) {
-                        Text("Mostrar:")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.secondary)
-                        ForEach(ATSLinePreset.allCases) { preset in
-                            Button(preset.rawValue) { store.applyPreset(preset) }
-                                .buttonStyle(.bordered)
-                                .tint(BrandColor.red)
+                    VStack(spacing: AppSpacing.xs) {
+                        scopePicker
+                        ViewThatFits(in: .horizontal) {
+                            actionRow
+                            ScrollView(.horizontal) { actionRow }
+                                .scrollIndicators(.hidden)
                         }
                     }
                 }
-                .scrollIndicators(.hidden)
                 if store.isUsingCache || store.errorMessage != nil {
                     Label(
                         store.errorMessage ?? "Datos guardados disponibles",
@@ -1001,28 +1029,15 @@ struct ATSLineView: View {
         .pickerStyle(.segmented)
     }
 
+    private var actionRow: some View {
+        HStack(spacing: AppSpacing.xs) {
+            actionControls
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
     @ViewBuilder
-    private func actionControls(_ data: ATSLineData) -> some View {
-        Menu {
-            Button("Todas las vías") { store.selectedTrack = "" }
-            Divider()
-            ForEach(data.trackDefinitions) { track in
-                Button("\(track.id) · \(track.area)") { store.selectedTrack = track.id }
-            }
-        } label: {
-            Label(store.selectedTrack.isEmpty ? "Todas las vías" : store.selectedTrack, systemImage: "arrow.triangle.branch")
-        }
-        .buttonStyle(.bordered)
-
-        Menu {
-            ForEach(store.availableKinds, id: \.self) { kind in
-                Button(kind) { store.selectedKind = kind }
-            }
-        } label: {
-            Label(store.selectedKind, systemImage: "line.3.horizontal.decrease.circle")
-        }
-        .buttonStyle(.bordered)
-
+    private var actionControls: some View {
         Menu {
             ForEach(ATSLineLayer.allCases) { layer in
                 Button {
@@ -1074,9 +1089,8 @@ struct ATSLineView: View {
                     ATSLineCanvas(
                         data: data,
                         scope: store.scope,
-                        selectedTrack: store.selectedTrack,
                         layers: store.layers,
-                        selection: store.selection,
+                        selection: store.visibleSelection,
                         measureStart: store.measureStart,
                         measureEnd: store.measureEnd,
                         distanceResult: store.distanceResult,
@@ -1089,15 +1103,28 @@ struct ATSLineView: View {
                             .padding(AppSpacing.sm)
                     }
                 }
-                HStack(spacing: AppSpacing.md) {
-                    legend(color: Color(red: 0.08, green: 0.55, blue: 0.61), text: "Vía principal")
-                    legend(color: Color(red: 0.23, green: 0.39, blue: 0.66), text: "Patio")
-                    legend(color: Color(red: 0.55, green: 0.34, blue: 0.66), text: "Enlaces")
-                    Spacer()
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), alignment: .leading)], spacing: 6) {
+                    ForEach(ATSLineSymbol.allCases) { symbol in
+                        Label {
+                            Text(symbol.rawValue)
+                        } icon: {
+                            symbol.path(at: CGPoint(x: 9, y: 9), scale: 0.7)
+                                .fill(symbol.color)
+                                .frame(width: 18, height: 18)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                    if store.isMeasuring {
+                        Label("Medición (A y B)", systemImage: "ruler")
+                            .foregroundStyle(BrandColor.red)
+                    }
+                }
+                HStack(spacing: AppSpacing.sm) {
                     Text("Plano esquemático · las medidas proceden de DC SYS")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                    if store.selection?.point != nil {
+                    Spacer()
+                    if store.visibleSelection?.point != nil {
                         Button("Centrar selección", systemImage: "scope") {
                             store.focusSelection()
                         }
@@ -1169,14 +1196,6 @@ struct ATSLineView: View {
 
     private func presentDetailIfNeeded() {
         if !isWideLayout { presentedSheet = .detail }
-    }
-
-    private func legend(color: Color, text: String) -> some View {
-        Label {
-            Text(text)
-        } icon: {
-            Capsule().fill(color).frame(width: 18, height: 5)
-        }
     }
 
     private func format(_ value: Double) -> String {
@@ -1384,10 +1403,17 @@ private struct ATSLineMapTransform {
         ) * 0.94
     }
 
+    var scale: CGFloat { baseScale * zoom }
+
+    // Use diagram units like the original SVG, with limits for iPad readability.
+    func drawingSize(_ units: CGFloat, minimum: CGFloat, maximum: CGFloat) -> CGFloat {
+        min(maximum, max(minimum, units * scale))
+    }
+
     func screen(_ point: CGPoint) -> CGPoint {
         CGPoint(
-            x: size.width / 2 + (point.x - world.center.x) * baseScale * zoom + pan.width,
-            y: size.height / 2 + (point.y - world.center.y) * baseScale * zoom + pan.height
+            x: size.width / 2 + (point.x - world.center.x) * scale + pan.width,
+            y: size.height / 2 + (point.y - world.center.y) * scale + pan.height
         )
     }
 }
@@ -1395,7 +1421,6 @@ private struct ATSLineMapTransform {
 private struct ATSLineCanvas: View {
     let data: ATSLineData
     let scope: ATSLineScope
-    let selectedTrack: String
     let layers: Set<ATSLineLayer>
     let selection: ATSLineSelection?
     let measureStart: ATSLineMeasurePoint?
@@ -1410,7 +1435,32 @@ private struct ATSLineCanvas: View {
     @GestureState private var gestureZoom: CGFloat = 1
     @GestureState private var gesturePan: CGSize = .zero
 
+    private var fittedWorld: ATSLineViewBox {
+        if scope == .all { return data.viewBox }
+
+        let segments = data.segments.filter(trackAllowed)
+        let ids = Set(segments.map(\.id))
+        var points = segments.flatMap {
+            [CGPoint(x: $0.x1, y: $0.y1), CGPoint(x: $0.x2, y: $0.y2)]
+        }
+        for item in data.platforms where objectAllowed(item.id, visibleIDs: ids) {
+            points.append(CGPoint(x: item.x1, y: item.y1))
+            points.append(CGPoint(x: item.x2, y: item.y2))
+        }
+        for items in [data.tags, data.signals, data.switches, data.bufferStops] {
+            points.append(contentsOf: items.lazy.filter { objectAllowed($0.id, visibleIDs: ids) }.map(\.point))
+        }
+        guard let minX = points.map(\.x).min(), let maxX = points.map(\.x).max(),
+              let minY = points.map(\.y).min(), let maxY = points.map(\.y).max() else {
+            return data.viewBox
+        }
+        let padding = max(60, max(maxX - minX, maxY - minY) * 0.035)
+        return ATSLineViewBox(x: minX - padding, y: minY - padding,
+                              width: maxX - minX + 2 * padding, height: maxY - minY + 2 * padding)
+    }
+
     var body: some View {
+        let world = fittedWorld
         GeometryReader { proxy in
             let effectiveZoom = min(24, max(1, zoom * gestureZoom))
             let effectivePan = CGSize(
@@ -1418,7 +1468,7 @@ private struct ATSLineCanvas: View {
                 height: pan.height + gesturePan.height
             )
             let transform = ATSLineMapTransform(
-                world: data.viewBox,
+                world: world,
                 size: proxy.size,
                 zoom: effectiveZoom,
                 pan: effectivePan
@@ -1455,8 +1505,7 @@ private struct ATSLineCanvas: View {
                 HStack(spacing: 4) {
                     mapButton("minus", label: "Alejar") { zoom = max(1, zoom / 1.45) }
                     mapButton("arrow.up.left.and.arrow.down.right", label: "Ajustar vista") {
-                        zoom = 1
-                        pan = .zero
+                        resetViewport()
                     }
                     mapButton("plus", label: "Acercar") { zoom = min(24, zoom * 1.45) }
                 }
@@ -1464,18 +1513,24 @@ private struct ATSLineCanvas: View {
                 .background(.ultraThinMaterial, in: Capsule())
                 .padding(AppSpacing.sm)
             }
+            .onChange(of: world) { resetViewport() }
             .onChange(of: focusRequest) { _, request in
                 guard let request else { return }
                 let targetZoom: CGFloat = 6
                 let scale = transform.baseScale * targetZoom
                 zoom = targetZoom
                 pan = CGSize(
-                    width: (data.viewBox.center.x - request.point.x) * scale,
-                    height: (data.viewBox.center.y - request.point.y) * scale
+                    width: (world.center.x - request.point.x) * scale,
+                    height: (world.center.y - request.point.y) * scale
                 )
             }
         }
         .frame(minHeight: 360)
+    }
+
+    private func resetViewport() {
+        zoom = 1
+        pan = .zero
     }
 
     private func mapButton(
@@ -1499,16 +1554,11 @@ private struct ATSLineCanvas: View {
     ) {
         let visibleSegments = data.segments.filter(trackAllowed)
         let visibleIDs = Set(visibleSegments.map(\.id))
-        if layers.contains(.tracks) {
-            for item in data.tracks where objectAllowed(item.id, visibleIDs: visibleIDs) {
-                stroke(item, context: &context, transform: transform, color: .gray.opacity(0.42), width: 2)
-            }
-        }
-        if layers.contains(.blocks) {
-            for item in data.virtualBlocks where objectAllowed(item.id, visibleIDs: visibleIDs) {
-                stroke(item, context: &context, transform: transform, color: BrandColor.amber.opacity(0.48), width: 2)
-            }
-        }
+        let strokeScale = transform.drawingSize(8, minimum: 0.8, maximum: 4)
+        let symbolScale = transform.drawingSize(1, minimum: 0.09, maximum: 1)
+        let bounds = CGRect(origin: .zero, size: size)
+        var labelBounds: [CGRect] = []
+        var labels: [(String, CGPoint)] = []
         if layers.contains(.segments) {
             for segment in visibleSegments {
                 let path = linePath(
@@ -1518,81 +1568,75 @@ private struct ATSLineCanvas: View {
                 context.stroke(
                     path,
                     with: .color(segmentColor(segment.track)),
-                    style: StrokeStyle(lineWidth: selection?.id == segment.id ? 7 : 4, lineCap: .round)
+                    style: StrokeStyle(lineWidth: selection?.id == segment.id ? max(3, strokeScale * 1.7) : strokeScale, lineCap: .round)
                 )
                 if layers.contains(.labels), transform.zoom >= 2.2 {
-                    drawLabel(segment.id, at: transform.screen(segment.midpoint), context: &context)
+                    labels.append((segment.id, transform.screen(segment.midpoint)))
                 }
             }
         }
         if let result = distanceResult, result.possible {
-            for traversal in result.traversed {
+            for traversal in result.traversed where visibleIDs.contains(traversal.segmentID) {
                 drawTraversal(traversal, color: BrandColor.red, width: 8, context: &context, transform: transform)
             }
         }
         if layers.contains(.platforms) {
             for item in data.platforms where objectAllowed(item.id, visibleIDs: visibleIDs) {
-                stroke(item, context: &context, transform: transform, color: BrandColor.green, width: selection?.id == item.id ? 10 : 7)
+                stroke(item, context: &context, transform: transform, color: ATSLineSymbol.platform.color, width: selection?.id == item.id ? max(4, strokeScale * 2.5) : strokeScale * 2)
                 if layers.contains(.labels), transform.zoom >= 1.8 {
-                    drawLabel(item.name, at: transform.screen(item.midpoint), context: &context)
+                    labels.append((item.name, transform.screen(item.midpoint)))
                 }
             }
         }
         if layers.contains(.calibration) {
             for item in data.calibrationLinks {
                 for traversal in item.traversed where visibleIDs.contains(traversal.segmentID) {
-                    drawTraversal(traversal, color: BrandColor.amber, width: selection?.id == item.id ? 9 : 6, context: &context, transform: transform)
+                    drawTraversal(traversal, color: ATSLineSymbol.calibration.color, width: selection?.id == item.id ? max(4, strokeScale * 2.2) : strokeScale * 1.6, context: &context, transform: transform)
                 }
             }
         }
         if layers.contains(.tags) {
             for item in data.tags where objectAllowed(item.id, visibleIDs: visibleIDs) {
-                drawCircle(item.point, radius: 5, color: BrandColor.red, selected: selection?.id == item.id, context: &context, transform: transform)
-                if layers.contains(.labels), transform.zoom >= 2.8 { drawLabel(item.id, at: transform.screen(item.point), context: &context) }
+                drawSymbol(.tag, id: item.id, at: transform.screen(item.point), scale: symbolScale, context: &context)
+                if layers.contains(.labels), transform.zoom >= 2.8 { labels.append((item.id, transform.screen(item.point))) }
             }
         }
         if layers.contains(.signals) {
             for item in data.signals where objectAllowed(item.id, visibleIDs: visibleIDs) {
                 let center = transform.screen(item.point)
-                var path = Path()
-                path.move(to: CGPoint(x: center.x, y: center.y - 8))
-                path.addLine(to: CGPoint(x: center.x + 8, y: center.y + 7))
-                path.addLine(to: CGPoint(x: center.x - 8, y: center.y + 7))
-                path.closeSubpath()
-                context.fill(path, with: .color(selection?.id == item.id ? BrandColor.red : BrandColor.graphite))
-                if layers.contains(.labels), transform.zoom >= 2.8 { drawLabel(item.id, at: center, context: &context) }
+                drawSymbol(.signal, id: item.id, at: center, scale: symbolScale, context: &context)
+                if layers.contains(.labels), transform.zoom >= 2.8 { labels.append((item.id, center)) }
             }
         }
         if layers.contains(.switches) {
             for item in data.switches where objectAllowed(item.id, visibleIDs: visibleIDs) {
-                let center = transform.screen(item.point)
-                let rect = CGRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12)
-                context.fill(Path(roundedRect: rect, cornerRadius: 2), with: .color(selection?.id == item.id ? BrandColor.red : Color.indigo))
+                drawSymbol(.turnout, id: item.id, at: transform.screen(item.point), scale: symbolScale, context: &context)
             }
         }
         if layers.contains(.buffers) {
             for item in data.bufferStops where objectAllowed(item.id, visibleIDs: visibleIDs) {
-                let center = transform.screen(item.point)
-                let rect = CGRect(x: center.x - 8, y: center.y - 4, width: 16, height: 8)
-                context.fill(Path(rect), with: .color(selection?.id == item.id ? BrandColor.red : Color.brown))
+                drawSymbol(.buffer, id: item.id, at: transform.screen(item.point), scale: symbolScale, context: &context)
             }
         }
         if layers.contains(.stops) {
             for item in data.stoppingPoints where visibleIDs.contains(item.segmentID) {
                 guard let point = point(on: item.segmentID, x: item.x) else { continue }
                 let center = transform.screen(point)
-                context.fill(Path(ellipseIn: CGRect(x: center.x - 6, y: center.y - 6, width: 12, height: 12)), with: .color(selection?.id == item.id ? BrandColor.red : BrandColor.amber))
-                if layers.contains(.labels), transform.zoom >= 2.3 { drawLabel(item.id, at: center, context: &context) }
+                drawSymbol(.stop, id: item.id, at: center, scale: symbolScale, context: &context)
+                if layers.contains(.labels), transform.zoom >= 2.3 { labels.append((item.id, center)) }
             }
         }
-        if let point = selection?.point {
-            let center = transform.screen(point)
-            context.stroke(Path(ellipseIn: CGRect(x: center.x - 12, y: center.y - 12, width: 24, height: 24)), with: .color(BrandColor.red), lineWidth: 3)
+        for (label, point) in labels {
+            drawLabel(label, at: point, in: bounds, occupied: &labelBounds, context: &context)
         }
-        if let start = measureStart {
+        if let point = selection?.point {
+            let symbol = ATSLineSymbol.selection
+            context.fill(symbol.path(at: transform.screen(point), scale: 1), with: .color(symbol.color))
+        }
+        if let start = measureStart, visibleIDs.contains(start.segmentID) {
             drawMeasurePoint(start, label: "A", context: &context, transform: transform)
         }
-        if let end = measureEnd {
+        if let end = measureEnd, visibleIDs.contains(end.segmentID) {
             drawMeasurePoint(end, label: "B", context: &context, transform: transform)
         }
     }
@@ -1604,11 +1648,12 @@ private struct ATSLineCanvas: View {
         let visibleSegments = data.segments.filter(trackAllowed)
         let visibleIDs = Set(visibleSegments.map(\.id))
         var pointCandidates: [(CGFloat, ATSLineSelection)] = []
+        let pointTolerance = transform.drawingSize(18, minimum: 5, maximum: 16)
 
         func addPoint(_ id: String, kind: String, point: CGPoint) {
             guard objectAllowed(id, visibleIDs: visibleIDs) else { return }
             let distance = hypot(transform.screen(point).x - location.x, transform.screen(point).y - location.y)
-            guard distance <= 22 else { return }
+            guard distance <= pointTolerance else { return }
             let context = data.objectContext[id]
             pointCandidates.append((distance, ATSLineSelection(
                 id: id,
@@ -1634,7 +1679,7 @@ private struct ATSLineCanvas: View {
             for item in data.stoppingPoints where visibleIDs.contains(item.segmentID) {
                 guard let point = point(on: item.segmentID, x: item.x) else { continue }
                 let distance = hypot(transform.screen(point).x - location.x, transform.screen(point).y - location.y)
-                guard distance <= 22 else { continue }
+                guard distance <= pointTolerance else { continue }
                 pointCandidates.append((distance, ATSLineSelection(
                     id: item.id,
                     kind: "Punto de parada",
@@ -1716,23 +1761,14 @@ private struct ATSLineCanvas: View {
     }
 
     private func trackAllowed(_ segment: ATSLineSegment) -> Bool {
-        if !selectedTrack.isEmpty { return segment.track == selectedTrack }
-        switch scope {
-        case .all:
-            return true
-        case .main:
-            return areaForTrack(segment.track) == "principal"
-        case .yard:
-            return areaForTrack(segment.track) != "principal"
-        }
+        scope.includes(area: areaForTrack(segment.track))
     }
 
     private func objectAllowed(_ id: String, visibleIDs: Set<String>) -> Bool {
-        if scope == .all && selectedTrack.isEmpty { return true }
+        if scope == .all { return true }
         guard let context = data.objectContext[id] else { return false }
         if let track = context.track {
-            if !selectedTrack.isEmpty { return track == selectedTrack }
-            return scope == .main ? areaForTrack(track) == "principal" : areaForTrack(track) != "principal"
+            return scope.includes(area: areaForTrack(track))
         }
         return context.segmentID.map(visibleIDs.contains) ?? false
     }
@@ -1763,23 +1799,6 @@ private struct ATSLineCanvas: View {
     }
 
     private func stroke(
-        _ item: ATSLineLinearObject,
-        context: inout GraphicsContext,
-        transform: ATSLineMapTransform,
-        color: Color,
-        width: CGFloat
-    ) {
-        context.stroke(
-            linePath(
-                from: transform.screen(CGPoint(x: item.x1, y: item.y1)),
-                to: transform.screen(CGPoint(x: item.x2, y: item.y2))
-            ),
-            with: .color(color),
-            style: StrokeStyle(lineWidth: width, lineCap: .round)
-        )
-    }
-
-    private func stroke(
         _ item: ATSLinePlatform,
         context: inout GraphicsContext,
         transform: ATSLineMapTransform,
@@ -1796,19 +1815,16 @@ private struct ATSLineCanvas: View {
         )
     }
 
-    private func drawCircle(
-        _ point: CGPoint,
-        radius: CGFloat,
-        color: Color,
-        selected: Bool,
-        context: inout GraphicsContext,
-        transform: ATSLineMapTransform
+    private func drawSymbol(
+        _ symbol: ATSLineSymbol,
+        id: String,
+        at center: CGPoint,
+        scale: CGFloat,
+        context: inout GraphicsContext
     ) {
-        let center = transform.screen(point)
-        let adjusted = selected ? radius + 3 : radius
         context.fill(
-            Path(ellipseIn: CGRect(x: center.x - adjusted, y: center.y - adjusted, width: adjusted * 2, height: adjusted * 2)),
-            with: .color(color)
+            symbol.path(at: center, scale: scale),
+            with: .color(selection?.id == id ? BrandColor.red : symbol.color)
         )
     }
 
@@ -1826,22 +1842,29 @@ private struct ATSLineCanvas: View {
     private func drawLabel(
         _ label: String,
         at point: CGPoint,
+        in bounds: CGRect,
+        occupied: inout [CGRect],
         context: inout GraphicsContext
     ) {
-        context.draw(
+        guard bounds.contains(point) else { return }
+        let resolved = context.resolve(
             Text(label)
                 .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                .foregroundStyle(BrandColor.graphite),
-            at: CGPoint(x: point.x + 8, y: point.y - 10),
-            anchor: .leading
+                .foregroundStyle(BrandColor.graphite)
         )
+        let size = resolved.measure(in: bounds.size)
+        let rect = CGRect(x: point.x + 8, y: point.y - 10 - size.height / 2, width: size.width, height: size.height)
+        let padded = rect.insetBy(dx: -3, dy: -2)
+        guard bounds.contains(padded), !occupied.contains(where: { $0.intersects(padded) }) else { return }
+        occupied.append(padded)
+        context.draw(resolved, at: rect.origin, anchor: .topLeading)
     }
 
     private func segmentColor(_ track: String) -> Color {
         switch areaForTrack(track) {
-        case "principal": Color(red: 0.08, green: 0.55, blue: 0.61)
-        case "patio": Color(red: 0.23, green: 0.39, blue: 0.66)
-        default: Color(red: 0.55, green: 0.34, blue: 0.66)
+        case "principal": ATSLineSymbol.main.color
+        case "patio": ATSLineSymbol.yard.color
+        default: ATSLineSymbol.links.color
         }
     }
 

@@ -5,6 +5,66 @@ Administradores. Estas consultas son una alternativa controlada para corregir
 datos durante desarrollo o una carga inicial. Realiza primero una copia de la
 base de datos y ejecuta cada cambio dentro de una transacción.
 
+## En La App
+
+En **Componentes internos**, toca el nombre de un componente para abrir su
+detalle; el control de expansión abre sus hijos. Un administrador puede
+adjuntar fotografías desde el detalle. **Administrar componentes → Agregar**
+empieza buscando unidades por nombre, código, serie o part number. Al seleccionar
+una unidad existente, un administrador elige padre y posición de destino. Si no
+existe, **Crear unidad nueva** abre el formulario completo. Ambos caminos guardan
+el componente y su ubicación juntos, sin clonar una unidad existente. La opción
+sin posición es explícita. La asignación respeta el subsistema y conserva imágenes
+e historial.
+
+**Editar** conserva el vínculo al modelo y su part number y permite cambiar la
+posición dentro del equipo. **Mover** permite escoger equipo del mismo subsistema,
+padre y posición. Libera la posición anterior de la unidad al trasladarla y registra
+el movimiento; para trasladar conjuntos con hijos ubicados en espacios internos de
+otro equipo, primero se deben liberar las posiciones de esos hijos. **Eliminar**
+pide confirmación y solo borra unidades sin hijos ni referencias históricas; nunca
+el modelo del catálogo. Un destino ocupado, ajeno al equipo o cíclico se rechaza y
+revierte toda la operación.
+
+## Espacios Internos
+
+En **Componentes internos → Administrar componentes → Espacios internos**,
+un administrador puede crear contenedores y posiciones para cualquier equipo
+del inventario. Por ejemplo: **Vagón 2 › Armario ATS › Rack A › Posición 03**.
+Cada posición admite un componente del mismo equipo; los contenedores solo
+sirven para organizar otros espacios. Los perfiles de consulta pueden ver el
+árbol, incluidas las posiciones libres.
+
+Los espacios personalizados comparten su estructura entre equipos del mismo
+tipo de catálogo, categoría y subsistema. La migración integra los espacios ya
+creados y cada nuevo equipo recibe esa estructura. Las ubicaciones importadas
+se conservan. Cada unidad tiene identificadores y ocupación independientes: no
+se copian componentes. La asignación, el cambio de posición
+y la liberación se registran en los movimientos del componente sin cambiar su
+equipo padre. Al trasladar una unidad a otro equipo se libera su posición anterior
+en la misma transacción. Queda pendiente la edición de espacios existentes.
+
+En Administrar componentes, **Guardar cambios** guarda directamente la operación
+del formulario, sin un paso previo de añadir a pendientes. Posición muestra espacios
+disponibles y guardar asigna la ocupación real, no una etiqueta libre.
+
+## Modelos Y Unidades
+
+- **Modelo / part number:** `asset_types` con `category = COMPONENT`. Este es el
+  catálogo usado por el selector de tipo. Su part number es de solo lectura al
+  registrar o editar una unidad física.
+- **Unidad física:** `assets` con `is_business_anchor = false` y `asset_type_id`
+  apuntando al modelo. Cada tarjeta concreta tiene su ID, serie cuando aplique,
+  ubicación, imágenes e historial. Agregar una unidad aparece en Componentes
+  generales y en el equipo padre; no crea un modelo nuevo automáticamente.
+- Un administrador puede activar **Registrar un modelo con part number nuevo**.
+  Este flujo exige nombre y part number, rechaza duplicados y crea el modelo y su
+  primera unidad en una sola transacción. Si falla la unidad, tampoco se guarda
+  el modelo. Los demás usuarios solo pueden registrar unidades de modelos existentes.
+
+No se crean tablas adicionales ni se convierten automáticamente los componentes
+antiguos sin tipo. La edición técnica no permite alterar el part number del modelo.
+
 ## Consultas De Lectura
 
 ### Encontrar un equipo grande

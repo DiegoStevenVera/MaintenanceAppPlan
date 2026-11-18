@@ -352,7 +352,7 @@ struct StockListView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     pageTitle
-                    filters(isCompact: isCompact)
+                    filters
                     results(
                         isWide: geometry.size.width >= 1_000,
                         isCompact: isCompact,
@@ -418,77 +418,26 @@ struct StockListView: View {
         .tint(BrandColor.red)
     }
 
-    @ViewBuilder
-    private func filters(isCompact: Bool) -> some View {
-        GlassPanel {
-            if isCompact {
-                VStack(spacing: AppSpacing.sm) {
-                    searchField
-                    LazyVGrid(
-                        columns: [GridItem(.flexible()), GridItem(.flexible())],
-                        spacing: AppSpacing.sm
-                    ) {
-                        subsystemFilter
-                        locationFilter
-                        statusFilter
-                        clearFiltersButton.frame(maxWidth: .infinity, minHeight: 52)
-                    }
-                }
-            } else {
-                HStack(spacing: AppSpacing.sm) {
-                    searchField.frame(minWidth: 180, maxWidth: .infinity)
-                    subsystemFilter.frame(minWidth: 130, maxWidth: 160)
-                    locationFilter.frame(minWidth: 150, maxWidth: 190)
-                    statusFilter.frame(minWidth: 130, maxWidth: 160)
-                    clearFiltersButton.frame(minWidth: 104)
-                }
+    private var filters: some View {
+        CompactInventoryFilters(
+            prompt: "Buscar en stock",
+            query: $query,
+            canClear: !query.isEmpty || !selectedSubsystem.isEmpty
+                || !selectedLocation.isEmpty || !selectedStatus.isEmpty,
+            onClear: {
+                query = ""
+                selectedSubsystem = ""
+                selectedLocation = ""
+                selectedStatus = ""
             }
+        ) {
+            CompactInventoryFilter(title: "Subsistema", systemImage: "square.3.layers.3d", allLabel: "Todos",
+                                   selection: $selectedSubsystem, options: stockStore.availableSubsystems)
+            CompactInventoryFilter(title: "Ubicación", systemImage: "shippingbox", allLabel: "Todas",
+                                   selection: $selectedLocation, options: stockStore.availableLocations)
+            CompactInventoryFilter(title: "Estado", systemImage: "checkmark.seal", allLabel: "Todos",
+                                   selection: $selectedStatus, options: stockStore.availableStatuses)
         }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: AppSpacing.sm) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-            TextField("Buscar en stock", text: $query)
-                .textInputAutocapitalization(.never).autocorrectionDisabled()
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var subsystemFilter: some View {
-        MaintenanceChoiceField("Subsistema", systemImage: "square.3.layers.3d", selection: $selectedSubsystem) {
-            Text("Todos").tag("")
-            ForEach(stockStore.availableSubsystems, id: \.self) { Text($0).tag($0) }
-        }
-    }
-
-    private var locationFilter: some View {
-        MaintenanceChoiceField("Ubicación", systemImage: "shippingbox", selection: $selectedLocation) {
-            Text("Todas").tag("")
-            ForEach(stockStore.availableLocations, id: \.self) { Text($0).tag($0) }
-        }
-    }
-
-    private var statusFilter: some View {
-        MaintenanceChoiceField("Estado", systemImage: "checkmark.seal", selection: $selectedStatus) {
-            Text("Todos").tag("")
-            ForEach(stockStore.availableStatuses, id: \.self) { Text($0).tag($0) }
-        }
-    }
-
-    private var clearFiltersButton: some View {
-        Button {
-            query = ""
-            selectedSubsystem = ""
-            selectedLocation = ""
-            selectedStatus = ""
-        } label: {
-            Label("Limpiar", systemImage: "arrow.counterclockwise")
-        }
-        .buttonStyle(CompactActionButtonStyle())
-        .disabled(query.isEmpty && selectedSubsystem.isEmpty && selectedLocation.isEmpty && selectedStatus.isEmpty)
     }
 
     @ViewBuilder

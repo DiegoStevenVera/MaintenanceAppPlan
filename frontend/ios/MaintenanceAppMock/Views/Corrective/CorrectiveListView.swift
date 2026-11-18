@@ -81,6 +81,11 @@ struct DatabaseCorrectiveListView: View {
         .background(MaintenanceScreenBackground())
         .navigationTitle("Correctivos")
         .toolbar {
+            NavigationLink {
+                CorrectiveSolutionsView()
+            } label: {
+                Label("Consulta de soluciones", systemImage: "doc.text.magnifyingglass")
+            }
             Button {
                 isSelectingOfflineWork.toggle()
                 if !isSelectingOfflineWork { selectedOfflineIDs = [] }

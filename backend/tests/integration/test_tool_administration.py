@@ -16,7 +16,138 @@ pytestmark = pytest.mark.skipif(
 
 
 def test_inventory_and_revision_workflows():
-    asyncio.run(workflows())
+    asyncio.run(run_workflow(workflows))
+
+
+def test_warehouse_issue_and_partial_settlement():
+    asyncio.run(run_workflow(warehouse_issue_workflow))
+
+
+async def run_workflow(workflow):
+    from app.database import engine
+
+    try:
+        await workflow()
+    finally:
+        await engine.dispose()
+
+
+async def warehouse_issue_workflow():
+    import app.models  # noqa: F401
+    from app.database import async_session_factory
+    from modules.asset_management.infrastructure.postgres.catalog_models import LocationTypeRecord
+    from modules.asset_management.infrastructure.postgres.domain_models import InventoryLocationRecord
+    from modules.identity_access.infrastructure.postgres.models import UserRecord
+    from modules.identity_access.interfaces.schemas import UserDTO
+    from modules.maintenance_execution.interfaces import tool_admin_router as api
+    from shared_kernel.schemas import UserRole
+
+    uid = str(uuid4())
+    user = UserDTO(
+        id=uid, name="Administrador", email=f"{uid}@example.test",
+        role=UserRole.ADMINISTRATOR, role_label="Admin",
+    )
+    async with async_session_factory() as s:
+        s.add(UserRecord(
+            id=uid, name=user.name, email=user.email, role=user.role.value,
+            role_label=user.role_label, password_hash="disabled", is_active=True,
+        ))
+        location_type = await s.scalar(select(LocationTypeRecord).where(
+            LocationTypeRecord.code == "ALMACENAMIENTO"
+        ))
+        if location_type is None:
+            location_type = LocationTypeRecord(
+                id=uuid4(), code="ALMACENAMIENTO", name="Almacenamiento", is_active=True
+            )
+            s.add(location_type)
+            await s.flush()
+        warehouse = InventoryLocationRecord(
+            id=uuid4(), name=f"Almacén {uid}", location_type_id=location_type.id, is_active=True,
+        )
+        s.add(warehouse)
+        await s.flush()
+        draft = api.InventoryItemWrite(
+            name=f"Paño {uid}", quantity=5, classification="CONSUMIBLE",
+            inventory_location_id=warehouse.id,
+        )
+        warehouse_id = warehouse.id
+        item_id = UUID((await api.create_inventory_item(draft, s))["id"])
+        other_id = UUID((await api.create_inventory_item(draft, s))["id"])
+        request = api.InventoryIssueWrite(id=uuid4(), quantity=4, responsible_user_id=uid)
+        await api.issue_inventory_item(item_id, request, user, s)
+        await api.issue_inventory_item(item_id, request, user, s)
+
+        async def items():
+            page = await api.inventory_items(q=uid, offset=0, limit=10, session=s)
+            return {UUID(row["id"]): row for row in page["items"]}
+
+        rows = await items()
+        assert rows[item_id]["quantity"] == 1 and rows[item_id]["stock_locked"]
+        assert rows[other_id]["quantity"] == 5 and not rows[other_id]["stock_locked"]
+        with pytest.raises(HTTPException) as ex:
+            await api.issue_inventory_item(
+                item_id, request.model_copy(update={"id": uuid4(), "quantity": Decimal(2)}), user, s
+            )
+        assert ex.value.status_code == 409
+        await s.rollback()
+
+        async def pending():
+            rows = await api.movements(offset=0, limit=100, open_only=True, session=s)
+            return next((row for row in rows if row["id"] == request.id), None)
+
+        assert (await pending())["outstanding"] == 4
+        balance_id = (await pending())["inventory_id"]
+        for kind, quantity, expected in [
+            ("RETURN", 2, 2), ("DAMAGED", 1, 1), ("CONSUMED", 1, 0),
+        ]:
+            await api.move(api.MovementWrite(
+                id=uuid4(), inventory_id=balance_id, kind=kind,
+                quantity=quantity, issue_id=request.id,
+            ), user, s)
+            row = await pending()
+            assert (row["outstanding"] if row else 0) == expected
+        assert (await items())[item_id]["quantity"] == 3
+        history = await api.movements(offset=0, limit=100, open_only=False, session=s)
+        assert {row["kind"] for row in history if row["inventory_id"] == balance_id} == {
+            "ISSUE", "RETURN", "DAMAGED", "CONSUMED",
+        }
+        await api.update_inventory_item(item_id, draft.model_copy(update={"quantity": 99}), s)
+        assert (await items())[item_id]["quantity"] == 3
+        with pytest.raises(HTTPException) as error:
+            await api.delete_inventory_item(item_id, s)
+        assert error.value.status_code == 409
+        await s.rollback()
+
+        serial = api.InventoryItemWrite(
+            name=f"Medidor {uid}", tool_code=uid, quantity=1, classification="EQUIPO",
+            inventory_location_id=warehouse_id,
+        )
+        serial_id = UUID((await api.create_inventory_item(serial, s))["id"])
+        with pytest.raises(HTTPException) as error:
+            await api.issue_inventory_item(
+                serial_id, api.InventoryIssueWrite(id=uuid4(), quantity=2, responsible_user_id=uid),
+                user, s,
+            )
+        assert error.value.status_code == 422
+        await s.rollback()
+        serial_issue = api.InventoryIssueWrite(id=uuid4(), quantity=1, responsible_user_id=uid)
+        await api.issue_inventory_item(serial_id, serial_issue, user, s)
+        assert (await items())[serial_id]["quantity"] == 0
+        assert (await items())[serial_id]["status"] == "SIN STOCK"
+
+    from app.main import create_app
+    from httpx import ASGITransport, AsyncClient
+    from modules.identity_access.interfaces.dependencies import get_current_user
+
+    app = create_app()
+    app.dependency_overrides[get_current_user] = lambda: user.model_copy(
+        update={"role": UserRole.MAINTENANCE_ENGINEER}
+    )
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        assert (await client.post(
+            f"/api/v1/tool-admin/items/{other_id}/issue",
+            json=request.model_dump(mode="json"),
+        )).status_code == 403
 
 
 async def workflows():

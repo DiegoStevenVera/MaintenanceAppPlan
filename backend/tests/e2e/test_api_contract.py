@@ -30,6 +30,15 @@ def test_healthcheck() -> None:
     assert response.json()["status"] == "ok"
 
 
+def test_corrective_solution_read_contract() -> None:
+    assert client.get("/api/v1/corrective-solutions/search").status_code == 401
+    response = client.get("/api/v1/corrective-solutions/search", headers=authorization_headers())
+    assert response.status_code == 200
+    assert response.json()["engine"] == "textual_contextual"
+    assert response.json()["items"] == []
+    assert client.get("/api/v1/corrective-solutions/bundle", headers=authorization_headers()).status_code == 422
+
+
 def test_pcon_requires_authentication() -> None:
     response = client.get("/api/v1/pcon/plan", params={"year": 2026, "month": 7})
     assert response.status_code == 401
@@ -286,6 +295,20 @@ def test_asset_history_is_specific_to_equipment() -> None:
     history = response.json()
     assert len(history) == 1
     assert history[0]["title"] == "Inspeccion de CRK 1"
+
+
+def test_component_endpoints_exclude_equipment_and_require_admin_for_edits() -> None:
+    headers = authorization_headers()
+    components = client.get("/api/v1/assets", params={"business_anchor": False}, headers=headers)
+    assert components.status_code == 200
+    assert all(not item["is_business_anchor"] for item in components.json()["items"])
+    for path in ("component-detail", "movements"):
+        assert client.get(f"/api/v1/assets/asset-crk-1/{path}", headers=headers).status_code == 404
+    assert client.put(
+        "/api/v1/assets/asset-crk-1/component-detail",
+        json={"name": "Cambio"},
+        headers=headers,
+    ).status_code == 403
 
 
 def test_normalized_maintenance_read_contract_requires_authentication() -> None:

@@ -33,6 +33,7 @@ struct EquipmentDTO: Identifiable, Decodable {
     let status: String
     let physicalLocation: String
     let isBusinessAnchor: Bool
+    let parentID: String?
     let businessLabel: String?
     let manufacturer: String?
     let model: String?
@@ -52,6 +53,7 @@ struct EquipmentDTO: Identifiable, Decodable {
         case partNumber = "part_number"
         case physicalLocation = "physical_location"
         case isBusinessAnchor = "is_business_anchor"
+        case parentID = "parent_id"
         case businessLabel = "business_label"
         case softwareVersion = "software_version"
         case currentPosition = "current_position"
@@ -129,7 +131,7 @@ struct EquipmentImageWritePayload: Encodable {
     let is_primary: Bool
 }
 
-struct EquipmentTreeNodeDTO: Identifiable, Codable {
+struct EquipmentTreeNodeDTO: Identifiable, Codable, Equatable {
     let id: String
     let name: String
     let category: String
@@ -219,6 +221,7 @@ struct AssetComponentOperation: Encodable, Identifiable {
         case update = "UPDATE"
         case move = "MOVE"
         case delete = "DELETE"
+        case assign = "ASSIGN"
     }
 
     let id = UUID()
@@ -233,6 +236,11 @@ struct AssetComponentOperation: Encodable, Identifiable {
     let partNumber: String?
     let model: String?
     let currentPosition: String?
+    var expectedParentID: String? = nil
+    var assetTypeID: String? = nil
+    var newTypeName: String? = nil
+    var newTypePartNumber: String? = nil
+    var destinationEquipmentID: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case action, name, category, status, model
@@ -242,6 +250,11 @@ struct AssetComponentOperation: Encodable, Identifiable {
         case serialNumber = "serial_number"
         case partNumber = "part_number"
         case currentPosition = "current_position"
+        case expectedParentID = "expected_parent_id"
+        case assetTypeID = "asset_type_id"
+        case newTypeName = "new_type_name"
+        case newTypePartNumber = "new_type_part_number"
+        case destinationEquipmentID = "destination_equipment_id"
     }
 }
 
@@ -278,6 +291,76 @@ private struct EquipmentPageDTO: Decodable {
     let total: Int
 }
 
+private struct ComponentDetailDTO: Decodable {
+    let asset: EquipmentDTO
+    let asset_type_id: String?
+    let internal_code: String?
+    let serial_number: String?
+    let parent_name: String?
+    let inventory_location: String?
+    let slot: String?
+    let manufacture_date: String?
+}
+
+private struct ComponentMovementDTO: Decodable, Identifiable {
+    let id: String
+    let kind: String
+    let moved_at: String
+    let origin: String?
+    let destination: String?
+    let from_status: String?
+    let to_status: String?
+    let notes: String?
+}
+
+private struct ComponentMovementPage: Decodable {
+    let items: [ComponentMovementDTO]
+    let total: Int
+}
+
+private struct EquipmentInternalSlot: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let parent_id: String?
+    let path: String
+    let accepts_asset: Bool
+    let occupant_id: String?
+    let occupant_name: String?
+}
+
+private struct InternalSlotWrite: Encodable {
+    let name: String
+    let parent_id: String?
+    let accepts_asset: Bool
+}
+
+private struct ComponentEditorOptions: Decodable {
+    struct Classification: Decodable, Hashable {
+        let id: String
+        let category: String
+        let type: String
+        let part_number: String?
+        let serial_number_policy: String
+    }
+    let classifications: [Classification]
+    let statuses: [String]
+}
+
+private struct InternalSlotOccupancy: Encodable {
+    let component_id: String?
+    let expected_occupant_id: String?
+}
+
+private struct ComponentWritePayload: Encodable {
+    let name: String
+    let serial_number: String
+    let part_number: String?
+    let manufacturer: String
+    let model: String
+    let software_version: String
+    let status_id: String?
+}
+
 private struct AssetService {
     private let client: APIClient
 
@@ -285,16 +368,32 @@ private struct AssetService {
         client = APIClient(baseURLString: baseURLString)
     }
 
+    func slots(id: String, accessToken: String) async throws -> [EquipmentInternalSlot] {
+        try await client.get("api/v1/assets/\(id)/internal-slots", bearerToken: accessToken)
+    }
+
+    func addSlot(id: String, payload: InternalSlotWrite, accessToken: String) async throws -> [EquipmentInternalSlot] {
+        try await client.post("api/v1/assets/\(id)/internal-slots", body: payload, bearerToken: accessToken)
+    }
+
+    func placeComponent(id: String, slotID: String, payload: InternalSlotOccupancy, accessToken: String) async throws -> [EquipmentInternalSlot] {
+        try await client.put("api/v1/assets/\(id)/internal-slots/\(slotID)", body: payload, bearerToken: accessToken)
+    }
+
     func list(
         query: String,
         subsystem: String?,
         category: String? = nil,
         status: String? = nil,
+        businessAnchor: Bool = true,
+        limit: Int = 200,
+        offset: Int = 0,
         accessToken: String
     ) async throws -> EquipmentPageDTO {
         var queryItems = [
-            URLQueryItem(name: "business_anchor", value: "true"),
-            URLQueryItem(name: "limit", value: "200")
+            URLQueryItem(name: "business_anchor", value: String(businessAnchor)),
+            URLQueryItem(name: "limit", value: String(limit)),
+            URLQueryItem(name: "offset", value: String(offset))
         ]
         if !query.isEmpty {
             queryItems.append(URLQueryItem(name: "q", value: query))
@@ -319,8 +418,30 @@ private struct AssetService {
         try await client.get("api/v1/assets/\(id)", bearerToken: accessToken)
     }
 
+    func component(id: String, accessToken: String) async throws -> ComponentDetailDTO {
+        try await client.get("api/v1/assets/\(id)/component-detail", bearerToken: accessToken)
+    }
+
+    func updateComponent(id: String, payload: ComponentWritePayload, accessToken: String) async throws -> ComponentDetailDTO {
+        try await client.put("api/v1/assets/\(id)/component-detail", body: payload, bearerToken: accessToken)
+    }
+
+    func movements(id: String, limit: Int, offset: Int, accessToken: String) async throws -> ComponentMovementPage {
+        try await client.get(
+            "api/v1/assets/\(id)/movements", bearerToken: accessToken,
+            queryItems: [
+                URLQueryItem(name: "limit", value: String(limit)),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+        )
+    }
+
     func administrationCatalog(accessToken: String) async throws -> EquipmentAdministrationCatalog {
         try await client.get("api/v1/assets/administration/catalog", bearerToken: accessToken)
+    }
+
+    func componentEditorOptions(id: String, accessToken: String) async throws -> ComponentEditorOptions {
+        try await client.get("api/v1/assets/\(id)/component-editor-options", bearerToken: accessToken)
     }
 
     func tree(id: String, accessToken: String) async throws -> [EquipmentTreeNodeDTO] {
@@ -541,6 +662,13 @@ final class AssetStore: ObservableObject {
                 accessToken: token
             )
         }
+        let reassignedIDs = Set(operations.filter { $0.action == .assign }.compactMap(\.componentID))
+        let staleTreeIDs = trees.compactMap { id, nodes in
+            id != rootID && nodes.contains(where: { reassignedIDs.contains($0.id) }) ? id : nil
+        }
+        for id in staleTreeIDs {
+            trees.removeValue(forKey: id)
+        }
         trees[rootID] = tree
         await loadDetail(id: rootID, session: session, force: true)
     }
@@ -629,6 +757,8 @@ struct AssetSearchView: View {
     @State private var selectedStatus = ""
     @State private var page = 0
     @State private var isPresentingNewEquipment = false
+    @State private var showingComponents = false
+    @State private var componentsRefresh = 0
 
     private let pageSize = 10
 
@@ -640,12 +770,21 @@ struct AssetSearchView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: AppSpacing.lg) {
                     pageHeader
-                    filters(isCompact: isCompact)
-                    results(
-                        isWide: geometry.size.width >= 1_000,
-                        isCompact: isCompact,
-                        isNarrow: isNarrow
-                    )
+                    Picker("Inventario", selection: $showingComponents) {
+                        Text("Equipos").tag(false)
+                        Text("Componentes").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    if showingComponents {
+                        ComponentInventoryList(isNarrow: isNarrow, refresh: componentsRefresh)
+                    } else {
+                        filters
+                        results(
+                            isWide: geometry.size.width >= 1_000,
+                            isCompact: isCompact,
+                            isNarrow: isNarrow
+                        )
+                    }
                 }
                 .padding(isCompact ? AppSpacing.md : AppSpacing.lg)
                 .frame(maxWidth: 1_200, alignment: .leading)
@@ -656,7 +795,7 @@ struct AssetSearchView: View {
         .navigationTitle("Equipos")
         .navigationBarTitleDisplayMode(.inline)
         .refreshable {
-            await load()
+            if showingComponents { componentsRefresh += 1 } else { await load() }
         }
         .task(id: "\(query)|\(selectedCategory)|\(selectedSubsystem)|\(selectedStatus)") {
             if !query.isEmpty {
@@ -683,14 +822,14 @@ struct AssetSearchView: View {
             HStack(alignment: .center, spacing: AppSpacing.md) {
                 pageTitle
                 Spacer()
-                if session.canEdit(.equipment) {
+                if !showingComponents && session.canEdit(.equipment) {
                     newEquipmentButton
                 }
             }
 
             VStack(alignment: .leading, spacing: AppSpacing.md) {
                 pageTitle
-                if session.canEdit(.equipment) {
+                if !showingComponents && session.canEdit(.equipment) {
                     newEquipmentButton
                         .frame(maxWidth: .infinity, alignment: .trailing)
                 }
@@ -702,7 +841,9 @@ struct AssetSearchView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Equipos")
                 .font(.largeTitle.bold())
-            Text("Consulta los equipos, su ubicación y estado operativo")
+            Text(showingComponents
+                 ? "Consulta los componentes y sus movimientos"
+                 : "Consulta los equipos, su ubicación y estado operativo")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
@@ -718,115 +859,26 @@ struct AssetSearchView: View {
         .tint(BrandColor.red)
     }
 
-    @ViewBuilder
-    private func filters(isCompact: Bool) -> some View {
-        GlassPanel {
-            if isCompact {
-                VStack(spacing: AppSpacing.sm) {
-                    searchField
-
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(), spacing: AppSpacing.sm),
-                            GridItem(.flexible(), spacing: AppSpacing.sm)
-                        ],
-                        spacing: AppSpacing.sm
-                    ) {
-                        categoryFilter
-                        subsystemFilter
-                        statusFilter
-                        clearFiltersButton
-                            .frame(maxWidth: .infinity, minHeight: 52)
-                    }
-                }
-            } else {
-                HStack(spacing: AppSpacing.sm) {
-                    searchField
-                        .frame(minWidth: 170, maxWidth: .infinity)
-                    categoryFilter
-                        .frame(minWidth: 120, maxWidth: 150)
-                    subsystemFilter
-                        .frame(minWidth: 120, maxWidth: 150)
-                    statusFilter
-                        .frame(minWidth: 120, maxWidth: 150)
-                    clearFiltersButton
-                        .frame(minWidth: 104)
-                }
+    private var filters: some View {
+        CompactInventoryFilters(
+            prompt: "Buscar equipo",
+            query: $query,
+            canClear: !query.isEmpty || !selectedCategory.isEmpty
+                || !selectedSubsystem.isEmpty || !selectedStatus.isEmpty,
+            onClear: {
+                query = ""
+                selectedCategory = ""
+                selectedSubsystem = ""
+                selectedStatus = ""
             }
-        }
-    }
-
-    private var searchField: some View {
-        HStack(spacing: AppSpacing.sm) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Buscar equipo", text: $query)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-        }
-        .padding(.horizontal, AppSpacing.md)
-        .frame(maxWidth: .infinity, minHeight: 52)
-        .background(
-            .background.opacity(0.72),
-            in: RoundedRectangle(cornerRadius: 10, style: .continuous)
-        )
-    }
-
-    private var categoryFilter: some View {
-        MaintenanceChoiceField(
-            "Categoría",
-            systemImage: "square.stack.3d.up",
-            selection: $selectedCategory
         ) {
-            Text("Todas").tag("")
-            ForEach(assetStore.availableCategories, id: \.self) { category in
-                Text(category).tag(category)
-            }
+            CompactInventoryFilter(title: "Categoría", systemImage: "square.stack.3d.up", allLabel: "Todas",
+                                   selection: $selectedCategory, options: assetStore.availableCategories)
+            CompactInventoryFilter(title: "Subsistema", systemImage: "square.stack.3d.up.fill", allLabel: "Todos",
+                                   selection: $selectedSubsystem, options: assetStore.availableSubsystems)
+            CompactInventoryFilter(title: "Estado", systemImage: "checkmark.seal", allLabel: "Todos",
+                                   selection: $selectedStatus, options: assetStore.availableStatuses)
         }
-    }
-
-    private var statusFilter: some View {
-        MaintenanceChoiceField(
-            "Estado",
-            systemImage: "checkmark.seal",
-            selection: $selectedStatus
-        ) {
-            Text("Todos").tag("")
-            ForEach(assetStore.availableStatuses, id: \.self) { status in
-                Text(status).tag(status)
-            }
-        }
-    }
-
-    private var subsystemFilter: some View {
-        MaintenanceChoiceField(
-            "Subsistema",
-            systemImage: "square.stack.3d.up.fill",
-            selection: $selectedSubsystem
-        ) {
-            Text("Todos").tag("")
-            ForEach(assetStore.availableSubsystems, id: \.self) { subsystem in
-                Text(subsystem).tag(subsystem)
-            }
-        }
-    }
-
-    private var clearFiltersButton: some View {
-        Button {
-            query = ""
-            selectedCategory = ""
-            selectedSubsystem = ""
-            selectedStatus = ""
-        } label: {
-            Label("Limpiar", systemImage: "arrow.counterclockwise")
-        }
-        .buttonStyle(CompactActionButtonStyle())
-        .disabled(
-            query.isEmpty
-                && selectedCategory.isEmpty
-                && selectedSubsystem.isEmpty
-                && selectedStatus.isEmpty
-        )
     }
 
     @ViewBuilder
@@ -948,6 +1000,502 @@ struct AssetSearchView: View {
             session: session
         )
         page = min(page, max(0, pageCount - 1))
+    }
+}
+
+@MainActor
+private func componentRequest<T>(
+    session: SessionStore,
+    _ operation: @escaping (AssetService, String) async throws -> T
+) async throws -> T {
+    let service = AssetService(baseURLString: UserDefaults.standard.string(forKey: "apiBaseURL") ?? "")
+    return try await session.withValidAccessToken { token in
+        try await operation(service, token)
+    }
+}
+
+private struct ComponentInventoryList: View {
+    @EnvironmentObject private var session: SessionStore
+    @State private var query = ""
+    @State private var page = 0
+    @State private var revision = 0
+    @State private var result: EquipmentPageDTO?
+    @State private var error: String?
+    @State private var loading = true
+    let isNarrow: Bool
+    let refresh: Int
+    private let pageSize = 15
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            GlassPanel {
+                HStack(spacing: AppSpacing.sm) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField("Buscar componente", text: $query)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                .font(.subheadline)
+                .padding(.horizontal, AppSpacing.sm)
+                .frame(minHeight: 44)
+                .background(.background.opacity(0.72), in: .rect(cornerRadius: 8))
+            }
+            if loading {
+                ProgressView("Cargando componentes").frame(maxWidth: .infinity)
+            } else if let error {
+                ContentUnavailableView {
+                    Label("No se pudieron cargar los componentes", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Reintentar") { revision += 1 }
+                }
+            } else if let result, !result.items.isEmpty {
+                Text("\(result.total) componentes").font(.title3.bold())
+                LazyVStack(spacing: AppSpacing.sm) {
+                    ForEach(result.items) { component in
+                        NavigationLink {
+                            ComponentDetailView(component: component) { revision += 1 }
+                        } label: {
+                            EquipmentCompactRow(equipment: component, isNarrow: isNarrow)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Abre el detalle del componente")
+                    }
+                }
+                PaginationBar(currentPage: page, pageCount: (result.total + pageSize - 1) / pageSize) {
+                    page = $0
+                }
+            } else {
+                ContentUnavailableView("Sin componentes", systemImage: "shippingbox")
+            }
+        }
+        .onChange(of: query) { page = 0 }
+        .task(id: "\(page):\(revision):\(refresh):\(query)") { await load() }
+    }
+
+    private func load() async {
+        loading = true
+        error = nil
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let offset = page * pageSize
+        do {
+            if !term.isEmpty { try await Task.sleep(for: .milliseconds(250)) }
+            let response = try await componentRequest(session: session) { service, token in
+                try await service.list(query: term, subsystem: nil, businessAnchor: false,
+                                       limit: pageSize, offset: offset, accessToken: token)
+            }
+            guard !Task.isCancelled else { return }
+            result = response
+            page = min(page, max(0, (response.total - 1) / pageSize))
+            loading = false
+        } catch {
+            guard !Task.isCancelled else { return }
+            self.error = error.localizedDescription
+            loading = false
+        }
+    }
+}
+
+private struct ComponentDetailView: View {
+    @EnvironmentObject private var session: SessionStore
+    @State private var editing = false
+    @State private var detail: ComponentDetailDTO?
+    @State private var error: String?
+    let assetID: String
+    let initialName: String
+    let onSaved: () -> Void
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var showCamera = false
+    @State private var uploading = false
+
+    init(component: EquipmentDTO, onSaved: @escaping () -> Void) {
+        assetID = component.id
+        initialName = component.name
+        self.onSaved = onSaved
+    }
+
+    init(assetID: String, name: String, onSaved: @escaping () -> Void = {}) {
+        self.assetID = assetID
+        initialName = name
+        self.onSaved = onSaved
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(alignment: .leading, spacing: AppSpacing.lg) {
+                    if let detail {
+                        header(detail.asset)
+                        if geometry.size.width >= 900 {
+                            HStack(alignment: .top, spacing: AppSpacing.md) {
+                                detailsPanel(detail)
+                                photos(detail.asset).frame(width: 330)
+                            }
+                        } else {
+                            detailsPanel(detail)
+                            photos(detail.asset)
+                        }
+                        ComponentMovementsPanel(id: assetID)
+                        if let error { Text(error).foregroundStyle(BrandColor.red) }
+                    } else if let error {
+                        ContentUnavailableView {
+                            Label("No se pudo cargar el componente", systemImage: "exclamationmark.triangle")
+                        } description: {
+                            Text(error)
+                        } actions: {
+                            Button("Reintentar") { Task { await load() } }
+                        }
+                    } else {
+                        ProgressView(initialName).frame(maxWidth: .infinity)
+                    }
+                }
+                .padding(AppSpacing.lg)
+                .frame(maxWidth: 1_100)
+                .frame(maxWidth: .infinity)
+            }
+            .refreshable { await load() }
+        }
+        .background(MaintenanceScreenBackground())
+        .navigationTitle("Detalle del componente")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .onChange(of: selectedPhoto) { _, photo in
+            guard let photo else { return }
+            Task {
+                do {
+                    guard let data = try await photo.loadTransferable(type: Data.self),
+                          let image = UIImage(data: data) else { return }
+                    await upload(image)
+                } catch { self.error = error.localizedDescription }
+                selectedPhoto = nil
+            }
+        }
+        .sheet(isPresented: $showCamera) {
+            CameraPhotoPicker { image in
+                showCamera = false
+                Task { await upload(image) }
+            }
+        }
+        .sheet(isPresented: $editing) {
+            if let detail {
+                ComponentEditorView(detail: detail) { updated in
+                    self.detail = updated
+                    onSaved()
+                }
+            }
+        }
+    }
+
+    private func header(_ asset: EquipmentDTO) -> some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: AppSpacing.md) {
+                identity(asset)
+                Spacer(minLength: AppSpacing.sm)
+                editButton
+            }
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                identity(asset)
+                editButton
+            }
+        }
+    }
+
+    private func identity(_ asset: EquipmentDTO) -> some View {
+        HStack(spacing: AppSpacing.md) {
+            EquipmentThumbnail(equipment: asset, size: 72)
+            VStack(alignment: .leading, spacing: 4) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: AppSpacing.sm) {
+                        Text(asset.serialOrCode).font(.title2.bold())
+                        EquipmentStatusBadge(status: asset.status)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(asset.serialOrCode).font(.title2.bold())
+                        EquipmentStatusBadge(status: asset.status)
+                    }
+                }
+                Text(asset.name).font(.headline).foregroundStyle(.secondary)
+                Label(asset.physicalLocation.activityLocationSummary, systemImage: "mappin.and.ellipse")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var editButton: some View {
+        if session.currentUser?.role == .administrator {
+            Button("Editar componente", systemImage: "pencil") { editing = true }
+                .buttonStyle(.bordered)
+                .tint(BrandColor.red)
+                .fixedSize()
+        }
+    }
+
+    private func photos(_ asset: EquipmentDTO) -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            EquipmentAssetPhotoPanel(equipment: asset)
+            if session.currentUser?.role == .administrator {
+                HStack(spacing: AppSpacing.sm) {
+                    PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                        Label("Fototeca", systemImage: "photo.badge.plus")
+                    }
+                    .buttonStyle(.bordered)
+                    Button("Cámara", systemImage: "camera") { showCamera = true }
+                        .buttonStyle(.bordered)
+                        .disabled(!UIImagePickerController.isSourceTypeAvailable(.camera))
+                    if uploading { ProgressView() }
+                }
+                .disabled(uploading)
+            }
+        }
+    }
+
+    private func detailsPanel(_ detail: ComponentDetailDTO) -> some View {
+        let asset = detail.asset
+        return ContentGlassPanel {
+            VStack(alignment: .leading, spacing: AppSpacing.md) {
+                SectionHeaderText(title: "Información general")
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), alignment: .leading)],
+                          spacing: AppSpacing.md) {
+                    field("Código interno", detail.internal_code ?? asset.serialOrCode, "barcode")
+                    field("Número de serie", detail.serial_number, "number")
+                    field("Número de parte", asset.partNumber, "tag")
+                    field("Estado", asset.status, "checkmark.seal")
+                    field("Categoría", asset.category, "square.stack.3d.up")
+                    field("Tipo", asset.assetType, "shippingbox")
+                    field("Subsistema", asset.subsystem, "square.3.layers.3d")
+                    field("Equipo o componente padre", detail.parent_name, "point.3.connected.trianglepath.dotted")
+                    field("Ubicación física", asset.physicalLocation, "mappin")
+                    field("Ubicación de inventario", detail.inventory_location, "building.2")
+                    field("Posición", detail.slot ?? asset.currentPosition, "scope")
+                    field("Fabricante", asset.manufacturer, "building")
+                    field("Modelo", asset.model, "wrench.and.screwdriver")
+                    field("Versión de software", asset.softwareVersion, "cpu")
+                    field("Fecha de fabricación", detail.manufacture_date, "calendar")
+                    field("Clasificación", asset.businessLabel, "tag")
+                }
+            }
+        }
+    }
+
+    private func field(_ title: String, _ value: String?, _ symbol: String) -> some View {
+        EquipmentInfoCell(title: title, value: value.flatMap { $0.isEmpty ? nil : $0 } ?? "—",
+                          symbol: symbol, maxLines: nil)
+    }
+
+    private func load() async {
+        error = nil
+        do {
+            detail = try await componentRequest(session: session) { service, token in
+                try await service.component(id: assetID, accessToken: token)
+            }
+        } catch {
+            self.error = error.localizedDescription
+        }
+    }
+
+    private func upload(_ image: UIImage) async {
+        guard !uploading else { return }
+        uploading = true
+        defer { uploading = false }
+        error = nil
+        do {
+            let factor = min(1, 1800 / max(image.size.width, image.size.height, 1))
+            let size = CGSize(width: image.size.width * factor, height: image.size.height * factor)
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            let resized = UIGraphicsImageRenderer(size: size, format: format).image { _ in
+                image.draw(in: CGRect(origin: .zero, size: size))
+            }
+            guard let data = resized.jpegData(compressionQuality: 0.8) else { return }
+            _ = try await componentRequest(session: session) { service, token in
+                try await service.addImage(assetID: assetID, payload: EquipmentImageWritePayload(
+                    image_base64: data.base64EncodedString(), file_name: "componente.jpg",
+                    media_type: "image/jpeg", caption: nil,
+                    is_primary: detail?.asset.galleryImages.isEmpty ?? true
+                ), accessToken: token)
+            }
+            await load()
+            onSaved()
+        } catch { self.error = error.localizedDescription }
+    }
+}
+
+private struct ComponentMovementsPanel: View {
+    @EnvironmentObject private var session: SessionStore
+    @State private var result: ComponentMovementPage?
+    @State private var page = 0
+    @State private var retry = 0
+    @State private var loading = true
+    @State private var error: String?
+    let id: String
+    private let pageSize = 15
+
+    var body: some View {
+        Group {
+            if loading {
+                ProgressView("Cargando movimientos").frame(maxWidth: .infinity)
+            } else {
+                panel
+            }
+        }
+        .task(id: "\(page):\(retry)") { await load() }
+    }
+
+    private var panel: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+            SectionHeaderText(title: "Movimientos")
+            if let error {
+                ContentUnavailableView {
+                    Label("No se pudieron cargar los movimientos", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("Reintentar") { loading = true; retry += 1 }
+                }
+            } else if let result, !result.items.isEmpty {
+                ForEach(result.items) { movement in
+                    ContentGlassPanel {
+                        VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                            Text(movement.kind).font(.headline)
+                            Text(assetTimestamp(movement.moved_at)?.formatted(date: .abbreviated, time: .shortened)
+                                 ?? movement.moved_at)
+                                .font(.caption).foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), alignment: .leading)],
+                                      spacing: AppSpacing.sm) {
+                                EquipmentInfoCell(title: "Origen", value: movement.origin ?? "No registrado",
+                                                  symbol: "arrow.up.right", maxLines: nil)
+                                EquipmentInfoCell(title: "Destino", value: movement.destination ?? "No registrado",
+                                                  symbol: "arrow.down.left", maxLines: nil)
+                            }
+                            if let status = movement.to_status {
+                                Text([movement.from_status, status].compactMap { $0 }.joined(separator: " → "))
+                                    .font(.caption)
+                            }
+                            if let notes = movement.notes, !notes.isEmpty { Text(notes).font(.subheadline) }
+                        }
+                    }
+                }
+                PaginationBar(currentPage: page, pageCount: (result.total + pageSize - 1) / pageSize) {
+                    page = $0
+                    loading = true
+                }
+            } else {
+                ContentUnavailableView("Sin movimientos registrados", systemImage: "arrow.left.arrow.right")
+            }
+        }
+    }
+
+    private func load() async {
+        loading = true
+        error = nil
+        do {
+            let response = try await componentRequest(session: session) { service, token in
+                try await service.movements(id: id, limit: pageSize, offset: page * pageSize, accessToken: token)
+            }
+            guard !Task.isCancelled else { return }
+            result = response
+        } catch {
+            guard !Task.isCancelled else { return }
+            self.error = error.localizedDescription
+        }
+        loading = false
+    }
+}
+
+private struct ComponentEditorView: View {
+    @EnvironmentObject private var session: SessionStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var name: String
+    @State private var serial: String
+    @State private var manufacturer: String
+    @State private var model: String
+    @State private var software: String
+    @State private var status = ""
+    @State private var statuses: [EquipmentCatalogOption] = []
+    @State private var saving = false
+    @State private var error: String?
+    let detail: ComponentDetailDTO
+    let onSaved: (ComponentDetailDTO) -> Void
+
+    init(detail: ComponentDetailDTO, onSaved: @escaping (ComponentDetailDTO) -> Void) {
+        self.detail = detail
+        self.onSaved = onSaved
+        _name = State(initialValue: detail.asset.name)
+        _serial = State(initialValue: detail.serial_number ?? "")
+        _manufacturer = State(initialValue: detail.asset.manufacturer ?? "")
+        _model = State(initialValue: detail.asset.model ?? "")
+        _software = State(initialValue: detail.asset.softwareVersion ?? "")
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Identificación") {
+                    TextField("Nombre", text: $name)
+                    TextField("Número de serie", text: $serial)
+                    LabeledContent("Part number del modelo", value: detail.asset.partNumber ?? "No registrado")
+                }
+                Section("Datos técnicos") {
+                    TextField("Fabricante", text: $manufacturer)
+                    TextField("Modelo", text: $model)
+                    TextField("Versión de software", text: $software)
+                    if statuses.isEmpty {
+                        LabeledContent("Estado", value: detail.asset.status)
+                    } else {
+                        Picker("Estado", selection: $status) {
+                            Text(detail.asset.status).tag("")
+                            ForEach(statuses) { Text($0.name).tag($0.id) }
+                        }
+                    }
+                }
+                if let error { Text(error).foregroundStyle(BrandColor.red) }
+            }
+            .navigationTitle("Editar componente")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancelar") { dismiss() }.disabled(saving)
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Guardar") { Task { await save() } }
+                        .disabled(saving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+            .interactiveDismissDisabled(saving)
+            .task {
+                do {
+                    let catalog = try await componentRequest(session: session) { service, token in
+                        try await service.administrationCatalog(accessToken: token)
+                    }
+                    statuses = catalog.statuses.filter { $0.id != detail.asset.statusID }
+                } catch {
+                    self.error = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+        error = nil
+        let payload = ComponentWritePayload(
+            name: name, serial_number: serial, part_number: nil, manufacturer: manufacturer,
+            model: model, software_version: software, status_id: status.isEmpty ? nil : status
+        )
+        do {
+            let updated = try await componentRequest(session: session) { service, token in
+                try await service.updateComponent(id: detail.asset.id, payload: payload, accessToken: token)
+            }
+            onSaved(updated)
+            dismiss()
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 }
 
@@ -1129,6 +1677,7 @@ private struct EquipmentInfoCell: View {
     let title: String
     let value: String
     let symbol: String
+    var maxLines: Int? = 2
 
     var body: some View {
         HStack(alignment: .top, spacing: AppSpacing.sm) {
@@ -1144,7 +1693,7 @@ private struct EquipmentInfoCell: View {
                     .foregroundStyle(.secondary)
                 Text(value)
                     .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
+                    .lineLimit(maxLines)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1226,7 +1775,7 @@ struct AssetDetailView: View {
         .background(MaintenanceScreenBackground())
         .navigationTitle("Detalle de equipo")
         .task {
-            await assetStore.loadDetail(id: assetID, session: session)
+            await assetStore.loadDetail(id: assetID, session: session, force: true)
         }
         .sheet(isPresented: $isPresentingComponentAdmin) {
             if let equipment = assetStore.details[assetID] {
@@ -1495,6 +2044,8 @@ struct AssetDetailView: View {
 }
 
 private struct EquipmentComponentTreePanel: View {
+    @EnvironmentObject private var assetStore: AssetStore
+    @EnvironmentObject private var session: SessionStore
     let equipmentID: String
     let componentCount: Int
     let nodes: [EquipmentTreeNodeDTO]
@@ -1549,24 +2100,103 @@ private struct EquipmentComponentTreePanel: View {
                         ForEach(branches) { branch in
                             EquipmentTreeBranchView(
                                 branch: branch,
-                                expandedNodeIDs: $expandedNodeIDs
+                                expandedNodeIDs: $expandedNodeIDs,
+                                onComponentSaved: {
+                                    Task { await assetStore.loadTree(id: equipmentID, session: session, force: true) }
+                                }
                             )
                         }
                     }
                 }
             }
         }
-        .onChange(of: nodeSignature) { _, _ in
+        .onChange(of: nodes) { _, _ in
             branches = EquipmentTreeBranch.build(
                 nodes: nodes,
                 rootID: equipmentID
             )
-            expandedNodeIDs.removeAll()
+            expandedNodeIDs.formIntersection(nodes.map(\.id))
         }
     }
+}
 
-    private var nodeSignature: String {
-        nodes.map(\.id).joined(separator: "|")
+private struct ExistingComponentPicker: View {
+    @EnvironmentObject private var session: SessionStore
+    @State private var query = ""
+    @State private var page = 0
+    @State private var response: EquipmentPageDTO?
+    @State private var loading = true
+    @State private var error: String?
+    @State private var retry = 0
+    let root: EquipmentDTO
+    let excludedIDs: Set<String>
+    let onSelect: (EquipmentDTO) -> Void
+    let onCreate: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: AppSpacing.md) {
+            HStack {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Nombre, código, serie o part number", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+            .padding(AppSpacing.sm)
+            .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+            VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                if loading {
+                    ProgressView("Cargando componentes")
+                } else if let error {
+                    Text(error).foregroundStyle(BrandColor.red)
+                    Button("Reintentar") { retry += 1 }
+                } else if let response {
+                    ForEach(response.items) { item in
+                        Button {
+                            onSelect(item)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.name).foregroundStyle(.primary)
+                                Text(item.serialOrCode).font(.caption).foregroundStyle(.secondary)
+                                Text(item.physicalLocation).font(.caption).foregroundStyle(.secondary)
+                                if excludedIDs.contains(item.id) {
+                                    Text("Ya pertenece al equipo").font(.caption).foregroundStyle(.secondary)
+                                } else if session.currentUser?.role != .administrator {
+                                    Text("La asignación requiere un administrador").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(AppSpacing.sm)
+                            .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(excludedIDs.contains(item.id) || session.currentUser?.role != .administrator)
+                    }
+                    if response.items.isEmpty { Text("Sin componentes disponibles") }
+                    PaginationBar(currentPage: page, pageCount: max(1, (response.total + 14) / 15)) { page = $0 }
+                }
+            }
+            Button("No está registrado: crear unidad nueva", systemImage: "plus.circle") { onCreate() }
+                .buttonStyle(.bordered)
+        }
+            .onChange(of: query) { page = 0 }
+            .task(id: "\(query):\(page):\(retry)") {
+                loading = true
+                error = nil
+                do {
+                    if !query.isEmpty { try await Task.sleep(for: .milliseconds(250)) }
+                    let result = try await componentRequest(session: session) { service, token in
+                        try await service.list(query: query, subsystem: root.subsystem, businessAnchor: false,
+                                               limit: 15, offset: page * 15, accessToken: token)
+                    }
+                    guard !Task.isCancelled else { return }
+                    response = result
+                    loading = false
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    self.error = error.localizedDescription
+                    loading = false
+                }
+            }
     }
 }
 
@@ -1583,23 +2213,39 @@ private struct ComponentAdministrationSheet: View {
     @State private var selectedParentID = ""
     @State private var destinationEquipmentID = ""
     @State private var name = ""
-    @State private var category = "Componente"
-    @State private var assetType = "Componente no tipificado"
-    @State private var status = "OPERATIVO"
+    @State private var selectedTypeID = ""
+    @State private var creatingType = false
+    @State private var newTypeName = ""
+    @State private var status = ""
+    @State private var editorOptions: ComponentEditorOptions?
+    @State private var internalSlots: [EquipmentInternalSlot] = []
     @State private var serialNumber = ""
     @State private var partNumber = ""
     @State private var model = ""
     @State private var position = ""
-    @State private var operations: [AssetComponentOperation] = []
     @State private var isSaving = false
     @State private var errorMessage: String?
+    @State private var existingComponent: EquipmentDTO?
+    @State private var registeringNew = false
+    @State private var destinationParentID = ""
+    @State private var destinationNodes: [EquipmentTreeNodeDTO] = []
+    @State private var destinationSlots: [EquipmentInternalSlot] = []
+    @State private var loadingDestination = false
+    @State private var confirmDeletion = false
+    @State private var destinationLoadedID = ""
+    @State private var editorReady = false
+    @State private var selectedDetailID = ""
+    @State private var selectedActualParentID: String?
+    @State private var moveEquipments: [EquipmentDTO] = []
+    @State private var loadingMoveEquipments = false
+    @State private var managingSlots = false
 
     private var selectedComponent: EquipmentTreeNodeDTO? {
         nodes.first { $0.id == selectedComponentID }
     }
 
     private var moveDestinations: [EquipmentDTO] {
-        assetStore.equipments.filter { $0.id != equipment.id }
+        [equipment] + moveEquipments.filter { $0.id != equipment.id }
     }
 
     var body: some View {
@@ -1610,25 +2256,14 @@ private struct ComponentAdministrationSheet: View {
                     operationPanel
                     editorPanel
 
-                    GlassPanel {
-                        ActionButtonGrid {
-                            Button(action: stageOperation) {
-                                Label("Agregar cambio al lote", systemImage: "plus.circle.fill")
-                            }
-                            .buttonStyle(ActionTileButtonStyle(prominent: true))
-                            .disabled(!canStageOperation)
-                        }
-                    }
-
-                    if !operations.isEmpty {
-                        pendingOperationsPanel
-                    }
-
                     if let errorMessage {
                         GlassPanel {
                             Label(errorMessage, systemImage: "exclamationmark.triangle.fill")
                                 .font(.subheadline)
                                 .foregroundStyle(BrandColor.red)
+                            if !editorReady {
+                                Button("Reintentar carga") { Task { await loadEditorOptions() } }
+                            }
                         }
                     }
                 }
@@ -1639,18 +2274,35 @@ private struct ComponentAdministrationSheet: View {
             .background(MaintenanceScreenBackground())
             .navigationTitle(canFullyAdminister ? "Administrar componentes" : "Agregar componente")
             .navigationBarTitleDisplayMode(.inline)
+            .interactiveDismissDisabled(isSaving)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancelar") { dismiss() }
+                    Button("Cancelar") { dismiss() }.disabled(isSaving)
                 }
+                if session.currentUser?.role == .administrator {
+                    ToolbarItem(placement: .primaryAction) {
+                        Button("Espacios internos", systemImage: "square.split.2x2") {
+                            managingSlots = true
+                        }
+                        .disabled(isSaving)
+                    }
+                }
+            }
+            .sheet(isPresented: $managingSlots) {
+                EquipmentSlotsSheet(equipment: equipment)
+            }
+            .onChange(of: managingSlots) { _, visible in
+                if !visible { Task { await loadEditorOptions() } }
             }
             .safeAreaInset(edge: .bottom) {
                 GlassPanel {
                     ActionButtonGrid {
                         Button("Cancelar", action: dismiss.callAsFunction)
                             .buttonStyle(ActionTileButtonStyle())
+                            .disabled(isSaving)
                         Button {
-                            Task { await save() }
+                            if mode == .delete && !selectedComponentID.isEmpty { confirmDeletion = true }
+                            else { Task { await save() } }
                         } label: {
                             if isSaving {
                                 ProgressView()
@@ -1659,7 +2311,7 @@ private struct ComponentAdministrationSheet: View {
                             }
                         }
                         .buttonStyle(ActionTileButtonStyle(prominent: true))
-                        .disabled(operations.isEmpty || isSaving)
+                        .disabled(isSaving)
                     }
                 }
                 .padding(.horizontal, AppSpacing.lg)
@@ -1667,9 +2319,20 @@ private struct ComponentAdministrationSheet: View {
             }
             .task {
                 selectedParentID = equipment.id
+                await loadEditorOptions()
                 if assetStore.equipments.isEmpty {
                     await assetStore.loadEquipments(query: "", subsystem: nil, session: session)
                 }
+            }
+            .task(id: destinationEquipmentID) { await loadDestination() }
+            .task(id: mode) {
+                if mode == .move { await loadMoveEquipments() }
+            }
+            .confirmationDialog("¿Eliminar esta unidad de componente?", isPresented: $confirmDeletion) {
+                Button("Eliminar unidad", role: .destructive) { Task { await save() } }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                Text("No se eliminará el modelo del catálogo. Solo se permite eliminar unidades sin hijos ni historial.")
             }
         }
     }
@@ -1687,8 +2350,8 @@ private struct ComponentAdministrationSheet: View {
                 .foregroundStyle(.secondary)
             Text(
                 canFullyAdminister
-                    ? "Agrupa cambios antes de guardarlos para agregar, editar, mover o eliminar componentes."
-                    : "Registra uno o más componentes dentro de este equipo."
+                    ? "Registra una unidad física o administra un componente existente."
+                    : "Registra una unidad física de un modelo del catálogo."
             )
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -1725,12 +2388,32 @@ private struct ComponentAdministrationSheet: View {
         if mode == .create {
             GlassPanel {
                 VStack(alignment: .leading, spacing: AppSpacing.md) {
-                    SectionHeaderText(
-                        title: "Nuevo componente",
-                        subtitle: "Define su padre y los datos disponibles"
-                    )
-                    componentParentPicker
-                    componentFields
+                    SectionHeaderText(title: "Agregar componente")
+                    if let existingComponent {
+                        Text(existingComponent.name).font(.headline)
+                        Text(existingComponent.serialOrCode).font(.subheadline)
+                        Text("Ubicación actual: \(existingComponent.physicalLocation)")
+                            .font(.caption).foregroundStyle(.secondary)
+                        LabeledContent("Part number", value: existingComponent.partNumber ?? "No registrado")
+                        componentParentPicker
+                        selectionField("Posición de destino", selection: $position, options: positionOptions,
+                                       empty: "Seleccionar posición")
+                        Button("Buscar otro componente", systemImage: "magnifyingglass") {
+                            self.existingComponent = nil
+                            position = ""
+                        }.buttonStyle(.bordered)
+                    } else if registeringNew {
+                        componentParentPicker
+                        componentFields
+                        Button("Volver a buscar componentes", systemImage: "magnifyingglass") {
+                            resetForm()
+                        }.buttonStyle(.bordered)
+                    } else {
+                        ExistingComponentPicker(root: equipment,
+                            excludedIDs: Set(nodes.filter { $0.selectable }.map(\.id)),
+                            onSelect: { existingComponent = $0; position = "" },
+                            onCreate: { registeringNew = true; position = "" })
+                    }
                 }
             }
         } else {
@@ -1772,7 +2455,7 @@ private struct ComponentAdministrationSheet: View {
             fieldLabel("Componente padre")
             Picker("Componente padre", selection: $selectedParentID) {
                 Text("\(equipment.name) (raíz)").tag(equipment.id)
-                ForEach(nodes) { node in
+                ForEach(nodes.filter { $0.selectable && $0.nodeKind == "ASSET" }) { node in
                     Text(nodeDisplayName(node)).tag(node.id)
                 }
             }
@@ -1789,7 +2472,7 @@ private struct ComponentAdministrationSheet: View {
             fieldLabel("Seleccionar componente")
             Picker("Seleccionar componente", selection: $selectedComponentID) {
                 Text("Seleccione un componente").tag("")
-                ForEach(nodes) { node in
+                ForEach(nodes.filter { $0.selectable && $0.nodeKind == "ASSET" }) { node in
                     Text(nodeDisplayName(node)).tag(node.id)
                 }
             }
@@ -1808,6 +2491,7 @@ private struct ComponentAdministrationSheet: View {
                 title: "Equipo destino",
                 subtitle: "El componente se moverá con sus datos actuales"
             )
+            if loadingMoveEquipments { ProgressView("Cargando equipos") }
             Picker("Mover a", selection: $destinationEquipmentID) {
                 Text("Seleccione un equipo").tag("")
                 ForEach(moveDestinations) { destination in
@@ -1818,49 +2502,169 @@ private struct ComponentAdministrationSheet: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(AppSpacing.sm)
             .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            if loadingDestination { ProgressView("Cargando ubicaciones") }
+            if !destinationEquipmentID.isEmpty && !loadingDestination {
+                Picker("Padre de destino", selection: $destinationParentID) {
+                    Text("Raíz del equipo").tag(destinationEquipmentID)
+                    ForEach(validDestinationParents) { node in
+                        Text(nodeDisplayName(node)).tag(node.id)
+                    }
+                }
+                .pickerStyle(.menu)
+                selectionField("Posición de destino", selection: $position,
+                    options: destinationSlots.filter { $0.accepts_asset && ($0.occupant_id == nil
+                        || $0.occupant_id == selectedComponentID) }.map(\.path), empty: "Seleccionar posición")
+            }
         }
     }
 
-    private var pendingOperationsPanel: some View {
-        ContentGlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(
-                    title: "Cambios pendientes (\(operations.count))",
-                    subtitle: "Se aplicarán juntos al guardar"
-                )
-                ForEach(operations) { operation in
-                    HStack(spacing: AppSpacing.sm) {
-                        Image(systemName: symbol(for: operation.action))
-                            .font(.title3)
-                            .foregroundStyle(BrandColor.red)
-                        Text(operationSummary(operation))
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Button(role: .destructive) {
-                            operations.removeAll { $0.id == operation.id }
-                        } label: {
-                            Image(systemName: "trash")
-                                .frame(width: 36, height: 36)
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                    .padding(AppSpacing.sm)
-                    .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-                }
+    private var validDestinationParents: [EquipmentTreeNodeDTO] {
+        let byID = Dictionary(uniqueKeysWithValues: destinationNodes.map { ($0.id, $0) })
+        return destinationNodes.filter { node in
+            guard node.selectable && node.nodeKind == "ASSET" else { return false }
+            var current: String? = node.id
+            var visited = Set<String>()
+            while let id = current, visited.insert(id).inserted {
+                if id == selectedComponentID { return false }
+                current = byID[id]?.parentID
             }
+            return true
+        }
+    }
+
+    private func loadMoveEquipments() async {
+        loadingMoveEquipments = true
+        defer { loadingMoveEquipments = false }
+        do {
+            var result: [EquipmentDTO] = []
+            while !Task.isCancelled {
+                let offset = result.count
+                let page = try await componentRequest(session: session) { service, token in
+                    try await service.list(query: "", subsystem: equipment.subsystem, businessAnchor: true,
+                                           limit: 200, offset: offset, accessToken: token)
+                }
+                guard !Task.isCancelled else { return }
+                result.append(contentsOf: page.items)
+                if result.count >= page.total || page.items.isEmpty { break }
+            }
+            guard !Task.isCancelled else { return }
+            moveEquipments = result
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func loadDestination() async {
+        let id = destinationEquipmentID
+        destinationParentID = id
+        destinationNodes = []
+        destinationSlots = []
+        destinationLoadedID = ""
+        position = ""
+        guard !id.isEmpty else { return }
+        loadingDestination = true
+        defer { if destinationEquipmentID == id { loadingDestination = false } }
+        do {
+            let result = try await componentRequest(session: session) { service, token in
+                let tree = try await service.tree(id: id, accessToken: token)
+                let slots = try await service.slots(id: id, accessToken: token)
+                return (tree, slots)
+            }
+            guard !Task.isCancelled && destinationEquipmentID == id else { return }
+            destinationNodes = result.0
+            destinationSlots = result.1
+            destinationLoadedID = id
+        } catch {
+            guard !Task.isCancelled && destinationEquipmentID == id else { return }
+            errorMessage = error.localizedDescription
         }
     }
 
     @ViewBuilder
     private var componentFields: some View {
-        field("Nombre", text: $name)
-        field("Categoría", text: $category)
-        field("Tipo", text: $assetType)
-        field("Estado", text: $status)
-        field("Número de serie", text: $serialNumber)
-        field("Part number", text: $partNumber)
+        field("Nombre de la unidad", text: $name)
+        LabeledContent("Categoría", value: "Componente")
+        if mode == .create && session.currentUser?.role == .administrator {
+            Toggle("Registrar un modelo con part number nuevo", isOn: $creatingType)
+                .onChange(of: creatingType) { _, _ in partNumber = ""; serialNumber = "" }
+        }
+        if creatingType && mode == .create {
+            field("Nombre del nuevo modelo", text: $newTypeName)
+            field("Part number del nuevo modelo", text: $partNumber)
+        } else {
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                fieldLabel("Modelo del catálogo (tipo de componente)")
+                Picker("Modelo del catálogo", selection: $selectedTypeID) {
+                    Text("Seleccionar").tag("")
+                    ForEach(editorOptions?.classifications ?? [], id: \.id) { option in
+                        Text([option.type, option.part_number].compactMap { $0 }.joined(separator: " · ")).tag(option.id)
+                    }
+                }
+                .labelsHidden().pickerStyle(.menu)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(AppSpacing.sm)
+                .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+                .disabled(editorOptions == nil)
+                .onChange(of: selectedTypeID) { _, _ in
+                    if selectedType?.serial_number_policy == "NOT_APPLICABLE" { serialNumber = "" }
+                }
+            }
+            LabeledContent("Part number del modelo", value: selectedType?.part_number ?? "No registrado")
+        }
+        selectionField("Estado", selection: $status, options: editorOptions?.statuses ?? [])
+        if creatingType || selectedType?.serial_number_policy != "NOT_APPLICABLE" {
+            field("Número de serie de la unidad", text: $serialNumber)
+        }
         field("Modelo", text: $model)
-        field("Posición", text: $position)
+        selectionField("Posición", selection: $position, options: positionOptions, empty: "Seleccionar posición")
+        if let error = errorMessage { Text(error).font(.caption).foregroundStyle(BrandColor.red) }
+    }
+
+    private var selectedType: ComponentEditorOptions.Classification? {
+        editorOptions?.classifications.first { $0.id == selectedTypeID }
+    }
+
+    private var positionOptions: [String] {
+        var options = internalSlots.filter {
+            $0.accepts_asset && ($0.occupant_id == nil || $0.occupant_id == selectedComponentID)
+        }.map(\.path)
+        if let current = selectedComponent?.slotPath ?? selectedComponent?.position,
+           !current.isEmpty { options.append(current) }
+        return Array(Set(options)).sorted()
+    }
+
+    private func selectionField(_ title: String, selection: Binding<String>, options: [String],
+                                empty: String = "Seleccionar") -> some View {
+        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+            fieldLabel(title)
+            Picker(title, selection: selection) {
+                Text(empty).tag("")
+                if title.contains("Posición") {
+                    Text("Sin posición específica").tag("__unplaced__")
+                }
+                ForEach(options, id: \.self) { Text($0).tag($0) }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(AppSpacing.sm)
+            .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 10))
+            .disabled(editorOptions == nil)
+        }
+    }
+
+    private func loadEditorOptions() async {
+        editorReady = false
+        do {
+            editorOptions = try await componentRequest(session: session) { service, token in
+                try await service.componentEditorOptions(id: equipment.id, accessToken: token)
+            }
+            internalSlots = try await componentRequest(session: session) { service, token in
+                try await service.slots(id: equipment.id, accessToken: token)
+            }
+            editorReady = true
+        } catch { errorMessage = error.localizedDescription }
     }
 
     private func field(_ title: String, text: Binding<String>) -> some View {
@@ -1878,58 +2682,109 @@ private struct ComponentAdministrationSheet: View {
             .foregroundStyle(.secondary)
     }
 
-    private var canStageOperation: Bool {
+    private var canSave: Bool {
+        if (mode == .create || mode == .update) && !editorReady { return false }
         switch mode {
+        case .assign:
+            return existingComponent != nil && !selectedParentID.isEmpty
         case .create:
+            if existingComponent != nil {
+                return !selectedParentID.isEmpty && (internalSlots.isEmpty || !position.isEmpty)
+            }
+            guard registeringNew else { return false }
             return !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .update, .delete:
+                && (creatingType ? !newTypeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    && !partNumber.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty : selectedType != nil)
+                && !status.isEmpty && editorOptions != nil && (internalSlots.isEmpty || !position.isEmpty)
+        case .update:
+            return selectedDetailID == selectedComponentID && !selectedComponentID.isEmpty
+                && !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && selectedType != nil
+                && !status.isEmpty && editorOptions != nil
+        case .delete:
             return !selectedComponentID.isEmpty
         case .move:
             return !selectedComponentID.isEmpty && !destinationEquipmentID.isEmpty
+                && !destinationParentID.isEmpty && !loadingDestination
+                && !loadingMoveEquipments
+                && destinationLoadedID == destinationEquipmentID && selectedDetailID == selectedComponentID
+                && (destinationSlots.isEmpty || !position.isEmpty)
         }
     }
 
-    private func stageOperation() {
-        errorMessage = nil
-        let operation = AssetComponentOperation(
-            action: mode,
-            componentID: mode == .create ? nil : selectedComponentID,
-            parentID: mode == .create
+    private func currentOperation() -> AssetComponentOperation {
+        let action: AssetComponentOperation.Action = mode == .create && existingComponent != nil ? .assign : mode
+        let placement = position == "__unplaced__" ? "" : position
+        var operation = AssetComponentOperation(
+            action: action,
+            componentID: action == .create ? nil : action == .assign ? existingComponent?.id : selectedComponentID,
+            parentID: action == .create || action == .assign
                 ? selectedParentID
-                : mode == .move ? destinationEquipmentID : nil,
-            name: mode == .delete || mode == .move ? nil : name,
-            category: mode == .create || mode == .update ? category : nil,
-            assetType: mode == .create || mode == .update ? assetType : nil,
-            status: mode == .create || mode == .update ? status : nil,
-            serialNumber: mode == .create || mode == .update ? serialNumber : nil,
-            partNumber: mode == .create || mode == .update ? partNumber : nil,
-            model: mode == .create || mode == .update ? model : nil,
-            currentPosition: mode == .create || mode == .update ? position : nil
+                : mode == .move ? destinationParentID : nil,
+            name: action == .create || action == .update ? name : nil,
+            category: action == .create || action == .update ? "Componente" : nil,
+            assetType: nil,
+            status: action == .create || action == .update ? status : nil,
+            serialNumber: action == .create || action == .update ? serialNumber : nil,
+            partNumber: nil,
+            model: action == .create || action == .update ? model : nil,
+            currentPosition: action == .delete ? nil : placement
         )
-        operations.append(operation)
-        resetForm()
+        if action == .assign {
+            operation.expectedParentID = existingComponent?.parentID
+        }
+        if action == .move {
+            operation.destinationEquipmentID = destinationEquipmentID
+            operation.expectedParentID = selectedActualParentID
+        }
+        if action == .create || action == .update {
+            operation.assetTypeID = creatingType ? nil : selectedTypeID
+            operation.newTypeName = creatingType ? newTypeName : nil
+            operation.newTypePartNumber = creatingType ? partNumber : nil
+        }
+        return operation
     }
 
     private func populateSelectedComponent() {
         guard let node = selectedComponent else { return }
+        selectedDetailID = ""
+        selectedActualParentID = nil
         name = node.name
-        category = node.category
-        assetType = node.assetType
+        selectedTypeID = editorOptions?.classifications.first { String($0.type.prefix(120)) == node.assetType }?.id ?? ""
+        let identifier = node.id
+        Task {
+            do {
+                let detail = try await componentRequest(session: session) { service, token in
+                    try await service.component(id: identifier, accessToken: token)
+                }
+                if selectedComponentID == identifier {
+                    if let typeID = detail.asset_type_id { selectedTypeID = typeID }
+                    selectedActualParentID = detail.asset.parentID
+                    selectedDetailID = identifier
+                }
+            } catch { errorMessage = error.localizedDescription }
+        }
         status = node.status
         serialNumber = node.serialNumber ?? ""
         partNumber = node.partNumber ?? ""
         model = node.model ?? ""
-        position = node.position ?? ""
+        position = node.slotPath ?? node.position ?? "__unplaced__"
+        if mode == .move { position = ""; destinationParentID = destinationEquipmentID }
     }
 
     private func resetForm() {
+        existingComponent = nil
+        registeringNew = false
         selectedComponentID = ""
+        selectedDetailID = ""
+        selectedActualParentID = nil
         destinationEquipmentID = ""
+        loadingDestination = false
         selectedParentID = equipment.id
         name = ""
-        category = "Componente"
-        assetType = "Componente no tipificado"
-        status = "OPERATIVO"
+        selectedTypeID = ""
+        creatingType = false
+        newTypeName = ""
+        status = ""
         serialNumber = ""
         partNumber = ""
         model = ""
@@ -1938,12 +2793,23 @@ private struct ComponentAdministrationSheet: View {
     }
 
     private func save() async {
+        guard !isSaving else { return }
+        guard canSave else {
+            if mode == .create && existingComponent == nil && !registeringNew {
+                errorMessage = "Selecciona una unidad existente o elige crear una unidad nueva."
+            } else if mode == .move || (mode == .create && existingComponent != nil) {
+                errorMessage = "Selecciona un padre y una posición de destino, o elige Sin posición específica."
+            } else {
+                errorMessage = "Completa los datos obligatorios, el modelo y la posición de destino."
+            }
+            return
+        }
         isSaving = true
         errorMessage = nil
         do {
             try await assetStore.applyComponentChanges(
                 rootID: equipment.id,
-                operations: operations,
+                operations: [currentOperation()],
                 session: session
             )
             dismiss()
@@ -1957,22 +2823,190 @@ private struct ComponentAdministrationSheet: View {
         "\(node.name) · \(node.assetType)"
     }
 
-    private func operationSummary(_ operation: AssetComponentOperation) -> String {
-        switch operation.action {
-        case .create: return "Agregar \(operation.name ?? "componente")"
-        case .update: return "Editar \(operation.name ?? selectedComponent?.name ?? "componente")"
-        case .move: return "Mover componente a otro equipo"
-        case .delete: return "Eliminar componente"
+}
+
+private struct EquipmentSlotsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var session: SessionStore
+    @EnvironmentObject private var assetStore: AssetStore
+    @State private var slots: [EquipmentInternalSlot] = []
+    @State private var name = ""
+    @State private var parentID = ""
+    @State private var acceptsAsset = true
+    @State private var selectingSlot: EquipmentInternalSlot?
+    @State private var releasingSlot: EquipmentInternalSlot?
+    @State private var query = ""
+    @State private var busy = false
+    @State private var loaded = false
+    @State private var error: String?
+    let equipment: EquipmentDTO
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+              VStack(alignment: .leading, spacing: AppSpacing.xl) {
+                VStack(alignment: .leading, spacing: AppSpacing.sm) {
+                    Text("Espacios internos").font(.system(.largeTitle, design: .rounded).weight(.black))
+                    Text(equipment.assetType).font(.headline).foregroundStyle(.secondary)
+                    Text("Estructura compartida por tipo de equipo. La ocupación pertenece a cada unidad.")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                }
+                GlassPanel {
+                  VStack(alignment: .leading, spacing: AppSpacing.md) {
+                    SectionHeaderText(title: "Nuevo espacio")
+                    LabeledContent("Nombre") {
+                        TextField("Nombre", text: $name).textFieldStyle(.roundedBorder)
+                    }
+                    LabeledContent("Ubicación padre") {
+                        Picker("Ubicación padre", selection: $parentID) {
+                            Text(equipment.assetType).tag("")
+                            ForEach(slots) { Text(displayPath($0.path)).tag($0.id) }
+                        }
+                        .labelsHidden().pickerStyle(.menu)
+                    }
+                    Toggle("Permite colocar un componente", isOn: $acceptsAsset)
+                    Button("Agregar espacio al tipo de equipo", systemImage: "plus") { Task { await addSlot() } }
+                        .buttonStyle(ActionTileButtonStyle(prominent: true))
+                        .disabled(busy || !loaded || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                  }
+                }
+                ContentGlassPanel {
+                  VStack(alignment: .leading, spacing: AppSpacing.md) {
+                    SectionHeaderText(title: "Espacios de \(equipment.name)")
+                    if !loaded && busy { ProgressView() }
+                    if loaded && slots.isEmpty { Text("Sin espacios personalizados").foregroundStyle(.secondary) }
+                    ForEach(slots) { slot in
+                        LabeledContent {
+                            if slot.accepts_asset {
+                                if slot.occupant_id != nil {
+                                    Button("Liberar") { releasingSlot = slot }.disabled(busy).buttonStyle(.bordered)
+                                } else {
+                                    Button("Asignar") { query = ""; selectingSlot = slot }.disabled(busy).buttonStyle(.bordered)
+                                }
+                            }
+                        } label: {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(displayPath(slot.path))
+                                Text(slot.occupant_name ?? (slot.accepts_asset ? "Libre" : "Contenedor"))
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(AppSpacing.sm)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 8))
+                    }
+                  }
+                }
+                if let error {
+                    GlassPanel { Text(error).foregroundStyle(BrandColor.red) }
+                }
+              }
+              .padding(AppSpacing.lg)
+              .frame(maxWidth: 900, alignment: .leading)
+              .frame(maxWidth: .infinity)
+            }
+            .background(MaintenanceScreenBackground())
+            .navigationTitle("Espacios internos")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cerrar") { dismiss() }.disabled(busy)
+                }
+            }
+            .task { await load() }
+            .refreshable { await load() }
+            .sheet(item: $selectingSlot) { slot in
+                NavigationStack {
+                    List {
+                        if matchingComponents.isEmpty {
+                            Text("Sin componentes disponibles").foregroundStyle(.secondary)
+                        }
+                        ForEach(matchingComponents) { node in
+                            Button {
+                                selectingSlot = nil
+                                Task { await place(node.id, in: slot) }
+                            } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(node.name)
+                                    if let serial = node.serialNumber {
+                                        Text(serial).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    if let path = node.slotPath {
+                                        Text(displayPath(path)).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .searchable(text: $query, prompt: "Nombre o número de serie")
+                    .navigationTitle(displayPath(slot.path))
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Cancelar") { selectingSlot = nil }
+                        }
+                    }
+                }
+            }
+            .confirmationDialog("¿Liberar este espacio?", isPresented: Binding(
+                get: { releasingSlot != nil },
+                set: { if !$0 { releasingSlot = nil } }
+            ), presenting: releasingSlot) { slot in
+                Button("Liberar espacio") { Task { await place(nil, in: slot) } }
+                Button("Cancelar", role: .cancel) {}
+            } message: { _ in
+                Text("El componente seguirá en el equipo, pero sin esta posición interna.")
+            }
         }
     }
 
-    private func symbol(for action: AssetComponentOperation.Action) -> String {
-        switch action {
-        case .create: return "plus.circle.fill"
-        case .update: return "pencil.circle.fill"
-        case .move: return "arrow.right.circle.fill"
-        case .delete: return "trash.circle.fill"
+    private var matchingComponents: [EquipmentTreeNodeDTO] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (assetStore.trees[equipment.id] ?? []).filter {
+            $0.nodeKind == "ASSET" && $0.selectable && (term.isEmpty
+                || $0.name.localizedCaseInsensitiveContains(term)
+                || $0.serialNumber?.localizedCaseInsensitiveContains(term) == true)
         }
+    }
+
+    private func displayPath(_ path: String) -> String {
+        path.split(separator: "/").joined(separator: " › ")
+    }
+
+    private func load() async {
+        await update(reloadTree: false) { service, token in
+            try await service.slots(id: equipment.id, accessToken: token)
+        }
+    }
+
+    private func addSlot() async {
+        let payload = InternalSlotWrite(name: name, parent_id: parentID.isEmpty ? nil : parentID,
+                                        accepts_asset: acceptsAsset)
+        await update { service, token in
+            try await service.addSlot(id: equipment.id, payload: payload, accessToken: token)
+        }
+        if error == nil { name = "" }
+    }
+
+    private func place(_ componentID: String?, in slot: EquipmentInternalSlot) async {
+        let payload = InternalSlotOccupancy(component_id: componentID, expected_occupant_id: slot.occupant_id)
+        await update { service, token in
+            try await service.placeComponent(id: equipment.id, slotID: slot.id, payload: payload, accessToken: token)
+        }
+    }
+
+    private func update(
+        reloadTree: Bool = true,
+        _ operation: @escaping (AssetService, String) async throws -> [EquipmentInternalSlot]
+    ) async {
+        guard !busy else { return }
+        busy = true
+        error = nil
+        defer { busy = false }
+        do {
+            slots = try await componentRequest(session: session, operation)
+            loaded = true
+            if reloadTree { await assetStore.loadTree(id: equipment.id, session: session, force: true) }
+        } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -2581,7 +3615,7 @@ private struct EquipmentAssetPhotoPanel: View {
     var body: some View {
         ContentGlassPanel {
             VStack(alignment: .leading, spacing: AppSpacing.md) {
-                SectionHeaderText(title: "Imágenes del equipo")
+                SectionHeaderText(title: equipment.isBusinessAnchor ? "Imágenes del equipo" : "Imágenes del componente")
 
                 if equipment.galleryImages.isEmpty {
                     VStack(spacing: AppSpacing.sm) {
@@ -2590,7 +3624,9 @@ private struct EquipmentAssetPhotoPanel: View {
                             .foregroundStyle(BrandColor.red.opacity(0.78))
                         Text("Sin imágenes registradas")
                             .font(.headline)
-                        Text("El administrador puede agregarlas desde Editar equipo.")
+                        Text(equipment.isBusinessAnchor
+                             ? "El administrador puede agregarlas desde Editar equipo."
+                             : "El administrador puede agregarlas desde Fototeca o Cámara.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -2714,42 +3750,64 @@ private struct EquipmentTreeBranch: Identifiable {
 private struct EquipmentTreeBranchView: View {
     let branch: EquipmentTreeBranch
     @Binding var expandedNodeIDs: Set<String>
+    let onComponentSaved: () -> Void
 
     var body: some View {
         if branch.children.isEmpty {
             row
         } else {
-            DisclosureGroup(isExpanded: expansionBinding) {
-                LazyVStack(alignment: .leading, spacing: AppSpacing.xs) {
-                    ForEach(branch.children) { child in
-                        EquipmentTreeBranchView(
-                            branch: child,
-                            expandedNodeIDs: $expandedNodeIDs
-                        )
+            VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                HStack(spacing: AppSpacing.xs) {
+                    Button {
+                        if expandedNodeIDs.contains(branch.id) {
+                            expandedNodeIDs.remove(branch.id)
+                        } else {
+                            expandedNodeIDs.insert(branch.id)
+                        }
+                    } label: {
+                        Image(systemName: expandedNodeIDs.contains(branch.id) ? "chevron.down" : "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .frame(width: 40, height: 44)
+                            .contentShape(Rectangle())
                     }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(BrandColor.red)
+                    .accessibilityLabel(expandedNodeIDs.contains(branch.id) ? "Contraer" : "Expandir")
+                    .help(expandedNodeIDs.contains(branch.id) ? "Contraer" : "Expandir")
+                    row
                 }
-                .padding(.leading, AppSpacing.lg)
-            } label: {
-                row
+                if expandedNodeIDs.contains(branch.id) {
+                    LazyVStack(alignment: .leading, spacing: AppSpacing.xs) {
+                        ForEach(branch.children) { child in
+                            EquipmentTreeBranchView(
+                                branch: child,
+                                expandedNodeIDs: $expandedNodeIDs,
+                                onComponentSaved: onComponentSaved
+                            )
+                        }
+                    }
+                    .padding(.leading, AppSpacing.lg)
+                }
             }
-            .tint(BrandColor.red)
         }
     }
 
-    private var expansionBinding: Binding<Bool> {
-        Binding(
-            get: { expandedNodeIDs.contains(branch.id) },
-            set: { isExpanded in
-                if isExpanded {
-                    expandedNodeIDs.insert(branch.id)
-                } else {
-                    expandedNodeIDs.remove(branch.id)
-                }
+    @ViewBuilder
+    private var row: some View {
+        if branch.node.nodeKind == "ASSET", branch.node.selectable {
+            NavigationLink {
+                ComponentDetailView(assetID: branch.node.id, name: branch.node.name, onSaved: onComponentSaved)
+            } label: {
+                rowContent
             }
-        )
+            .buttonStyle(.plain)
+            .accessibilityHint("Abre el detalle del componente")
+        } else {
+            rowContent
+        }
     }
 
-    private var row: some View {
+    private var rowContent: some View {
         HStack(alignment: .top, spacing: AppSpacing.sm) {
             Image(systemName: branch.children.isEmpty ? "cpu" : "shippingbox.fill")
                 .foregroundStyle(BrandColor.red)
@@ -2773,8 +3831,14 @@ private struct EquipmentTreeBranchView: View {
             Text(branch.node.status)
                 .font(.caption2.weight(.bold))
                 .foregroundStyle(.secondary)
+            if branch.node.nodeKind == "ASSET", branch.node.selectable {
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(.vertical, AppSpacing.xs)
+        .contentShape(Rectangle())
     }
 }
 
@@ -2820,7 +3884,9 @@ private struct EquipmentMaintenanceRow: View {
                     .foregroundStyle(.tertiary)
             }
         }
+        .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             .background.opacity(0.60),
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -2836,15 +3902,16 @@ private struct EquipmentMaintenanceRow: View {
     }
 
     private var formattedDate: String {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let standard = ISO8601DateFormatter()
-        guard let date = fractional.date(from: entry.performedAt)
-            ?? standard.date(from: entry.performedAt) else {
-            return entry.performedAt
-        }
-        return date.formatted(date: .abbreviated, time: .omitted)
+        assetTimestamp(entry.performedAt)?.formatted(date: .abbreviated, time: .omitted) ?? entry.performedAt
     }
+}
+
+private func assetTimestamp(_ value: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let date = formatter.date(from: value) { return date }
+    formatter.formatOptions = [.withInternetDateTime]
+    return formatter.date(from: value)
 }
 
 struct AssetSearchView_Previews: PreviewProvider {

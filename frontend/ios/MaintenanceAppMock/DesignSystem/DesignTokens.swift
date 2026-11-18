@@ -466,6 +466,102 @@ struct MaintenanceTextArea: View {
     }
 }
 
+struct CompactInventoryFilters<Actions: View>: View {
+    let prompt: String
+    @Binding var query: String
+    let canClear: Bool
+    let onClear: () -> Void
+    @ViewBuilder let actions: () -> Actions
+
+    var body: some View {
+        GlassPanel {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppSpacing.xs) {
+                    searchField.frame(minWidth: 180)
+                    filterRow
+                }
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    searchField
+                    ViewThatFits(in: .horizontal) {
+                        filterRow
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 128), alignment: .leading)],
+                            spacing: AppSpacing.xs
+                        ) {
+                            actions()
+                            clearButton
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var searchField: some View {
+        HStack(spacing: AppSpacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField(prompt, text: $query)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .font(.subheadline)
+        .padding(.horizontal, AppSpacing.sm)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .background(.background.opacity(0.72), in: .rect(cornerRadius: 8))
+    }
+
+    private var filterRow: some View {
+        HStack(spacing: AppSpacing.xs) {
+            actions()
+            clearButton
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    private var clearButton: some View {
+        Button(action: onClear) {
+            Image(systemName: "arrow.counterclockwise")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(BrandColor.red)
+        .accessibilityLabel("Limpiar filtros")
+        .help("Limpiar filtros")
+        .disabled(!canClear)
+    }
+}
+
+struct CompactInventoryFilter: View {
+    let title: String
+    let systemImage: String
+    let allLabel: String
+    @Binding var selection: String
+    let options: [String]
+
+    var body: some View {
+        Menu {
+            Picker(title, selection: $selection) {
+                Text(allLabel).tag("")
+                ForEach(options, id: \.self) { Text($0).tag($0) }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(selection.isEmpty ? title : selection, systemImage: systemImage)
+                .font(.subheadline)
+                .lineLimit(2)
+                .padding(.horizontal, AppSpacing.sm)
+                .frame(maxWidth: 180, minHeight: 44)
+                .background(.background.opacity(0.72), in: .rect(cornerRadius: 8))
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(selection.isEmpty ? allLabel : selection)
+        .help(selection.isEmpty ? title : selection)
+    }
+}
+
 struct MaintenanceChoiceField<Selection: Hashable, Content: View>: View {
     let title: String
     let systemImage: String?

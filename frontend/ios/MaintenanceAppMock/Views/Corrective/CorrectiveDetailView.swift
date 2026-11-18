@@ -200,6 +200,12 @@ struct CorrectiveDetailView: View {
 
     private func detailActions(_ detail: APIActivityDetail) -> some View {
         HStack(spacing: AppSpacing.sm) {
+            NavigationLink {
+                CorrectiveSolutionsView(referenceID: eventID, subsystem: detail.subsystem,
+                    assetID: detail.assets.first?.id ?? "", initialQuery: detail.correctiveReport?.symptom ?? "")
+            } label: {
+                Label("Ver casos similares", systemImage: "doc.text.magnifyingglass")
+            }.buttonStyle(.bordered)
             reportActions(detail, isCompact: true)
             lifecycleActions(detail, presentation: .compact)
         }

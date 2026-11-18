@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from typing import Literal
 from uuid import UUID
 
@@ -39,6 +40,63 @@ class AssetDTO(BaseModel):
     geographic_location_id: UUID | None = None
     component_count: int = 0
     images: list[AssetImageDTO] = Field(default_factory=list)
+
+
+class ComponentDetailDTO(BaseModel):
+    asset: AssetDTO
+    asset_type_id: UUID | None = None
+    internal_code: str | None = None
+    serial_number: str | None = None
+    parent_name: str | None = None
+    inventory_location: str | None = None
+    slot: str | None = None
+    manufacture_date: date | None = None
+
+
+class ComponentWriteRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=240)
+    serial_number: str | None = Field(default=None, max_length=120)
+    part_number: str | None = Field(default=None, max_length=120)
+    manufacturer: str | None = Field(default=None, max_length=160)
+    model: str | None = Field(default=None, max_length=120)
+    software_version: str | None = Field(default=None, max_length=120)
+    status_id: UUID | None = None
+
+
+class ComponentMovementDTO(BaseModel):
+    id: UUID
+    kind: str
+    moved_at: datetime
+    origin: str | None = None
+    destination: str | None = None
+    from_status: str | None = None
+    to_status: str | None = None
+    notes: str | None = None
+
+
+class EquipmentSlotDTO(BaseModel):
+    id: UUID
+    name: str
+    parent_id: UUID | None
+    path: str
+    accepts_asset: bool
+    occupant_id: str | None = None
+    occupant_name: str | None = None
+
+
+class EquipmentSlotWriteRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    name: str = Field(min_length=1, max_length=120)
+    parent_id: UUID | None = None
+    accepts_asset: bool = True
+
+
+class EquipmentSlotOccupancyRequest(BaseModel):
+    component_id: str | None = None
+    expected_occupant_id: str | None = None
 
 
 class AssetWriteRequest(BaseModel):
@@ -174,12 +232,17 @@ class AssetHistoryEntryDTO(BaseModel):
 class AssetComponentOperationDTO(BaseModel):
     """One staged component change applied atomically within an equipment tree."""
 
-    action: Literal["CREATE", "UPDATE", "MOVE", "DELETE"]
+    action: Literal["CREATE", "UPDATE", "MOVE", "DELETE", "ASSIGN"]
     component_id: str | None = None
     parent_id: str | None = None
+    expected_parent_id: str | None = None
+    destination_equipment_id: str | None = None
     name: str | None = Field(default=None, max_length=240)
     category: str | None = Field(default=None, max_length=120)
     asset_type: str | None = Field(default=None, max_length=120)
+    asset_type_id: UUID | None = None
+    new_type_name: str | None = Field(default=None, min_length=1, max_length=120)
+    new_type_part_number: str | None = Field(default=None, min_length=1, max_length=120)
     status: str | None = Field(default=None, max_length=80)
     serial_number: str | None = Field(default=None, max_length=120)
     part_number: str | None = Field(default=None, max_length=120)

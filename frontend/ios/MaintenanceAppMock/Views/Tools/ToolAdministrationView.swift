@@ -39,6 +39,8 @@ private struct ToolInventoryItemEntry: Decodable, Identifiable {
     let tool_code: String?
     let label: String?
     let quantity: Double
+    let can_issue: Bool?
+    let stock_locked: Bool?
     let name: String
     let description: String?
     let cabinet: String?
@@ -98,6 +100,7 @@ private struct ToolMovementEntry: Decodable, Identifiable {
     let inventory_id: String
     let kind: String
     let name: String
+    let category: String
     let location: String
     let serial_number: String?
     let responsible_name: String?
@@ -105,6 +108,27 @@ private struct ToolMovementEntry: Decodable, Identifiable {
     let outstanding: Double
     let created_at: String
     let notes: String?
+    let automatic_activity_id: String?
+
+    var displayKind: String {
+        if automatic_activity_id != nil {
+            if kind == "ISSUE" { return "Salida automática" }
+            if kind == "RETURN" { return "Devolución automática" }
+        }
+        return movementLabels[kind] ?? kind
+    }
+}
+
+private enum ToolMovementSheet: Identifiable {
+    case issue(ToolInventoryItemEntry)
+    case settlement(ToolMovementEntry)
+
+    var id: String {
+        switch self {
+        case .issue(let item): "issue-\(item.id)"
+        case .settlement(let movement): "settlement-\(movement.id)"
+        }
+    }
 }
 
 private struct ToolPerson: Decodable, Identifiable { let id: String; let name: String }
@@ -176,7 +200,6 @@ struct ToolAdministrationView: View {
     @EnvironmentObject private var session: SessionStore
     @EnvironmentObject private var offlineStore: OfflineReportStore
     @State private var inventoryItems: [ToolInventoryItemEntry] = []
-    @State private var stocks: [ToolStockEntry] = []
     @State private var movements: [ToolMovementEntry] = []
     @State private var mode = 0
     @State private var query = ""
@@ -189,8 +212,9 @@ struct ToolAdministrationView: View {
     @State private var inventoryPage = 0
     @State private var error: String?
     @State private var loading = false
-    @State private var movementStock: ToolStockEntry?
-    @State private var settlement: ToolMovementEntry?
+    @State private var movementSheet: ToolMovementSheet?
+    @State private var movementLoading = false
+    @State private var movementError: String?
     @State private var hasMore = false
 
     private let inventoryPageSize = 10
@@ -208,7 +232,7 @@ struct ToolAdministrationView: View {
                     .pickerStyle(.segmented)
 
                     if mode == 0 {
-                        inventoryContent(isWide: geometry.size.width >= 900)
+                        inventoryContent(isWide: geometry.size.width >= 1060)
                     } else {
                         movementContent
                     }
@@ -245,7 +269,10 @@ struct ToolAdministrationView: View {
             }
         }
         .task { await load() }
-        .refreshable { await load() }
+        .task(id: mode) { await reloadMovements(for: mode) }
+        .refreshable {
+            if mode == 0 { await load() } else { await reloadMovements(for: mode) }
+        }
         .onChange(of: query) { _, _ in inventoryPage = 0 }
         .onChange(of: inventoryClassification) { _, _ in inventoryPage = 0 }
         .onChange(of: inventoryStatus) { _, _ in inventoryPage = 0 }
@@ -259,6 +286,14 @@ struct ToolAdministrationView: View {
         }
         .sheet(item: $imageItem) { item in
             ToolInventoryImageGalleryView(item: item)
+        }
+        .sheet(item: $movementSheet) { sheet in
+            ToolMovementEditorView(sheet: sheet) {
+                Task {
+                    await load()
+                    if mode != 0 { await reloadMovements(for: mode) }
+                }
+            }
         }
         .alert("Eliminar herramienta", isPresented: Binding(
             get: { deleteTarget != nil },
@@ -296,44 +331,7 @@ struct ToolAdministrationView: View {
 
     @ViewBuilder
     private func inventoryContent(isWide: Bool) -> some View {
-        GlassPanel {
-            VStack(alignment: .leading, spacing: AppSpacing.md) {
-                HStack(spacing: AppSpacing.sm) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Buscar por nombre, código o categoría", text: $query)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                }
-                .padding(AppSpacing.md)
-                .background(.background.opacity(0.72), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-                HStack(spacing: AppSpacing.md) {
-                    MaintenanceChoiceField("Clasificación", systemImage: "square.stack.3d.up", selection: $inventoryClassification) {
-                        Text("Todas").tag("")
-                        Text("Herramientas manuales").tag("HERRAMIENTA MANUAL")
-                        Text("Llaves / accesos").tag("LLAVE")
-                        Text("Consumibles").tag("CONSUMIBLE")
-                        Text("Equipos").tag("EQUIPO")
-                    }
-                    MaintenanceChoiceField("Estado", systemImage: "checkmark.seal", selection: $inventoryStatus) {
-                        Text("Todos").tag("all")
-                        Text("Disponible").tag("DISPONIBLE")
-                        Text("Sin stock").tag("SIN STOCK")
-                        Text("Averiado").tag("AVERIADO")
-                    }
-                    Spacer(minLength: 0)
-                    Button {
-                        query = ""
-                        inventoryClassification = ""
-                        inventoryStatus = "all"
-                    } label: {
-                        Label("Limpiar filtros", systemImage: "arrow.counterclockwise")
-                    }
-                    .buttonStyle(ActionTileButtonStyle())
-                }
-            }
-        }
+        inventoryFilters
 
         HStack(alignment: .lastTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
@@ -359,6 +357,7 @@ struct ToolAdministrationView: View {
                     ForEach(pageItems) { item in
                         ToolInventoryCompactRow(
                             item: item,
+                            onIssue: issueAction(item),
                             onImage: { imageItem = item },
                             onEdit: { inventorySheet = .edit(item) },
                             onDelete: { deleteTarget = makeDeleteTarget(item) }
@@ -371,17 +370,107 @@ struct ToolAdministrationView: View {
 
     }
 
+    private var inventoryFilters: some View {
+        GlassPanel {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: AppSpacing.xs) {
+                    inventorySearch.frame(minWidth: 240)
+                    inventoryFilterRow.fixedSize(horizontal: true, vertical: false)
+                }
+                VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                    inventorySearch
+                    ViewThatFits(in: .horizontal) {
+                        inventoryFilterRow.fixedSize(horizontal: true, vertical: false)
+                        VStack(alignment: .leading, spacing: AppSpacing.xs) {
+                            inventoryFilterActions
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var inventorySearch: some View {
+        HStack(spacing: AppSpacing.xs) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            TextField("Buscar por nombre, código o categoría", text: $query)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+        }
+        .font(.subheadline)
+        .padding(.horizontal, AppSpacing.sm)
+        .frame(minHeight: 44)
+        .background(.background.opacity(0.72), in: .rect(cornerRadius: 8))
+    }
+
+    private var inventoryFilterRow: some View {
+        HStack(spacing: AppSpacing.xs) {
+            inventoryFilterActions
+        }
+    }
+
+    @ViewBuilder
+    private var inventoryFilterActions: some View {
+        inventoryFilter("Clasificación", systemImage: "square.stack.3d.up", selection: $inventoryClassification, options: [
+            ("", "Todas"), ("HERRAMIENTA MANUAL", "Herramientas manuales"),
+            ("LLAVE", "Llaves / accesos"), ("CONSUMIBLE", "Consumibles"), ("EQUIPO", "Equipos"),
+        ])
+        inventoryFilter("Estado", systemImage: "checkmark.seal", selection: $inventoryStatus, options: [
+            ("all", "Todos"), ("DISPONIBLE", "Disponible"), ("SIN STOCK", "Sin stock"), ("AVERIADO", "Averiado"),
+        ])
+        Button {
+            query = ""
+            inventoryClassification = ""
+            inventoryStatus = "all"
+        } label: {
+            Image(systemName: "arrow.counterclockwise")
+                .frame(minWidth: 44, minHeight: 44)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(BrandColor.red)
+        .accessibilityLabel("Limpiar filtros")
+        .help("Limpiar filtros")
+    }
+
+    private func inventoryFilter(
+        _ title: String,
+        systemImage: String,
+        selection: Binding<String>,
+        options: [(value: String, label: String)]
+    ) -> some View {
+        let current = options.first(where: { $0.value == selection.wrappedValue })
+        return Menu {
+            Picker(title, selection: selection) {
+                ForEach(options, id: \.value) { option in
+                    Text(option.label).tag(option.value)
+                }
+            }
+            .pickerStyle(.inline)
+        } label: {
+            Label(current?.value.isEmpty == true || current?.value == "all" ? title : current?.label ?? title,
+                  systemImage: systemImage)
+                .font(.subheadline)
+                .padding(.horizontal, AppSpacing.sm)
+                .frame(minHeight: 44)
+                .background(.background.opacity(0.72), in: .rect(cornerRadius: 8))
+        }
+        .accessibilityLabel(title)
+        .accessibilityValue(current?.label ?? "")
+    }
+
     private var inventoryTable: some View {
         VStack(spacing: 0) {
             HStack(spacing: AppSpacing.sm) {
                 Text("Imagen").frame(width: 64, alignment: .leading)
-                Text("Código").frame(width: 105, alignment: .leading)
-                Text("Nombre").frame(minWidth: 170, maxWidth: .infinity, alignment: .leading)
-                Text("Categoría").frame(width: 125, alignment: .leading)
-                Text("Ubicación").frame(width: 150, alignment: .leading)
-                Text("Stock").frame(width: 72, alignment: .trailing)
-                Text("Estado").frame(width: 120, alignment: .leading)
-                Text("Acciones").frame(width: 130, alignment: .trailing)
+                Text("Código").frame(width: 90, alignment: .leading)
+                Text("Nombre").frame(minWidth: 145, maxWidth: .infinity, alignment: .leading)
+                Text("Categoría").frame(width: 105, alignment: .leading)
+                Text("Ubicación").frame(width: 130, alignment: .leading)
+                Text("Stock").frame(width: 56, alignment: .trailing)
+                Text("Estado").frame(width: 115, alignment: .leading)
+                Text("Acciones").frame(width: 180, alignment: .trailing)
             }
             .font(.caption.weight(.semibold))
             .foregroundStyle(.secondary)
@@ -391,6 +480,7 @@ struct ToolAdministrationView: View {
             ForEach(pageItems) { item in
                 ToolInventoryWideRow(
                     item: item,
+                    onIssue: issueAction(item),
                     onImage: { imageItem = item },
                     onEdit: { inventorySheet = .edit(item) },
                     onDelete: { deleteTarget = makeDeleteTarget(item) }
@@ -399,6 +489,12 @@ struct ToolAdministrationView: View {
         }
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(BrandColor.glassStroke) }
+    }
+
+    private func issueAction(_ item: ToolInventoryItemEntry) -> (() -> Void)? {
+        guard session.currentUser?.role == .administrator,
+              offlineStore.isNetworkAvailable, item.can_issue == true, !loading else { return nil }
+        return { movementSheet = .issue(item) }
     }
 
     private var inventoryPagination: some View {
@@ -410,31 +506,41 @@ struct ToolAdministrationView: View {
 
     private var movementContent: some View {
         VStack(alignment: .leading, spacing: AppSpacing.sm) {
-            ForEach(movements.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }) { movement in
+            if let movementError {
+                Label(movementError, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(BrandColor.red)
+                Button("Reintentar") { Task { await reloadMovements(for: mode) } }
+            } else if movements.isEmpty && !movementLoading {
+                ContentUnavailableView(mode == 1 ? "Sin salidas pendientes" : "Sin movimientos",
+                                       systemImage: "shippingbox")
+            }
+            ForEach(movements) { movement in
                 GlassPanel {
                     VStack(alignment: .leading, spacing: AppSpacing.sm) {
                         Text(movement.name).font(.headline)
-                        Text("\(movementLabels[movement.kind] ?? movement.kind): \(movement.quantity.formatted())")
+                        Text("\(movement.displayKind): \(movement.quantity.formatted())")
                         Text([movement.serial_number, movement.responsible_name, movement.location].compactMap { $0 }.joined(separator: " · "))
                             .foregroundStyle(.secondary)
                         Text(movement.created_at).font(.caption)
                         if let notes = movement.notes { Text(notes).font(.caption) }
                         if movement.kind == "ISSUE", movement.outstanding > 0 {
                             Text("Pendiente: \(movement.outstanding.formatted())")
-                            Button("Registrar devolución / consumo") {
-                                settlement = movement
-                                movementStock = stocks.first { $0.id == movement.inventory_id }
+                            if session.currentUser?.role == .administrator {
+                                Button("Regularizar salida") {
+                                    movementSheet = .settlement(movement)
+                                }
+                                .buttonStyle(ActionTileButtonStyle())
+                                .disabled(!offlineStore.isNetworkAvailable)
                             }
-                            .buttonStyle(ActionTileButtonStyle())
-                            .disabled(!offlineStore.isNetworkAvailable)
                         }
                     }
                 }
             }
+            if movementLoading { ProgressView().frame(maxWidth: .infinity) }
             if hasMore {
-                Button("Mostrar más") { Task { await loadMore() } }
+                Button("Mostrar más") { Task { await loadMore(for: mode) } }
                     .buttonStyle(ActionTileButtonStyle())
-                    .disabled(loading)
+                    .disabled(movementLoading)
             }
         }
     }
@@ -490,32 +596,48 @@ struct ToolAdministrationView: View {
             inventoryLocations = try await session.withValidAccessToken {
                 try await toolClient().get("api/v1/tool-admin/storage-locations", bearerToken: $0)
             }
-            stocks = try await session.withValidAccessToken {
-                try await toolClient().get("api/v1/tool-admin/inventory", bearerToken: $0)
-            }
-            movements = []
-            if mode != 0 { await loadMore() }
         } catch {
             self.error = error.localizedDescription
         }
     }
 
-    @MainActor private func loadMore() async {
+    @State private var movementRequest = UUID()
+
+    @MainActor private func reloadMovements(for selectedMode: Int) async {
+        movementRequest = UUID()
+        movements = []
+        hasMore = false
+        movementLoading = false
+        movementError = nil
+        guard selectedMode != 0 else { return }
+        await loadMore(for: selectedMode)
+    }
+
+    @MainActor private func loadMore(for selectedMode: Int) async {
+        guard selectedMode == mode, !movementLoading else { return }
+        let request = UUID()
+        movementRequest = request
+        let offset = movements.count
+        movementLoading = true
+        movementError = nil
+        defer { if movementRequest == request { movementLoading = false } }
         do {
             let rows: [ToolMovementEntry] = try await session.withValidAccessToken {
                 try await toolClient().get(
                     "api/v1/tool-admin/movements",
                     bearerToken: $0,
                     queryItems: [
-                        .init(name: "open_only", value: mode == 1 ? "true" : "false"),
-                        .init(name: "offset", value: String(movements.count)),
+                        .init(name: "open_only", value: selectedMode == 1 ? "true" : "false"),
+                        .init(name: "offset", value: String(offset)),
                     ]
                 )
             }
+            guard movementRequest == request, selectedMode == mode, !Task.isCancelled else { return }
             movements += rows
             hasMore = rows.count == 100
         } catch {
-            self.error = error.localizedDescription
+            guard movementRequest == request, selectedMode == mode, !Task.isCancelled else { return }
+            movementError = error.localizedDescription
         }
     }
 
@@ -534,6 +656,7 @@ struct ToolAdministrationView: View {
 
 private struct ToolInventoryWideRow: View {
     let item: ToolInventoryItemEntry
+    let onIssue: (() -> Void)?
     let onImage: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -544,7 +667,7 @@ private struct ToolInventoryWideRow: View {
                 .frame(width: 64)
             Text(item.tool_code ?? item.label ?? "—")
                 .font(.caption.weight(.semibold))
-                .frame(width: 105, alignment: .leading)
+                .frame(width: 90, alignment: .leading)
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.name).font(.subheadline.weight(.semibold)).lineLimit(2)
                 if let model = item.model_code { Text(model).font(.caption).foregroundStyle(.secondary) }
@@ -554,14 +677,15 @@ private struct ToolInventoryWideRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .frame(minWidth: 170, maxWidth: .infinity, alignment: .leading)
-            Text(item.category ?? "—").font(.caption).frame(width: 125, alignment: .leading)
-            Text(item.location ?? item.location_text ?? "—").font(.caption).lineLimit(2).frame(width: 150, alignment: .leading)
-            Text(item.quantity.formatted()).frame(width: 72, alignment: .trailing)
+            .frame(minWidth: 145, maxWidth: .infinity, alignment: .leading)
+            Text(item.category ?? "—").font(.caption).frame(width: 105, alignment: .leading)
+            Text(item.location ?? item.location_text ?? "—").font(.caption).lineLimit(2).frame(width: 130, alignment: .leading)
+            Text(item.quantity.formatted()).frame(width: 56, alignment: .trailing)
             ToolInventoryStatusBadge(status: item.status)
-                .frame(width: 120, alignment: .leading)
-            ToolInventoryRowActions(onImage: onImage, onEdit: onEdit, onDelete: onDelete)
-                .frame(width: 130, alignment: .trailing)
+                .frame(width: 115, alignment: .leading)
+            ToolInventoryRowActions(onIssue: onIssue, onImage: onImage, onEdit: onEdit,
+                                    onDelete: item.stock_locked == true ? nil : onDelete)
+                .frame(width: 180, alignment: .trailing)
         }
         .padding(.horizontal, AppSpacing.md)
         .padding(.vertical, AppSpacing.sm)
@@ -574,6 +698,7 @@ private struct ToolInventoryWideRow: View {
 
 private struct ToolInventoryCompactRow: View {
     let item: ToolInventoryItemEntry
+    let onIssue: (() -> Void)?
     let onImage: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
@@ -605,7 +730,8 @@ private struct ToolInventoryCompactRow: View {
                         )
                     }
                 }
-                ToolInventoryRowActions(onImage: onImage, onEdit: onEdit, onDelete: onDelete)
+                ToolInventoryRowActions(onIssue: onIssue, onImage: onImage, onEdit: onEdit,
+                                        onDelete: item.stock_locked == true ? nil : onDelete)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -639,12 +765,20 @@ private func inventoryCertificationLabel(_ item: ToolInventoryItemEntry) -> Stri
 }
 
 private struct ToolInventoryRowActions: View {
+    let onIssue: (() -> Void)?
     let onImage: () -> Void
     let onEdit: () -> Void
-    let onDelete: () -> Void
+    let onDelete: (() -> Void)?
 
     var body: some View {
         HStack(spacing: AppSpacing.xs) {
+            Button(action: { onIssue?() }) {
+                Image(systemName: "arrow.up.right.square")
+            }
+            .buttonStyle(.glass)
+            .disabled(onIssue == nil)
+            .accessibilityLabel("Registrar salida")
+            .help("Registrar salida")
             Button(action: onImage) { Image(systemName: "eye") }
                 .buttonStyle(.glass)
                 .accessibilityLabel("Ver imágenes")
@@ -652,10 +786,12 @@ private struct ToolInventoryRowActions: View {
                 .buttonStyle(.glass)
                 .tint(BrandColor.red)
                 .accessibilityLabel("Editar herramienta")
-            Button(role: .destructive, action: onDelete) { Image(systemName: "trash") }
+            Button(role: .destructive, action: { onDelete?() }) { Image(systemName: "trash") }
                 .buttonStyle(.glass)
+                .disabled(onDelete == nil)
                 .accessibilityLabel("Eliminar herramienta")
         }
+        .controlSize(.small)
     }
 }
 
@@ -851,7 +987,6 @@ private struct ToolInventoryEditorView: View {
     @State private var classification: String
     @State private var category: String
     @State private var locationID: String
-    @State private var locationText: String
     @State private var status: String
     @State private var observations: String
     @State private var selectedPhoto: PhotosPickerItem?
@@ -879,7 +1014,6 @@ private struct ToolInventoryEditorView: View {
         _classification = State(initialValue: item?.classification ?? "HERRAMIENTA MANUAL")
         _category = State(initialValue: item?.category ?? "")
         _locationID = State(initialValue: item?.inventory_location_id ?? "")
-        _locationText = State(initialValue: item?.location_text ?? item?.location ?? "")
         _status = State(initialValue: item?.status ?? "DISPONIBLE")
         _observations = State(initialValue: item?.observations ?? "")
         _existingImages = State(initialValue: item?.images ?? [])
@@ -906,8 +1040,8 @@ private struct ToolInventoryEditorView: View {
         return values
     }
 
-    private var selectedLocationName: String {
-        locations.first(where: { $0.id == locationID })?.name ?? locationText
+    private var needsLocationReview: Bool {
+        !locationID.isEmpty && !locations.contains { $0.id == locationID }
     }
 
     var body: some View {
@@ -966,7 +1100,7 @@ private struct ToolInventoryEditorView: View {
                             if isSaving { ProgressView() } else { Label(item == nil ? "Guardar" : "Guardar cambios", systemImage: "checkmark.circle.fill") }
                         }
                         .buttonStyle(ActionTileButtonStyle(prominent: true))
-                        .disabled(isSaving || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        .disabled(isSaving || needsLocationReview || name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
                 .padding(.horizontal, AppSpacing.lg)
@@ -1074,8 +1208,10 @@ private struct ToolInventoryEditorView: View {
             MaintenanceFieldGrid {
                 MaintenanceTextField(title: "Código modelo", placeholder: "Ej. HT-0006", text: $modelCode, systemImage: "number")
                 MaintenanceTextField(title: "Código", placeholder: "Código de la herramienta", text: $toolCode, systemImage: "barcode")
+                    .disabled(item?.stock_locked == true)
                 MaintenanceTextField(title: "Etiqueta", placeholder: "001", text: $label, systemImage: "tag", autocapitalization: .never, disablesAutocorrection: true)
                 MaintenanceTextField(title: "Nombre", placeholder: "Nombre de la herramienta", text: $name, systemImage: "wrench.and.screwdriver")
+                    .disabled(item?.stock_locked == true)
                 MaintenanceTextField(title: "Empresa", placeholder: "Empresa de procedencia", text: $company, systemImage: "building.2")
                 MaintenanceTextField(title: "Armario", placeholder: "Armario o almacén", text: $cabinet, systemImage: "cabinet")
                 MaintenanceTextField(title: "Gabinete", placeholder: "Ubicación dentro del armario", text: $cabinetDetail, systemImage: "square.split.2x2")
@@ -1084,20 +1220,27 @@ private struct ToolInventoryEditorView: View {
                 MaintenanceChoiceField("Clasificación", systemImage: "square.stack.3d.up", selection: $classification) {
                     ForEach(classificationChoices, id: \.self) { Text($0).tag($0) }
                 }
+                .disabled(item?.stock_locked == true)
                 MaintenanceChoiceField("Categoría", systemImage: "tag", selection: $category) {
                     Text("Sin categoría").tag("")
                     ForEach(categoryChoices, id: \.self) { Text($0).tag($0) }
                 }
                 MaintenanceTextField(title: "Cantidad / stock", placeholder: "0", text: $quantity, systemImage: "number", autocapitalization: .never, disablesAutocorrection: true)
+                    .disabled(item?.stock_locked == true)
                 MaintenanceChoiceField("Estado", systemImage: "checkmark.seal", selection: $status) {
                     ForEach(statusOptions, id: \.self) { Text($0).tag($0) }
                 }
-                MaintenanceChoiceField("Ubicación", systemImage: "shippingbox", selection: $locationID) {
+                .disabled(item?.stock_locked == true)
+                MaintenanceChoiceField("Almacén", systemImage: "shippingbox", selection: $locationID) {
+                    if needsLocationReview {
+                        Text("Ubicación anterior no disponible").tag(locationID)
+                    }
                     Text("Sin ubicación").tag("")
                     ForEach(locations) { location in
                         Text(location.name).tag(location.id)
                     }
                 }
+                .disabled(item?.stock_locked == true)
             }
             if classification == "EQUIPO" {
                 Label(
@@ -1112,10 +1255,10 @@ private struct ToolInventoryEditorView: View {
                 .foregroundStyle(item?.certification_status == "VALID" ? .green : .orange)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            if locations.isEmpty {
-                MaintenanceTextField(title: "Ubicación", placeholder: "Ubicación de almacenamiento", text: $locationText, systemImage: "shippingbox")
-            } else if !selectedLocationName.isEmpty {
-                Text("Ubicación seleccionada: \(selectedLocationName)")
+            if needsLocationReview || locations.isEmpty {
+                Text(needsLocationReview
+                     ? "Selecciona un almacén activo o elige Sin ubicación."
+                     : "No hay almacenes disponibles para seleccionar.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1169,7 +1312,7 @@ private struct ToolInventoryEditorView: View {
             classification: optionalValue(classification),
             category: optionalValue(category),
             inventory_location_id: optionalValue(locationID),
-            location_text: optionalValue(locationText),
+            location_text: nil,
             status: optionalValue(status),
             observations: optionalValue(observations),
             image_base64: imageData?.base64EncodedString(),
@@ -1299,9 +1442,9 @@ private struct ToolStockEditorView: View {
 private struct ToolMovementEditorView: View {
     @EnvironmentObject private var session: SessionStore
     @Environment(\.dismiss) private var dismiss
-    let stock: ToolStockEntry
-    let issue: ToolMovementEntry?
-    @State private var kind = "RECEIPT"
+    let sheet: ToolMovementSheet
+    let onSaved: () -> Void
+    @State private var kind = "RETURN"
     @State private var quantity = 1.0
     @State private var responsible = ""
     @State private var people: [ToolPerson] = []
@@ -1311,16 +1454,46 @@ private struct ToolMovementEditorView: View {
     @State private var requestID = UUID()
     @State private var linkedActivities: Set<String> = []
     @State private var choosingActivities = false
+
+    private var item: ToolInventoryItemEntry? {
+        if case .issue(let item) = sheet { return item }
+        return nil
+    }
+
+    private var issue: ToolMovementEntry? {
+        if case .settlement(let movement) = sheet { return movement }
+        return nil
+    }
+
+    private var maximum: Double { item?.quantity ?? issue?.outstanding ?? 0 }
+    private var serial: String? { item?.serial_number ?? issue?.serial_number }
+    private var isIdentified: Bool { item?.tool_id != nil || serial != nil }
+
     var body: some View {
         NavigationStack {
             Form {
-                Section(stock.name) {
-                    Text(stock.serial_number ?? stock.location)
-                    Picker("Movimiento", selection: $kind) {
-                        ForEach(options, id: \.self) { Text(movementLabels[$0] ?? $0).tag($0) }
+                Section(item?.name ?? issue?.name ?? "Herramienta") {
+                    LabeledContent("Almacén", value: item?.location ?? issue?.location ?? "—")
+                    if let serial { LabeledContent("Serie", value: serial) }
+                    LabeledContent(item == nil ? "Pendiente" : "Stock disponible", value: maximum.formatted())
+                    if let issue {
+                        if let name = issue.responsible_name {
+                            LabeledContent("Responsable", value: name)
+                        }
+                        Picker("Movimiento", selection: $kind) {
+                            ForEach(options, id: \.self) { Text(movementLabels[$0] ?? $0).tag($0) }
+                        }
                     }
-                    LabeledContent("Cantidad") { TextField("Cantidad", value: $quantity, format: .number).keyboardType(.decimalPad).multilineTextAlignment(.trailing).disabled(stock.serial_number != nil) }
-                    if kind == "ISSUE" {
+                    LabeledContent("Cantidad") {
+                        if isIdentified {
+                            Text("1")
+                        } else {
+                            TextField("Cantidad", value: $quantity, format: .number)
+                                .keyboardType(.decimalPad)
+                                .multilineTextAlignment(.trailing)
+                        }
+                    }
+                    if item != nil {
                         Picker("Responsable", selection: $responsible) {
                             Text("Seleccionar").tag("")
                             ForEach(people) { Text($0.name).tag($0.id) }
@@ -1328,16 +1501,20 @@ private struct ToolMovementEditorView: View {
                         Button("Vincular mantenimientos (\(linkedActivities.count))") { choosingActivities = true }
                     }
                     TextField("Motivo / observaciones", text: $notes, axis: .vertical).lineLimit(3...6)
-                    if let issue { Text("Pendiente de esta salida: \(issue.outstanding.formatted())") }
                 }
                 if let error { Text(error).foregroundStyle(.red) }
-            }.navigationTitle("Movimiento de herramientas")
+            }.navigationTitle(item == nil ? "Regularizar salida" : "Registrar salida")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancelar") { dismiss() }.disabled(busy) }
-                ToolbarItem(placement: .confirmationAction) { Button(busy ? "Guardando…" : "Confirmar") { Task { await save() } }.disabled(busy || quantity <= 0 || (kind == "ISSUE" && responsible.isEmpty)) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(busy ? "Guardando…" : "Confirmar") { Task { await save() } }
+                        .disabled(busy || quantity <= 0 || quantity > maximum
+                                  || (item != nil && responsible.isEmpty))
+                }
             }
             .task {
-                if issue != nil { kind = "RETURN" }
+                quantity = isIdentified ? 1 : min(1, maximum)
+                guard item != nil else { return }
                 do { people = try await session.withValidAccessToken { try await toolClient().get("api/v1/tool-admin/people", bearerToken: $0) } }
                 catch { self.error = error.localizedDescription }
             }
@@ -1346,20 +1523,29 @@ private struct ToolMovementEditorView: View {
         }
     }
     private var options: [String] {
-        if issue != nil { return stock.category == "CONSUMABLE" ? ["RETURN", "CONSUMED", "DAMAGED", "LOST"] : ["RETURN", "DAMAGED", "LOST"] }
-        return ["RECEIPT", "ISSUE", "ADJUST_ADD", "ADJUST_REMOVE"]
+        issue?.category == "CONSUMABLE" ? ["RETURN", "CONSUMED", "DAMAGED", "LOST"] : ["RETURN", "DAMAGED", "LOST"]
     }
     @MainActor private func save() async {
         struct Payload: Encodable {
-            let id: String; let inventory_id: String; let kind: String; let quantity: Double
+            let id: String; let inventory_id: String?; let kind: String?; let quantity: Double
             let issue_id: String?; let responsible_user_id: String?; let activity_ids: [String]; let notes: String
         }
+        guard !busy, quantity > 0, quantity <= maximum,
+              item == nil || !responsible.isEmpty else { return }
         busy = true; defer { busy = false }
+        error = nil
         do {
+            let path = item.map { "api/v1/tool-admin/items/\($0.id)/issue" } ?? "api/v1/tool-admin/movements"
+            let payload = Payload(
+                id: requestID.uuidString, inventory_id: issue?.inventory_id,
+                kind: issue == nil ? nil : kind, quantity: quantity, issue_id: issue?.id,
+                responsible_user_id: item == nil ? nil : responsible,
+                activity_ids: linkedActivities.sorted(), notes: notes
+            )
             let _: ToolWriteResult = try await session.withValidAccessToken {
-                try await toolClient().post("api/v1/tool-admin/movements", body: Payload(id: requestID.uuidString, inventory_id: stock.id, kind: kind, quantity: quantity,
-                    issue_id: issue?.id, responsible_user_id: kind == "ISSUE" ? responsible : nil, activity_ids: linkedActivities.sorted(), notes: notes), bearerToken: $0)
+                try await toolClient().post(path, body: payload, bearerToken: $0)
             }
+            onSaved()
             dismiss()
         } catch { self.error = error.localizedDescription }
     }
